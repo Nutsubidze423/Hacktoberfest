@@ -7,6 +7,7 @@
 #include <bitset>
 #include <chrono>
 #include <cstdint>
+#include <cstdlib>
 #include <optional>
 #include <vector>
 
@@ -23,6 +24,12 @@ constexpr UINT kMsgReturned = WM_APP + 3;  // B's focus_leave
 constexpr UINT kMsgUnhook = WM_APP + 4;    // after the emergency exit
 constexpr UINT kMsgStop = WM_APP + 5;
 constexpr UINT kMsgCooldown = WM_APP + 6;  // suspension ended
+constexpr UINT kMsgSuspended = WM_APP + 7; // suspension started
+
+// While the peer controls this PC, this much of our own mouse movement within
+// kTakeoverWindowMs means "I want my PC back" (touchpad noise stays below it).
+constexpr int kTakeoverPx = 24;
+constexpr ULONGLONG kTakeoverWindowMs = 300;
 
 // When control comes back, the cursor lands this far inside A's edge so the
 // next small movement does not bounce it straight back to B.
@@ -75,6 +82,34 @@ struct CaptureThread {
 
     // Left button held while the cursor touches the edge: e.g. files dragged
     // from Explorer that should go to the peer. Reported once per touch.
+    // Own (physical) mouse movement while the peer controls this PC.
+    static inline int takeover_px = 0;
+    static inline ULONGLONG takeover_since = 0;
+    static inline bool takeover_signalled = false;
+
+    static void reset_takeover() {
+        takeover_px = 0;
+        takeover_since = 0;
+        takeover_signalled = false;
+    }
+
+    static void local_move_while_suspended(const POINT& pt) {
+        if (takeover_signalled) return;
+        // The cursor hasn't moved yet when the hook runs, so this is purely our own
+        // movement, whatever the peer's injected input did in between.
+        POINT cur{};
+        GetCursorPos(&cur);
+        const ULONGLONG now = GetTickCount64();
+        if (now - takeover_since > kTakeoverWindowMs) {
+            takeover_px = 0;
+            takeover_since = now;
+        }
+        takeover_px += std::abs(pt.x - cur.x) + std::abs(pt.y - cur.y);
+        if (takeover_px < kTakeoverPx) return;
+        takeover_signalled = true;
+        cap->events_.push({.msg = proto::FocusLeave{}, .send = false, .local_activity = true});
+    }
+
     static void drag_at_edge(double y_norm, input::Point at) {
         if (drag_signalled || cap->disabled_ || !cap->has_client_ || cap->suspended_) return;
         drag_signalled = true;
@@ -215,6 +250,7 @@ struct CaptureThread {
                 }
             }
             if (!(buttons_down & kLeftButton)) drag_signalled = false;
+            if (wp == WM_MOUSEMOVE && cap->suspended_) local_move_while_suspended(m.pt);
             return CallNextHookEx(nullptr, code, wp, lp);
         }
 
@@ -317,6 +353,7 @@ struct CaptureThread {
             case kMsgReturned: returned(unpack(wp)); return 0;
             case kMsgUnhook: unhook(); return 0;
             case kMsgCooldown: start_cooldown(); return 0;
+            case kMsgSuspended: reset_takeover(); return 0;
             case kMsgStop:
                 leave_remote(true);
                 unhook();
@@ -396,7 +433,14 @@ void InputCapture::set_on_drag_at_edge(DragAtEdge callback) {
 }
 
 void InputCapture::set_suspended(bool suspended) {
-    if (suspended_.exchange(suspended) && !suspended) post(kMsgCooldown);
+    const bool was = suspended_.exchange(suspended);
+    if (was && !suspended) post(kMsgCooldown);
+    if (!was && suspended) post(kMsgSuspended);
+}
+
+void InputCapture::set_on_local_activity(LocalActivity callback) {
+    std::lock_guard lock(sink_mutex_);
+    on_local_activity_ = std::move(callback);
 }
 
 bool InputCapture::post(unsigned msg, unsigned long long wparam) {
@@ -508,6 +552,15 @@ void InputCapture::worker_main() {
             if (ev.drag_at) {
                 std::lock_guard lock(sink_mutex_);
                 if (on_drag_at_edge_) on_drag_at_edge_(std::get<proto::FocusEnter>(ev.msg).y_norm, *ev.drag_at);
+                continue;
+            }
+            if (ev.local_activity) {
+                LocalActivity callback;
+                {
+                    std::lock_guard lock(sink_mutex_);
+                    callback = on_local_activity_;
+                }
+                if (callback) callback();  // outside the lock: it may send to the peer
                 continue;
             }
             if (const auto* enter = std::get_if<proto::FocusEnter>(&ev.msg)) {

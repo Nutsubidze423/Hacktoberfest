@@ -11,8 +11,10 @@
 //     kvm.detach();   // before the connection goes away
 //
 // Only one direction is active at a time: while the peer controls this PC, this
-// PC's own input can't be handed over. If both users cross their edges at the
-// same moment, the host keeps control and the client yields.
+// PC's own input can't be handed over. Whoever moves their own mouse wins:
+// moving this PC's mouse while the peer controls it takes the PC back (the
+// peer's cursor goes home), and then this PC's edge works again. If both users
+// cross their edges at the same moment, the host keeps control and the client yields.
 //
 // Who sends what (focus_* carry y_norm, the crossing point on the shared edge):
 //   controller -> controlled: focus_enter, mouse_move, mouse_button, mouse_wheel, key,
@@ -86,12 +88,14 @@ public:
 
 private:
     bool send(const proto::Message& msg);
+    void take_back();  // this PC's own mouse moved while the peer controls it
 
     KvmOptions options_;
     std::mutex sink_mutex_;
     Sink sink_;
     std::optional<host::InputCapture> capture_;
     host::InputCapture::DragAtEdge on_drag_at_edge_;
+    std::mutex inject_mutex_;  // inject_ is used by the session thread and by take_back()
     client::InputInject inject_;
 };
 
