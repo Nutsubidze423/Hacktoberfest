@@ -20,8 +20,8 @@ struct overloaded : F... {
 
 }  // namespace
 
-InputInject::InputInject(display::Side host_side, Sink to_host)
-    : host_side_(host_side), to_host_(std::move(to_host)) {}
+InputInject::InputInject(display::Side host_side, Sink to_host, std::chrono::milliseconds leave_cooldown)
+    : host_side_(host_side), to_host_(std::move(to_host)), leave_cooldown_(leave_cooldown) {}
 
 InputInject::~InputInject() {
     release_all();
@@ -85,6 +85,7 @@ void InputInject::enter(double y_norm) {
     const auto p = display::inward(edge_.point(y_norm), host_side_, kEnterInset);
     warned_blocked_ = false;
     received_ = {};
+    entered_at_ = std::chrono::steady_clock::now();
     check(input::move_cursor_abs(p.x, p.y));
     active_ = true;
     log::info("input inject: control -> B, cursor at ({}, {})", p.x, p.y);
@@ -115,7 +116,8 @@ void InputInject::move(int dx, int dy) {
     // Hand control back once the cursor already sits on the edge facing A and
     // the mouse keeps pushing that way.
     input::Point cur;
-    if (towards_host(dx, dy) && input::get_cursor_pos(cur)) {
+    const bool cooled_down = std::chrono::steady_clock::now() - entered_at_ >= leave_cooldown_;
+    if (cooled_down && towards_host(dx, dy) && input::get_cursor_pos(cur)) {
         if (const auto t = edge_.position(cur)) {
             leave_to_host(*t);
             return;

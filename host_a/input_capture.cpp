@@ -2,8 +2,10 @@
 
 #include <windows.h>
 
+#include <algorithm>
 #include <bit>
 #include <bitset>
+#include <chrono>
 #include <cstdint>
 #include <optional>
 #include <vector>
@@ -28,6 +30,10 @@ constexpr int kReturnInset = 2;
 // Hook moves seen on B without any Raw Input motion before motion is taken
 // from the hook instead (devices whose movement never shows up in Raw Input).
 constexpr int kRawGrace = 12;
+
+// Mouse moves go out at most this often (merged in between): a 1000 Hz mouse
+// would otherwise flood Wi-Fi with tiny packets. Other input is never delayed.
+constexpr auto kMoveInterval = std::chrono::milliseconds(4);
 
 constexpr wchar_t kWindowClass[] = L"KvmInputCapture";
 
@@ -59,6 +65,11 @@ struct CaptureThread {
     static inline int raw_moves = 0;
     static inline bool hook_motion = false;        // motion from the hook (cursor parked) instead of Raw Input
     static inline input::Point park;
+    static inline ULONGLONG no_switch_until = 0;   // GetTickCount64() of the end of the cooldown
+
+    static void start_cooldown() {
+        no_switch_until = GetTickCount64() + static_cast<ULONGLONG>(std::max(0, cap->options_.switch_cooldown_ms));
+    }
 
     static void push(proto::Message msg, bool send = true, bool emergency = false) {
         cap->events_.push({std::move(msg), send, emergency});
@@ -118,6 +129,7 @@ struct CaptureThread {
         const auto on_edge = edge.position(exit_point);
         const auto back = on_edge ? display::inward(exit_point, edge.side(), kReturnInset) : exit_point;
         SetCursorPos(back.x, back.y);
+        start_cooldown();
         push(proto::FocusLeave{.y_norm = on_edge.value_or(0.5)}, tell_b);
     }
 
@@ -127,6 +139,7 @@ struct CaptureThread {
         cap->remote_ = false;
         const auto in = display::inward(edge.point(y_norm), edge.side(), kReturnInset);
         SetCursorPos(in.x, in.y);  // not SendInput: never feed input through our own hook
+        start_cooldown();
         push(proto::FocusLeave{.y_norm = y_norm}, /*send=*/false);
     }
 
@@ -177,7 +190,8 @@ struct CaptureThread {
 
         if (!cap->remote_) {
             // Never switch mid-drag: the button release would be lost on A.
-            if (wp == WM_MOUSEMOVE && cap->options_.edge_switching && buttons_down == 0) {
+            if (wp == WM_MOUSEMOVE && cap->options_.edge_switching && buttons_down == 0 &&
+                GetTickCount64() >= no_switch_until) {
                 if (const auto t = edge.position({m.pt.x, m.pt.y})) {
                     // With the cursor parked, this move must not land on the edge.
                     if (enter_remote(*t, {m.pt.x, m.pt.y}) && hook_motion) return 1;
@@ -361,7 +375,11 @@ bool InputCapture::post(unsigned msg, unsigned long long wparam) {
 
 void InputCapture::hook_thread_main() {
     using T = CaptureThread;
+    // Input latency matters more than anything else this thread could wait for,
+    // and a hook thread that doesn't answer in time gets unhooked by Windows.
+    SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST);
     T::cap = this;
+    T::no_switch_until = 0;
     T::keys_down.reset();
     T::keys_pass_up.reset();
     T::buttons_down = 0;
@@ -412,24 +430,40 @@ void InputCapture::hook_thread_main() {
 }
 
 void InputCapture::worker_main() {
+    using Clock = std::chrono::steady_clock;
+    SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST);
+
     std::vector<Event> batch;
     bool send_failed = false;  // warn once per stay on B
     struct {
         int moves = 0, buttons = 0, wheels = 0, keys = 0;
     } sent;  // per stay on B, for the log
+    Clock::time_point last_move_sent{};
+
+    const auto is_move = [](const Event& ev) { return !ev.note && std::holds_alternative<proto::MouseMove>(ev.msg); };
+    // Appends ev, merging consecutive mouse moves into one message.
+    const auto append = [&](Event&& ev) {
+        if (!batch.empty() && is_move(batch.back()) && is_move(ev)) {
+            auto& prev = std::get<proto::MouseMove>(batch.back().msg);
+            const auto& next = std::get<proto::MouseMove>(ev.msg);
+            prev.dx += next.dx;
+            prev.dy += next.dy;
+        } else {
+            batch.push_back(std::move(ev));
+        }
+    };
+
     while (auto first = events_.pop()) {
         batch.clear();
-        batch.push_back(std::move(*first));
-        while (auto more = events_.try_pop()) {
-            // Merge consecutive mouse moves into one message.
-            auto* prev = std::get_if<proto::MouseMove>(&batch.back().msg);
-            const auto* next = std::get_if<proto::MouseMove>(&more->msg);
-            if (prev && next && !batch.back().note && !more->note) {
-                prev->dx += next->dx;
-                prev->dy += next->dy;
-            } else {
-                batch.push_back(std::move(*more));
-            }
+        append(std::move(*first));
+        while (auto more = events_.try_pop()) append(std::move(*more));
+        // Pace motion (kMoveInterval); anything that isn't a move flushes right away.
+        while (is_move(batch.back()) && Clock::now() < last_move_sent + kMoveInterval) {
+            auto more = events_.pop_for(last_move_sent + kMoveInterval - Clock::now());
+            if (!more) break;
+            const bool move = is_move(*more);
+            append(std::move(*more));
+            if (!move) break;
         }
 
         for (const Event& ev : batch) {
@@ -454,7 +488,10 @@ void InputCapture::worker_main() {
             std::lock_guard lock(sink_mutex_);
             if (!sink_) continue;
             if (sink_(ev.msg)) {
-                if (std::holds_alternative<proto::MouseMove>(ev.msg)) ++sent.moves;
+                if (std::holds_alternative<proto::MouseMove>(ev.msg)) {
+                    ++sent.moves;
+                    last_move_sent = Clock::now();
+                }
                 if (std::holds_alternative<proto::MouseButtonEvent>(ev.msg)) ++sent.buttons;
                 if (std::holds_alternative<proto::MouseWheel>(ev.msg)) ++sent.wheels;
                 if (std::holds_alternative<proto::Key>(ev.msg)) ++sent.keys;

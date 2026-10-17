@@ -116,11 +116,12 @@ int main() {
     // B stands to the right of A, so A is on B's left.
     const auto mons = display::monitors();
     const display::OuterEdge left(mons, display::Side::Left);
-    InputInject inject(display::Side::Left, [](const proto::Message& m) {
+    const auto to_host = [](const proto::Message& m) {
         std::lock_guard l(g_mu);
         g_to_host.push_back(m);
         return true;
-    });
+    };
+    InputInject inject(display::Side::Left, to_host, std::chrono::milliseconds(0));
 
     // -- not B's turn yet: input is ignored
     const display::Point before = cursor();
@@ -206,6 +207,19 @@ int main() {
     take_seen();
     inject.release_all();
     check(!inject.active() && count(take_seen(), true, WM_KEYUP, 'A') == 1, "release_all() on disconnect");
+
+    // -- cooldown: right after focus_enter, the edge facing A doesn't hand control back
+    {
+        InputInject cooled(display::Side::Left, to_host);  // default 250 ms
+        cooled.handle(proto::FocusEnter{.y_norm = 0.5});
+        cooled.handle(proto::MouseMove{.dx = -100000, .dy = 0});
+        wait_cursor([&](display::Point p) { return left.position(p).has_value(); });
+        cooled.handle(proto::MouseMove{.dx = -3, .dy = 0});
+        check(cooled.active() && take_to_host().empty(), "push towards A within the cooldown: stays on B");
+        Sleep(300);
+        cooled.handle(proto::MouseMove{.dx = -3, .dy = 0});
+        check(!cooled.active() && take_to_host().size() == 1, "push after the cooldown: control back to A");
+    }
 
     SetCursorPos(orig.x, orig.y);
     PostThreadMessageW(tid, WM_QUIT, 0, 0);

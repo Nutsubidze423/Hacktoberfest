@@ -13,6 +13,7 @@
 // released when control leaves B (either way) or the connection drops, so
 // nothing stays stuck.
 
+#include <chrono>
 #include <functional>
 #include <set>
 #include <tuple>
@@ -29,7 +30,10 @@ public:
     using Sink = std::function<bool(const proto::Message&)>;
 
     // host_side: where A stands relative to B, i.e. opposite(config client_side).
-    InputInject(display::Side host_side, Sink to_host);
+    // leave_cooldown: after focus_enter, the edge facing A can't hand control back
+    // for this long, so a jittery hand or touchpad doesn't bounce straight back.
+    InputInject(display::Side host_side, Sink to_host,
+                std::chrono::milliseconds leave_cooldown = std::chrono::milliseconds(250));
     ~InputInject();  // release_all()
 
     InputInject(const InputInject&) = delete;
@@ -57,6 +61,8 @@ private:
 
     display::Side host_side_;
     Sink to_host_;
+    std::chrono::milliseconds leave_cooldown_;
+    std::chrono::steady_clock::time_point entered_at_{};
     display::OuterEdge edge_;
     bool active_ = false;
     bool warned_blocked_ = false;

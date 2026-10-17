@@ -34,6 +34,9 @@ struct CaptureOptions {
     display::Side client_side = display::Side::Right;
     // Switch to B when the cursor hits that edge. false = only switch_to_remote().
     bool edge_switching = true;
+    // After control comes back to A, the edge ignores the cursor this long, so a
+    // jittery hand or touchpad doesn't bounce straight back to B.
+    int switch_cooldown_ms = 250;
     // Test only: treat input injected by other programs as physical input.
     // Our own injected events (kvm::input::kInjectedMarker) are always ignored.
     bool accept_injected = false;

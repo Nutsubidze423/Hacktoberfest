@@ -185,7 +185,7 @@ int main() {
                                 mons.front().rect.top + mons.front().rect.height() / 2};
 
     {
-        InputCapture cap({.client_side = display::Side::Right, .accept_injected = true});
+        InputCapture cap({.client_side = display::Side::Right, .switch_cooldown_ms = 0, .accept_injected = true});
         check(cap.start(), "start(): hooks installed");
         InputCapture second({.client_side = display::Side::Right});
         check(!second.start(), "a second capture in the same process is refused");
@@ -360,6 +360,33 @@ int main() {
         for (const auto& m : only<proto::MouseMove>(take_sent())) dx += m.dx, dy += m.dy;
         check(dx == 12 && dy == 3, "Raw Input with a null device (touchpad) is forwarded (dx " + std::to_string(dx) +
                                        ", dy " + std::to_string(dy) + ")");
+
+        // Pacing merges moves but must never lose any.
+        for (int i = 0; i < 200; ++i) rel_move(1, 0);
+        settle();
+        const auto burst = only<proto::MouseMove>(take_sent());
+        int bx = 0;
+        for (const auto& m : burst) bx += m.dx;
+        check(bx == 200, "200 fast moves arrive complete (sum " + std::to_string(bx) + ") in " +
+                             std::to_string(burst.size()) + " messages");
+    }
+
+    // -- cooldown: right after control comes back, the edge doesn't bounce it to B again
+    {
+        InputCapture cap({.client_side = display::Side::Right, .switch_cooldown_ms = 250, .accept_injected = true});
+        check(cap.start(), "start with switch_cooldown_ms = 250");
+        cap.set_client(sink);
+        abs_move(inside); settle();
+        abs_move(edge_at(0.5));
+        check(wait_until([&] { return cap.remote(); }), "edge -> B");
+        cap.on_focus_leave({.y_norm = 0.5});
+        wait_until([&] { return !cap.remote(); });
+        abs_move(edge_at(0.5)); Sleep(60);
+        check(!cap.remote(), "edge within the cooldown: stays on A");
+        Sleep(300);
+        abs_move(inside); Sleep(30);
+        abs_move(edge_at(0.5));
+        check(wait_until([&] { return cap.remote(); }), "edge after the cooldown: -> B");
     }
 
     // -- no Raw Input motion: motion comes from the hook, cursor parked mid-monitor
