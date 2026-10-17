@@ -23,12 +23,11 @@ namespace kvm {
 namespace {
 
 namespace vt = ui::viewer;
-namespace color = ui::color;
+using ui::pal;
 using ui::px;
 using ui::TextStyle;
 
 constexpr wchar_t kClassName[] = L"KvmViewerWindow";
-constexpr wchar_t kDefaultTitle[] = L"kvm client";
 constexpr UINT kMsgStreamStart = WM_APP + 1;  // wParam = width, lParam = height
 constexpr UINT kMsgLinkChanged = WM_APP + 2;  // wParam = LinkState before, lParam = LinkState now
 constexpr UINT_PTR kHudTimer = 1;
@@ -115,7 +114,7 @@ bool ViewerWindow::create(bool visible) {
     reduced_motion_ = reduced_motion();
 
     const UINT system_dpi = GetDpiForSystem();
-    const HWND hwnd = CreateWindowExW(0, kClassName, kDefaultTitle, WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT,
+    const HWND hwnd = CreateWindowExW(0, kClassName, ui::kAppName, WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT,
                                       px(vt::initial_client_w, system_dpi), px(vt::initial_client_h, system_dpi),
                                       nullptr, nullptr, GetModuleHandleW(nullptr), this);
     if (!hwnd) {
@@ -124,8 +123,7 @@ bool ViewerWindow::create(bool visible) {
     apply_dpi(GetDpiForWindow(hwnd));
     update_icons();
 
-    const DWM_WINDOW_CORNER_PREFERENCE corners = DWMWCP_DONOTROUND;
-    DwmSetWindowAttribute(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, &corners, sizeof(corners));
+    ui::style_window(hwnd);  // rounded corners, no system border, theme-matched shadow
 
     // Real size at the window's own DPI; SWP_FRAMECHANGED applies the frameless WM_NCCALCSIZE.
     SetWindowPos(hwnd, nullptr, 0, 0, px(vt::initial_client_w, dpi_), px(vt::initial_client_h, dpi_),
@@ -369,6 +367,11 @@ LRESULT ViewerWindow::handle_message(UINT msg, WPARAM wp, LPARAM lp) {
         if (reduced_motion_) {
             blink_on_ = true;
         }
+        if (ui::is_theme_change(msg, lp)) {  // Windows switched between dark and light apps
+            ui::refresh_theme();
+            ui::style_window(hwnd);
+            InvalidateRect(hwnd, nullptr, FALSE);
+        }
         break;
     case WM_TIMER:
         if (wp == kHudTimer) {
@@ -413,7 +416,7 @@ LRESULT ViewerWindow::handle_message(UINT msg, WPARAM wp, LPARAM lp) {
         }
         RECT rc;
         GetClientRect(hwnd, &rc);
-        const auto button = viewer::hit_test(viewer::layout_strip(static_cast<float>(rc.right), dpi_),
+        const auto button = viewer::hit_test(viewer::layout_strip(static_cast<float>(rc.right), dpi_, text_),
                                              static_cast<float>(pt.x), static_cast<float>(pt.y));
         if (button != hover_) {
             hover_ = button;
@@ -486,7 +489,7 @@ LRESULT ViewerWindow::handle_message(UINT msg, WPARAM wp, LPARAM lp) {
         } else {
             RECT rc;
             GetClientRect(hwnd, &rc);
-            const auto released_on = viewer::hit_test(viewer::layout_strip(static_cast<float>(rc.right), dpi_),
+            const auto released_on = viewer::hit_test(viewer::layout_strip(static_cast<float>(rc.right), dpi_, text_),
                                                       static_cast<float>(GET_X_LPARAM(lp)),
                                                       static_cast<float>(GET_Y_LPARAM(lp)));
             const auto was_pressed = std::exchange(pressed_, viewer::StripButton::None);
@@ -535,7 +538,7 @@ LRESULT ViewerWindow::hit_test_nc(POINT screen) const {
         if (top) return HTTOP;
         if (bottom) return HTBOTTOM;
     }
-    const auto layout = viewer::layout_strip(static_cast<float>(rc.right), dpi_);
+    const auto layout = viewer::layout_strip(static_cast<float>(rc.right), dpi_, text_);
     if (static_cast<float>(pt.y) < layout.strip.bottom) {
         const bool on_button = viewer::hit_test(layout, static_cast<float>(pt.x), static_cast<float>(pt.y)) !=
                                viewer::StripButton::None;
@@ -613,7 +616,7 @@ bool ViewerWindow::ensure_render_target() {
         return false;
     }
     rt_->SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_CLEARTYPE);  // opaque target
-    rt_->CreateSolidColorBrush(ui::to_color(color::text_hi), &brush_);
+    rt_->CreateSolidColorBrush(ui::to_color(pal().ink), &brush_);
     bitmap_.Reset();
     bitmap_dirty_ = true;
     return true;
@@ -690,7 +693,7 @@ ViewerWindow::View ViewerWindow::current_view() const {
 }
 
 bool ViewerWindow::blinking_visible(View view) const {
-    return view != View::Streaming && view != View::Stalled;  // state-block caret / connecting square
+    return view == View::Connecting;  // the status dot blinks while connecting
 }
 
 void ViewerWindow::on_blink_tick() {
@@ -759,14 +762,15 @@ void ViewerWindow::render() {
         stream_title = shared_.stream_title;
     }
     const bool streaming = view == View::Streaming || view == View::Stalled;
-    const std::wstring title = streaming && !stream_title.empty() ? stream_title : std::wstring(kDefaultTitle);
+    const std::wstring title = streaming ? stream_title : std::wstring();
 
     rt_->BeginDraw();
     rt_->SetTransform(D2D1::Matrix3x2F::Identity());
     ui::Painter p(rt_.Get(), brush_.Get(), text_);
-    p.fill({0, 0, w, h}, color::bg0);
+    const ui::Palette& c = pal();
+    p.fill({0, 0, w, h}, c.bg);
 
-    const auto layout = viewer::layout_strip(w, dpi_);
+    const auto layout = viewer::layout_strip(w, dpi_, text_);
     const D2D1_RECT_F content{0, layout.strip.bottom, w, h};
     draw_content(p, view, content);
     if (hud_visible_) {
@@ -776,29 +780,29 @@ void ViewerWindow::render() {
     viewer::StripModel strip;
     switch (view) {
     case View::Waiting:
-        strip.state_word = L"WAITING";
-        strip.status_color = color::text_lo;
+        strip.state_word = L"Waiting";
+        strip.status_color = c.ink3;
         break;
     case View::Connecting:
-        strip.state_word = L"CONNECTING";
-        strip.status_color = color::warn;
+        strip.state_word = L"Connecting";
+        strip.status_color = c.warn;
         strip.status_visible = blink_on_;
         break;
     case View::Linked:
-        strip.state_word = L"LINKED";
-        strip.status_color = color::ok;
+        strip.state_word = L"Linked";
+        strip.status_color = c.ok;
         break;
     case View::Streaming:
-        strip.state_word = L"STREAM";
-        strip.status_color = color::accent;
+        strip.state_word = L"Streaming";
+        strip.status_color = c.accent_ink;
         break;
     case View::Stalled:
-        strip.state_word = L"STALLED";
-        strip.status_color = color::warn;
+        strip.state_word = L"Stalled";
+        strip.status_color = c.warn;
         break;
     case View::Lost:
-        strip.state_word = L"LOST";
-        strip.status_color = color::err;
+        strip.state_word = L"Connection lost";
+        strip.status_color = c.err;
         break;
     }
     strip.title = title;
@@ -816,7 +820,7 @@ void ViewerWindow::render() {
         InvalidateRect(hwnd_, nullptr, FALSE);
     }
 
-    const std::wstring window_text = title == kDefaultTitle ? L"KVM client" : title;
+    const std::wstring window_text = title.empty() ? std::wstring(ui::kAppName) : title;
     if (window_text != window_text_) {
         window_text_ = window_text;
         SetWindowTextW(hwnd_, window_text_.c_str());  // taskbar / Alt+Tab
@@ -883,86 +887,121 @@ void ViewerWindow::draw_state_block(ui::Painter& p, View view, const D2D1_RECT_F
         reconnects = shared_.reconnects;
         rtt = shared_.rtt_ms;
     }
-    const std::wstring endpoint = host.empty() ? std::wstring(ui::kUnknown) : std::format(L"{}:{}", widen(host), port);
+    const std::wstring endpoint = host.empty() ? std::wstring() : std::format(L"{}:{}", widen(host), port);
 
-    std::wstring_view word;
+    // Centred like the website's hero: "Sarke", a big headline, a line or two of detail.
+    std::wstring_view headline;
     std::vector<std::wstring> details;
+    bool hint = false;
     switch (view) {
     case View::Waiting:
-        word = L"WAITING";
-        details.push_back(L"looking for host at " + endpoint);
+        headline = L"Waiting for the other PC";
+        details.push_back(endpoint.empty() ? L"It can start any time." : L"Looking for " + endpoint);
         break;
     case View::Connecting:
-        word = L"CONNECTING";
-        details.push_back(L"connecting to " + endpoint);
+        headline = L"Connecting";
+        details.push_back(endpoint.empty() ? L"Linking up over your local network." : L"Connecting to " + endpoint);
         break;
     case View::Linked:
-        word = L"LINKED";
-        details.push_back(rtt ? std::format(L"rtt {} ms", *rtt) : std::format(L"rtt {}", ui::kUnknown));
-        details.push_back(L"on host press ctrl+alt+shift+s to pick a window");
+        headline = L"Linked";
+        details.push_back(rtt ? std::format(L"Round trip {} ms", *rtt) : std::wstring(L"Round trip measuring\u2026"));
+        hint = true;
         break;
     case View::Lost:
-        word = L"CONNECTION LOST";
-        details.push_back(reconnects ? L"reconnecting" : L"restart the client");
+        headline = L"Connection lost";
+        details.push_back(reconnects ? L"Reconnecting by itself." : L"Restart Sarke on this PC.");
         break;
     default:
         return;
     }
 
+    const ui::Palette& c = pal();
     const auto& text = p.styles();
-    const float label_h = text.metrics(TextStyle::Label).line_px;
-    const float display_h = text.metrics(TextStyle::Display).line_px;
+    const auto P = [this](float dp) { return static_cast<float>(px(dp, dpi_)); };
+    p.halo(content);
+
+    const float side = P(ui::space::s32);
+    const float max_w = content.right - content.left - 2 * side;
+    // The biggest headline that fits.
+    const TextStyle big = text.measure(TextStyle::Display, headline) <= max_w ? TextStyle::Display : TextStyle::Headline;
+    const float eyebrow_h = text.metrics(TextStyle::Title).line_px;
+    const float big_h = text.metrics(big).line_px;
     const float body_h = text.metrics(TextStyle::Body).line_px;
-    const auto gap4 = static_cast<float>(px(ui::space::s4, dpi_));
-    const auto gap8 = static_cast<float>(px(ui::space::s8, dpi_));
-    const auto gap12 = static_cast<float>(px(ui::space::s12, dpi_));
+    const float keycap_h = P(vt::keycap_h);
     const auto n = static_cast<float>(details.size());
-    const float total = label_h + gap8 + display_h + gap12 + n * body_h + (n - 1) * gap4;
-
-    const auto x = static_cast<float>(px(vt::state_block_x, dpi_));
-    const float max_w = content.right - 2 * x;
+    const float total = eyebrow_h + P(ui::space::s8) + big_h + P(ui::space::s16) + n * body_h +
+                        (hint ? P(ui::space::s24) + keycap_h : 0);
     float y = std::floor(content.top + (content.bottom - content.top - total) / 2);
+    const auto row = [&](float h) { return D2D1_RECT_F{content.left + side, y, content.right - side, y + h}; };
 
-    p.text(TextStyle::Label, L"KVM CLIENT", x, y, max_w, color::text_lo);
-    y += label_h + gap8;
-
-    const float word_w = std::round(p.text(TextStyle::Display, word, x, y, max_w, color::text_hi));
-    if (blink_on_) {
-        const float cx = x + word_w + gap4;
-        const float cy = y + text.metrics(TextStyle::Display).cap_top_px;
-        p.fill({cx, cy, cx + static_cast<float>(px(vt::caret_w, dpi_)), cy + static_cast<float>(px(vt::caret_h, dpi_))},
-               color::accent);
-    }
-    y += display_h + gap12;
-
+    p.text_center(TextStyle::Title, ui::kAppName, row(eyebrow_h), c.ink2);
+    y += eyebrow_h + P(ui::space::s8);
+    p.text_center(big, headline, row(big_h), c.ink);
+    y += big_h + P(ui::space::s16);
     for (const auto& line : details) {
-        p.text(TextStyle::Body, line, x, y, max_w, color::text_mid);
-        y += body_h + gap4;
+        p.text_center(TextStyle::Body, line, row(body_h), c.ink2);
+        y += body_h;
     }
 
-    const float footer_bottom = content.bottom - static_cast<float>(px(vt::footer_bottom_gap, dpi_));
-    p.text(TextStyle::Label, footer_, x, footer_bottom - label_h, max_w, color::text_lo);
+    if (hint) {
+        // "On the other PC, press [Ctrl] [Alt] [Shift] [W] to send a window" with keycaps.
+        y += P(ui::space::s24);
+        constexpr std::wstring_view before = L"On the other PC, press";
+        constexpr std::wstring_view after = L"to send a window";
+        constexpr std::wstring_view keys[] = {L"Ctrl", L"Alt", L"Shift", L"W"};
+        const float gap = P(ui::space::s8);
+        const float pad = P(vt::keycap_pad);
+        float width = std::round(text.measure(TextStyle::Body, before)) + std::round(text.measure(TextStyle::Body, after)) + 2 * gap;
+        for (const auto k : keys) width += std::round(text.measure(TextStyle::Mono, k)) + 2 * pad + P(ui::space::s4);
+        width -= P(ui::space::s4);
+        if (width <= max_w) {
+            float x = std::floor((content.left + content.right - width) / 2);
+            const float body_top = std::floor(y + (keycap_h - body_h) / 2);
+            x += std::round(p.text(TextStyle::Body, before, x, body_top, max_w, c.ink2)) + gap;
+            for (const auto k : keys) {
+                const float kw = std::round(text.measure(TextStyle::Mono, k)) + 2 * pad;
+                const D2D1_RECT_F cap{x, y, x + kw, y + keycap_h};
+                p.round(cap, P(ui::radius::xs), c.tile);
+                p.text_center(TextStyle::Mono, k, cap, c.ink);
+                x += kw + P(ui::space::s4);
+            }
+            x += gap - P(ui::space::s4);
+            p.text(TextStyle::Body, after, x, body_top, max_w, c.ink2);
+        } else {
+            p.text_center(TextStyle::Body, L"On the other PC, press Ctrl+Alt+Shift+W", row(keycap_h), c.ink2);
+        }
+    }
+
+    // This PC, small at the bottom (the website's meta line).
+    const float caption_h = text.metrics(TextStyle::Caption).line_px;
+    const float footer_top = content.bottom - P(vt::footer_bottom_gap) - caption_h;
+    p.text_center(TextStyle::Caption, footer_, {content.left + side, footer_top, content.right - side, footer_top + caption_h},
+                  c.ink3);
 }
 
 void ViewerWindow::draw_stalled(ui::Painter& p, const D2D1_RECT_F& content) {
-    p.fill(content, color::bg0, vt::stalled_overlay_alpha);
+    const ui::Palette& c = pal();
+    p.fill(content, c.bg, ui::alpha::scrim);
 
     const double seconds = std::chrono::duration<double>(Clock::now() - last_frame_time_).count();
-    const std::wstring detail = std::format(L"{:.1f}s without frames", seconds);
-    constexpr std::wstring_view word = L"STALLED";
+    const std::wstring detail = std::format(L"{:.1f} s without frames", seconds);
+    constexpr std::wstring_view word = L"Stalled";
 
+    // A tile in the middle, like the website's cards.
     const auto& text = p.styles();
-    const float display_h = text.metrics(TextStyle::Display).line_px;
+    const auto P = [this](float dp) { return static_cast<float>(px(dp, dpi_)); };
+    const float head_h = text.metrics(TextStyle::Headline).line_px;
     const float body_h = text.metrics(TextStyle::Body).line_px;
-    const auto gap8 = static_cast<float>(px(ui::space::s8, dpi_));
-    const float cx = (content.left + content.right) / 2;
-    float y = std::floor((content.top + content.bottom - (display_h + gap8 + body_h)) / 2);
-
-    const float word_w = std::round(text.measure(TextStyle::Display, word));
-    p.text_right(TextStyle::Display, word, std::floor(cx + word_w / 2), y, color::warn);
-    y += display_h + gap8;
-    const float detail_w = std::round(text.measure(TextStyle::Body, detail));
-    p.text_right(TextStyle::Body, detail, std::floor(cx + detail_w / 2), y, color::text_mid);
+    const float pad = P(ui::space::s24);
+    const float w = std::max(std::round(text.measure(TextStyle::Headline, word)),
+                             std::round(text.measure(TextStyle::Body, L"999.9 s without frames"))) + 2 * pad;
+    const float h = head_h + P(ui::space::s4) + body_h + 2 * pad;
+    const float cx = std::floor((content.left + content.right - w) / 2);
+    const float cy = std::floor((content.top + content.bottom - h) / 2);
+    p.round({cx, cy, cx + w, cy + h}, P(ui::radius::md), c.tile);
+    p.text_center(TextStyle::Headline, word, {cx, cy + pad, cx + w, cy + pad + head_h}, c.warn);
+    const float by = cy + pad + head_h + P(ui::space::s4);
+    p.text_center(TextStyle::Body, detail, {cx, by, cx + w, by + body_h}, c.ink2);
 }
 
 }  // namespace kvm

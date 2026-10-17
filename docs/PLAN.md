@@ -166,7 +166,15 @@ Claude წაიკითხავს ამ ფაილს, იპოვის
 - [x] S1: `video_receiver.*` კითხულობს გარედან მიცემულ `FrameChannel&`-ს (არხს და reconnect-ს `main.cpp` ფლობს); LatestSlot, 1080p 30 fps / ~9 ms ლოკალურად; `kvm_host --no-kvm --test-video`-ის ფრეიმები მიიღო (codec `test` არ ჩანს, MBPS-ში ითვლება)
 - [x] S3: viewer-ის ინფუთი → `remote_mouse_move`, `mouse_button`, `mouse_wheel`, `key` (`viewer_input.*`, ორივე exe-ში; მხოლოდ გამოსახულებაზე, drag-ისას clamp, ფოკუსის დაკარგვისას ყველაფერი up, Alt+F4 ლოკალურია). viewer-ის დახურვა სტრიმისას → `stream_stop {hwnd}`. გაგზავნა: `set_message_sink` → `conn.send_json`
 - [x] S2: ბრენჩი `main`-ზე rebase და push (`sandro/viewer-design`)
-- [x] ლოგო (C „Caret“), tray icon, შეტყობინებები „Connected to host“ / „Connection lost“ (`docs/DESIGN.md` 9)
+- [x] ლოგო, tray icon, შეტყობინებები „Connected to host“ / „Connection lost“ (`docs/DESIGN.md` 9)
+- [x] აპის სახელი **Sarke** (viewer, tray, შეტყობინებები, DESIGN.md) + ლოგო „ს caret“ + `docs/brand/sarke.ico`, `tools/ui_preview_logo.exe`. exe-ების სახელები და `.rc` — ლუკა (`ARTEFACT/Sarke — სახელი და ლოგო`)
+- [x] ეკრანების განლაგება (Displays, `docs/DESIGN.md` 10): `client_b/display_layout.*` + `display_settings.*`, `tools/sarke_displays.exe` — რეალური მონიტორები (live), მეორე PC drag-ით, Apply → `config.json` `client_side` (host/client), Identify; ტესტი `tools/display_layout_test.exe` (62). top/bottom — ლუკას `main.cpp`-ების შემდეგ (`ARTEFACT/ეკრანების განლაგება და Sarke-ის შეტყობინება`)
+- [x] Sarke-ის შეტყობინება ზედა მარჯვნივ, NVIDIA-ს მსგავსად (`client_b/toast.*`, `docs/DESIGN.md` 9.3, `tools/ui_preview_toast.exe`); tray-ში „Display arrangement...“
+- [x] ბრაუზერის პროტოტიპი `docs/preview/sarke-app.html` (+ `sarke-ui.html`): იგივე side-only მოდელი, ბრაუზერის რეალური ეკრანები, ახალი ბარათი; 95 ტესტი (`test_sarke_app.py`)
+- [x] დიზაინი v2 = საიტის სტილი (sarke-nine.vercel.app): პალიტრა, ბნელი/ნათელი თემა, Google Sans + Geist Mono (`assets/fonts`), მომრგვალებული ფილები, საიტის ლოგო — viewer, Displays, ბარათი, პრევიუები (`docs/DESIGN.md` v2, `ARTEFACT/დიზაინი v2 — საიტის სტილი`)
+- [x] `sarke.exe` (launcher): kvm_host/kvm_client ფონზე + tray, ბარათები, Displays, პარამეტრების მენიუ (ხარისხი, fps, desk, შეტყობინებები, როლი) — config.json-ში წერს და აპს თავიდან უშვებს; `main.cpp` უცვლელია (`client_b/launcher.*`, `tools/launcher_test.exe` 25, ერთ PC-ზე end-to-end)
+- [x] `docs/BLUEPRINT.md`: ყველა ფუნქცია, ღილაკი, პარამეტრი და Windows-ის ოპერაცია; საიტთან შეუსაბამობები
+- [ ] ლუკა: top/bottom-ის დაშვება `main.cpp`-ებში; zip-ში `sarke.exe` + `assets\fonts`
 - [ ] დიზაინის შემოწმება DPI 125 / 150 / 200%-ზე და ორ მონიტორს შორის (`docs/DESIGN.md` 7)
 - [x] M1b (ლუკა): ფანჯარა A ⇄ B `main.cpp`-ში — viewer-ის მხარე მზადაა (ჩართო თემომ, `host_a/window_link.*`)
 - [x] ~~ფაზა 2: `host_a/remote_input.*`~~ → თემოს გადაეცა (გადაწყვეტილებები 2, #3; T8 `5fc0ab5`)

@@ -1,5 +1,6 @@
 #include "viewer_chrome.h"
 
+#include <algorithm>
 #include <cmath>
 
 namespace kvm::viewer {
@@ -7,7 +8,7 @@ namespace kvm::viewer {
 namespace {
 
 namespace vt = ui::viewer;
-namespace color = ui::color;
+using ui::pal;
 using ui::px;
 using ui::TextStyle;
 
@@ -15,17 +16,17 @@ bool contains(const D2D1_RECT_F& r, float x, float y) {
     return x >= r.left && x < r.right && y >= r.top && y < r.bottom;
 }
 
-// Top of a line box of `style` vertically centered in [top, bottom).
-float centered_line_top(const ui::Painter& p, TextStyle style, float top, float bottom) {
-    return std::floor(top + (bottom - top - p.styles().metrics(style).line_px) / 2);
+float P(float dp, UINT dpi) {
+    return static_cast<float>(px(dp, dpi));
 }
 
 void draw_caption_glyph(ui::Painter& p, StripButton button, const D2D1_RECT_F& r, bool maximized, std::uint32_t fg,
                         std::uint32_t bg, UINT dpi) {
-    const auto g = static_cast<float>(px(vt::caption_glyph, dpi));
+    const float g = P(vt::caption_glyph, dpi);
     const auto hair = static_cast<float>(ui::hairline(dpi));
     const float gx = std::floor(r.left + (r.right - r.left - g) / 2);
     const float gy = std::floor(r.top + (r.bottom - r.top - g) / 2);
+    const float k = P(2, dpi);  // Windows 11 glyphs have softly rounded squares
 
     switch (button) {
     case StripButton::Minimize: {
@@ -35,13 +36,12 @@ void draw_caption_glyph(ui::Painter& p, StripButton button, const D2D1_RECT_F& r
     }
     case StripButton::Maximize:
         if (maximized) {
-            // Restore: back square offset up-right, front square down-left on top of it.
-            const auto off = static_cast<float>(px(vt::restore_offset, dpi));
-            p.frame({gx + off, gy, gx + g, gy + g - off}, hair, fg);
-            p.fill({gx, gy + off, gx + g - off, gy + g}, bg);
-            p.frame({gx, gy + off, gx + g - off, gy + g}, hair, fg);
+            const float off = P(vt::restore_offset, dpi);
+            p.round_stroke({gx + off, gy, gx + g, gy + g - off}, k, hair, fg);
+            p.round({gx, gy + off, gx + g - off, gy + g}, k, bg);
+            p.round_stroke({gx, gy + off, gx + g - off, gy + g}, k, hair, fg);
         } else {
-            p.frame({gx, gy, gx + g, gy + g}, hair, fg);
+            p.round_stroke({gx, gy, gx + g, gy + g}, k, hair, fg);
         }
         break;
     case StripButton::Close:
@@ -55,25 +55,31 @@ void draw_caption_glyph(ui::Painter& p, StripButton button, const D2D1_RECT_F& r
 
 }  // namespace
 
-StripLayout layout_strip(float client_w, UINT dpi) {
-    const auto h = static_cast<float>(px(vt::strip_h, dpi));
-    const auto caption_w = static_cast<float>(px(vt::caption_button_w, dpi));
-    const auto text_w = static_cast<float>(px(vt::text_button_w, dpi));
-    const auto gap = static_cast<float>(px(ui::space::s8, dpi));
+StripLayout layout_strip(float client_w, UINT dpi, const ui::TextStyles& text) {
+    const float h = P(vt::strip_h, dpi);
+    const float caption_w = P(vt::caption_button_w, dpi);
+    const float pill_h = P(vt::pill_h, dpi);
+    const float pad = P(vt::pill_pad, dpi);
+    const float gap = P(vt::toggle_gap, dpi);
+    const float top = std::floor((h - pill_h) / 2);
+    // Both toggles as wide as their widest label, so "Fit" <-> "1:1" doesn't move anything.
+    const float toggle_w = std::round(std::max({text.measure(TextStyle::BodyStrong, L"HUD"),
+                                                text.measure(TextStyle::BodyStrong, L"Fit"),
+                                                text.measure(TextStyle::BodyStrong, L"1:1")})) + 2 * pad;
 
     StripLayout l;
     l.strip = {0, 0, client_w, h};
-    // Right to left: close, maximize/restore, minimize, gap, FIT, HUD.
+    // Right to left: close, maximize/restore, minimize, 8 dp, Fit, 4 dp, HUD.
     float right = client_w;
     l.close = {right - caption_w, 0, right, h};
     right -= caption_w;
     l.maximize = {right - caption_w, 0, right, h};
     right -= caption_w;
     l.minimize = {right - caption_w, 0, right, h};
-    right -= caption_w + gap;
-    l.fit = {right - text_w, 0, right, h};
-    right -= text_w;
-    l.hud = {right - text_w, 0, right, h};
+    right -= caption_w + P(ui::space::s8, dpi);
+    l.fit = {right - toggle_w, top, right, top + pill_h};
+    right -= toggle_w + gap;
+    l.hud = {right - toggle_w, top, right, top + pill_h};
     return l;
 }
 
@@ -90,53 +96,67 @@ StripButton hit_test(const StripLayout& l, float x, float y) {
 }
 
 void draw_strip(ui::Painter& p, const StripLayout& l, const StripModel& m, UINT dpi) {
-    const auto hair = static_cast<float>(ui::hairline(dpi));
-    p.fill(l.strip, color::bg0);
+    const ui::Palette& c = pal();
+    const auto& text = p.styles();
+    const float h = l.strip.bottom;
 
-    // Status square.
-    const auto sq = static_cast<float>(px(vt::status_square, dpi));
-    const auto sq_x = static_cast<float>(px(vt::status_square_x, dpi));
-    const float sq_y = std::floor((l.strip.bottom - sq) / 2);
-    if (m.status_visible) {
-        p.fill({sq_x, sq_y, sq_x + sq, sq_y + sq}, m.status_color);
+    // Logo + "Sarke".
+    const float logo = P(vt::logo, dpi);
+    const float lx = P(vt::logo_x, dpi);
+    const float ly = std::floor((h - logo) / 2);
+    p.logo({lx, ly, lx + logo, ly + logo});
+    float x = lx + logo + P(ui::space::s8, dpi);
+    const float name_top = std::floor((h - text.metrics(TextStyle::BodyStrong).line_px) / 2);
+    x += std::round(p.text(TextStyle::BodyStrong, ui::kAppName, x, name_top, l.hud.left - x, c.ink)) + P(ui::space::s12, dpi);
+
+    // Status pill: dot + state word.
+    const float pill_h = P(vt::pill_h, dpi);
+    const float pad = P(vt::pill_pad, dpi);
+    const float dot = P(vt::status_dot, dpi);
+    const float word_w = std::round(text.measure(TextStyle::Caption, m.state_word));
+    const float pill_w = pad + dot + P(6, dpi) + word_w + pad;
+    const float top = std::floor((h - pill_h) / 2);
+    if (x + pill_w < l.hud.left - P(ui::space::s8, dpi)) {
+        const D2D1_RECT_F pill{x, top, x + pill_w, top + pill_h};
+        p.pill(pill, c.tile);
+        if (m.status_visible) {
+            p.circle({x + pad + dot / 2, top + pill_h / 2}, dot / 2, m.status_color);
+        }
+        p.text(TextStyle::Caption, m.state_word, x + pad + dot + P(6, dpi),
+               std::floor(top + (pill_h - text.metrics(TextStyle::Caption).line_px) / 2), word_w + P(4, dpi), c.ink2);
+        x += pill_w + P(ui::space::s12, dpi);
     }
 
-    // State word, 8 dp gap, title (ellipsis before the buttons).
-    const auto word_x = static_cast<float>(px(vt::state_word_x, dpi));
-    const auto gap = static_cast<float>(px(ui::space::s8, dpi));
-    const float word_w = p.text(TextStyle::Label, m.state_word, word_x, centered_line_top(p, TextStyle::Label, 0, l.strip.bottom),
-                                l.hud.left - word_x, color::text_lo);
-    const float title_x = std::round(word_x + word_w + gap);
-    p.text(TextStyle::Body, m.title, title_x, centered_line_top(p, TextStyle::Body, 0, l.strip.bottom),
-           l.hud.left - gap - title_x, color::text_hi);
+    // Title of what is streaming, up to the toggles.
+    if (!m.title.empty()) {
+        p.text(TextStyle::Body, m.title, x, std::floor((h - text.metrics(TextStyle::Body).line_px) / 2),
+               l.hud.left - P(ui::space::s12, dpi) - x, c.ink2);
+    }
 
-    // Text buttons: inactive textMid, active accent; hover/pressed fill bg2.
-    const auto text_button = [&](StripButton b, const D2D1_RECT_F& r, std::wstring_view label, bool active) {
+    // Toggles: pills; on = filled, off = text only, hover = tile.
+    const auto toggle = [&](StripButton b, const D2D1_RECT_F& r, std::wstring_view label, bool on) {
         const bool hot = m.hover == b || m.pressed == b;
-        if (hot) {
-            p.fill(r, color::bg2);
+        if (on) {
+            p.pill(r, hot ? c.fill_hi : c.fill);
+        } else if (hot) {
+            p.pill(r, c.tile);
         }
-        const std::uint32_t fg = active ? color::accent : (hot ? color::text_hi : color::text_mid);
-        const float w = std::round(p.styles().measure(TextStyle::Label, label));
-        p.text(TextStyle::Label, label, std::floor(r.left + (r.right - r.left - w) / 2),
-               centered_line_top(p, TextStyle::Label, r.top, r.bottom), r.right - r.left, fg);
+        p.text_center(TextStyle::BodyStrong, label, r, on || hot ? c.ink : c.ink2);
     };
-    text_button(StripButton::Hud, l.hud, L"HUD", m.hud_on);
-    text_button(StripButton::Fit, l.fit, m.one_to_one ? L"1:1" : L"FIT", m.one_to_one);
+    toggle(StripButton::Hud, l.hud, L"HUD", m.hud_on);
+    toggle(StripButton::Fit, l.fit, m.one_to_one ? L"1:1" : L"Fit", m.one_to_one);
 
-    // Caption buttons: hover/pressed fill bg2 (close: err), glyph textMid -> textHi.
+    // Caption buttons: hover fill tile (close: err with a white glyph), like Windows 11.
     for (const StripButton b : {StripButton::Minimize, StripButton::Maximize, StripButton::Close}) {
         const D2D1_RECT_F& r = b == StripButton::Minimize ? l.minimize : b == StripButton::Maximize ? l.maximize : l.close;
         const bool hot = m.hover == b || m.pressed == b;
-        const std::uint32_t bg = hot ? (b == StripButton::Close ? color::err : color::bg2) : color::bg0;
+        const std::uint32_t bg = hot ? (b == StripButton::Close ? ui::kCloseHover : c.tile) : c.bg;
         if (hot) {
             p.fill(r, bg);
         }
-        draw_caption_glyph(p, b, r, m.maximized, hot ? color::text_hi : color::text_mid, bg, dpi);
+        const std::uint32_t fg = hot ? (b == StripButton::Close ? ui::kCloseGlyph : c.ink) : c.ink2;
+        draw_caption_glyph(p, b, r, m.maximized, fg, bg, dpi);
     }
-
-    // Bottom hairline last, so hovered buttons never cover it.
-    p.fill({l.strip.left, l.strip.bottom - hair, l.strip.right, l.strip.bottom}, color::line);
 }
 
 }  // namespace kvm::viewer

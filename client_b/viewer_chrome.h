@@ -22,14 +22,14 @@ struct StripLayout {
     D2D1_RECT_F close{};
 };
 
-StripLayout layout_strip(float client_w, UINT dpi);
+StripLayout layout_strip(float client_w, UINT dpi, const ui::TextStyles& text);
 StripButton hit_test(const StripLayout& layout, float x, float y);
 
 struct StripModel {
     std::uint32_t status_color = 0;
     bool status_visible = true;  // false during the "off" phase of a blink
-    std::wstring_view state_word;
-    std::wstring_view title;
+    std::wstring_view state_word;  // sentence case, e.g. "Linked"
+    std::wstring_view title;       // the stream's window title, or empty
     bool hud_on = true;
     bool one_to_one = false;
     bool maximized = false;
