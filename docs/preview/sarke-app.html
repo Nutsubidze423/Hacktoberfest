@@ -1,0 +1,890 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sarke app redesign</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Noto+Sans+Georgian:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  /* Sarke design system (identical to the website). */
+  :root {
+    --bg0: #0B0B0C; --bg1: #141416; --bg2: #1C1C1F; --line: #2A2A2E; --line-strong: #3A3A40;
+    --text-hi: #EDEDED; --text-mid: #B4B4BA; --text-lo: #8A8A92;
+    --accent: #FF5A1F; --on-accent: #0B0B0C; --ok: #3DDC84; --warn: #FFC21A; --err: #FF4D4D;
+    --font: 'JetBrains Mono', 'Noto Sans Georgian', Consolas, monospace;
+    --t: 120ms;
+    --page: #18191C;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--page); color: var(--text-mid); font-family: var(--font); }
+  button, input, select { font: inherit; color: inherit; }
+  button { cursor: pointer; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .lbl { font-size: 12px; line-height: 16px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-lo); }
+  .hi { color: var(--text-hi); }
+  .readout { font-size: 14px; font-weight: 700; color: var(--text-hi); font-variant-numeric: tabular-nums; }
+  @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+
+  /* ---------- prototype controls (outside the app) ---------- */
+  .proto { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding: 12px 24px; color: var(--text-lo); }
+  .proto .seg { display: flex; gap: 2px; }
+  .proto button { background: #222428; border: 0; padding: 6px 10px; font-size: 11px; letter-spacing: 0.06em; color: var(--text-mid); }
+  .proto button[aria-pressed="true"] { background: #34373E; color: var(--text-hi); }
+  .stage { padding: 8px 24px 32px; }
+  .scaler { transform-origin: top left; }
+
+  /* ---------- the app window: no outline, areas separated by fill ---------- */
+  .app { position: relative; width: 1200px; height: 760px; background: var(--bg0); display: grid;
+         grid-template-columns: 232px 1fr; grid-template-rows: 40px 1fr; box-shadow: 0 16px 48px rgba(0,0,0,0.5); overflow: hidden; }
+  .titlebar { grid-column: 1 / 3; display: flex; align-items: center; background: var(--bg1); }
+  .brand { display: flex; align-items: center; gap: 10px; padding-left: 16px; width: 232px; }
+  .brand .mark { width: 8px; height: 8px; background: var(--accent); }
+  .tb-status { display: flex; align-items: center; gap: 8px; margin-left: 24px; }
+  .tb-status .sq { width: 8px; height: 8px; }
+  .caption { margin-left: auto; display: flex; height: 40px; }
+  .caption button { width: 46px; height: 40px; border: 0; background: transparent; display: flex; align-items: center; justify-content: center;
+                    transition: background var(--t) linear; }
+  .caption button svg * { stroke: var(--text-mid); transition: stroke var(--t) linear; }
+  .caption button:hover { background: var(--bg2); }
+  .caption button:hover svg * { stroke: var(--text-hi); }
+  .caption button.close:hover { background: var(--err); }
+
+  .nav { background: var(--bg1); display: flex; flex-direction: column; padding: 8px 0 16px; }
+  .nav .item { display: flex; align-items: center; gap: 12px; height: 40px; padding: 0 16px 0 18px; border: 0; background: transparent; position: relative;
+               text-align: left; color: var(--text-mid); font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase;
+               transition: background var(--t) linear, color var(--t) linear; }
+  .nav .item svg * { stroke: currentColor; }
+  .nav .item:hover { background: var(--bg2); color: var(--text-hi); }
+  .nav .item[aria-current="page"] { background: var(--bg2); color: var(--text-hi); }
+  .nav .item[aria-current="page"]::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 2px; background: var(--accent); }
+  .nav .group { padding: 16px 18px 8px; }
+  .peer { margin: auto 12px 0; background: var(--bg0); padding: 12px; display: flex; flex-direction: column; gap: 6px; }
+  .peer .row1 { display: flex; align-items: center; gap: 8px; }
+  .peer .sq { width: 8px; height: 8px; }
+
+  .content { position: relative; overflow: hidden; background: var(--bg0); }
+  .grid-bg { background-image:
+      linear-gradient(to right, rgba(42,42,46,0.4) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(42,42,46,0.4) 1px, transparent 1px);
+    background-size: 96px 96px; }
+  .page { position: absolute; inset: 0; overflow: auto; }
+  .page[hidden] { display: none; }
+  .pad { padding: 48px 48px 32px; }
+  h2 { margin: 0; font-size: 40px; line-height: 1.1; font-weight: 700; text-transform: uppercase; color: var(--text-hi); }
+  h3 { margin: 0; font-size: 18px; font-weight: 700; text-transform: uppercase; color: var(--text-hi); }
+  .body { font-size: 14px; line-height: 1.6; color: var(--text-mid); }
+
+  /* ---------- stream page: state hero ---------- */
+  .hero { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 48px; align-items: center; height: 100%; padding: 48px; }
+  .hero .disp { margin-top: 12px; display: flex; align-items: flex-start; gap: 8px; }
+  .hero .disp .w { font-size: 64px; line-height: 64px; font-weight: 700; letter-spacing: -0.01em; text-transform: uppercase; color: var(--text-hi); }
+  .caret { width: 8px; height: 46px; margin-top: 9px; background: var(--accent); flex: none; animation: blink 1060ms steps(1, end) infinite; }
+  @keyframes blink { 50% { opacity: 0; } }
+  .hero .details { margin-top: 24px; display: flex; flex-direction: column; gap: 6px; font-size: 14px; color: var(--text-mid); }
+  .hero .details kbd { font-family: var(--font); background: var(--bg2); color: var(--text-hi); padding: 2px 6px; font-size: 12px; }
+  .hero .actions { margin-top: 32px; display: flex; gap: 12px; flex-wrap: wrap; }
+  .btn { height: 44px; padding: 0 20px; border: 0; font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase;
+         display: inline-flex; align-items: center; gap: 10px; transition: background var(--t) linear, color var(--t) linear; text-decoration: none; }
+  .btn.primary { background: var(--accent); color: var(--on-accent); font-weight: 700; }
+  .btn.primary:hover { background: var(--text-hi); }
+  .btn.secondary { background: var(--bg2); color: var(--text-hi); }
+  .btn.secondary:hover { background: var(--line-strong); }
+  .btn.small { height: 32px; padding: 0 14px; }
+  .foot { position: absolute; left: 48px; bottom: 24px; }
+  .blinking { animation: blink 1060ms steps(1, end) infinite; }
+
+  /* little arrangement map (hero + displays page) */
+  /* No text selection on the map: a selected label would turn the next drag into the browser's own text drag. */
+  .map { position: relative; background-color: var(--bg0); user-select: none; -webkit-user-select: none; }
+  .mon { position: absolute; background: var(--bg2); display: flex; flex-direction: column; justify-content: space-between; padding: 8px 10px; }
+  .mon .num { font-size: 22px; font-weight: 700; color: var(--text-hi); line-height: 1; }
+  .mon.peer-mon { background: var(--bg1); }
+  .mon.peer-mon::before { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 3px; background: var(--accent); }
+  .mon.dim { opacity: 0.35; }
+  .mon.lost::before { background: var(--err); }
+  .mon.dragging { cursor: grabbing; opacity: 0.85; }
+  .drag-group { position: absolute; cursor: grab; touch-action: none; }
+  .glow { position: absolute; pointer-events: none; }
+  .ghost { position: absolute; background: rgba(255,90,31,0.10); pointer-events: none; }
+
+  /* ---------- stream page: live picture ---------- */
+  .cmdbar { position: absolute; left: 0; right: 0; top: 0; height: 40px; display: flex; align-items: center; gap: 2px; padding: 0 12px; background: var(--bg0); z-index: 4; }
+  .cmd { height: 32px; padding: 0 12px; border: 0; background: transparent; font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-mid);
+         transition: background var(--t) linear, color var(--t) linear; display: inline-flex; align-items: center; gap: 8px; }
+  .cmd:hover { background: var(--bg2); color: var(--text-hi); }
+  .cmd.on { color: var(--accent); }
+  .cmdbar .title { margin-left: 12px; font-size: 13px; color: var(--text-hi); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .cmdbar .spacer { flex: 1; }
+  .picture-area { position: absolute; left: 0; right: 0; top: 40px; bottom: 0; overflow: hidden; background: var(--bg0); }
+  .pic { position: absolute; }
+  .pic svg { display: block; width: 100%; height: 100%; }
+  .band { position: absolute; left: 0; right: 0; background-color: var(--bg0); }
+  .hud { position: absolute; top: 12px; right: 12px; width: 192px; background: rgba(20,20,22,0.92); z-index: 3; }
+  .hud .hdr { height: 32px; display: flex; align-items: center; justify-content: space-between; padding: 0 12px; box-shadow: inset 0 -1px 0 var(--line-strong); }
+  .hud .hdr .sq { width: 8px; height: 8px; }
+  .hud .r { height: 24px; display: flex; align-items: center; justify-content: space-between; padding: 0 12px; }
+  .hud .r + .r { box-shadow: inset 0 1px 0 var(--line); }
+  .hud .u { font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-lo); margin-left: 6px; font-weight: 400; }
+  .stall { position: absolute; inset: 0; background: rgba(11,11,12,0.6); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; z-index: 2; }
+  .stall .w { font-size: 40px; font-weight: 700; color: var(--warn); }
+
+  /* ---------- displays page ---------- */
+  .disp-layout { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 32px; margin-top: 32px; }
+  .card { background: var(--bg1); padding: 16px; }
+  .disp-layout .card + .card { margin-top: 12px; }
+  .seg { display: flex; gap: 2px; margin-top: 8px; }
+  .seg button { flex: 1; height: 32px; border: 0; background: var(--bg2); font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-mid);
+                transition: background var(--t) linear, color var(--t) linear; }
+  .seg button:hover { color: var(--text-hi); }
+  .seg button[aria-pressed="true"] { background: var(--accent); color: var(--on-accent); font-weight: 700; }
+  .kv { display: flex; justify-content: space-between; align-items: baseline; padding: 6px 0; }
+  .kv + .kv { box-shadow: inset 0 1px 0 var(--line); }
+  .monlist { margin-top: 32px; }
+  .monrow { display: grid; grid-template-columns: 40px 1fr auto; align-items: center; gap: 12px; padding: 12px 16px; background: var(--bg1); }
+  .monrow + .monrow { margin-top: 2px; }
+  .monrow .n { font-size: 20px; font-weight: 700; color: var(--text-hi); }
+  .tag { font-size: 11px; letter-spacing: 0.08em; padding: 2px 6px; background: var(--bg2); color: var(--text-mid); text-transform: uppercase; }
+  .seg button:disabled { opacity: 0.45; cursor: not-allowed; }
+  .seg button:disabled:hover { color: var(--text-mid); }
+  .note { display: block; margin-top: 8px; }
+  .glowset { position: absolute; inset: 0; pointer-events: none; }
+  .zone { position: absolute; box-shadow: inset 0 0 0 1px var(--line-strong); pointer-events: none; }
+  .zone.hot { background: rgba(255,90,31,0.10); box-shadow: inset 0 0 0 1px rgba(255,90,31,0.7); }
+  .ident { position: absolute; display: flex; align-items: center; justify-content: center; font-size: 44px; font-weight: 700; color: var(--text-hi);
+           background: rgba(11,11,12,0.75); box-shadow: inset 0 0 0 3px var(--accent); pointer-events: none; z-index: 3; }
+  .live { position: absolute; left: 12px; top: 12px; display: flex; align-items: center; gap: 8px; pointer-events: none; }
+  .live .sq { width: 8px; height: 8px; background: var(--ok); }
+  .live .sq.sample { background: var(--text-lo); }
+  .msg { margin-top: 16px; font-size: 13px; line-height: 18px; color: var(--text-mid); }
+  .monbtns { display: flex; gap: 8px; flex-wrap: wrap; }
+
+  /* ---------- settings page ---------- */
+  .settings { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 32px; }
+  .setrow { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 12px 0; }
+  .setrow + .setrow { box-shadow: inset 0 1px 0 var(--line); }
+  .setrow .t { font-size: 13px; color: var(--text-hi); }
+  .setrow .d { font-size: 12px; color: var(--text-lo); margin-top: 2px; }
+  .switch { width: 40px; height: 22px; border: 0; background: var(--bg2); position: relative; flex: none; transition: background var(--t) linear; }
+  .switch::after { content: ""; position: absolute; top: 4px; left: 4px; width: 14px; height: 14px; background: var(--text-mid); transition: left var(--t) linear, background var(--t) linear; }
+  .switch[aria-checked="true"] { background: var(--accent); }
+  .switch[aria-checked="true"]::after { left: 22px; background: var(--on-accent); }
+  .switch[disabled] { opacity: 0.6; cursor: not-allowed; }
+  .keycap { font-size: 12px; background: var(--bg2); color: var(--text-hi); padding: 4px 8px; white-space: nowrap; }
+  input[type="text"] { background: var(--bg2); border: 0; padding: 8px 10px; color: var(--text-hi); width: 170px; }
+  input[type="range"] { width: 150px; accent-color: #FF5A1F; }
+
+  /* ---------- Sarke notification: a card at the top-right, like NVIDIA's overlay (native: client_b/toast.cpp) ---------- */
+  .toast { position: fixed; top: 16px; right: 16px; width: 380px; min-height: 72px; z-index: 50; background: var(--bg1);
+           box-shadow: inset 0 0 0 1px var(--line-strong), 0 12px 32px rgba(0,0,0,0.45); display: flex; align-items: center; gap: 14px;
+           padding: 16px 40px 16px 20px; cursor: pointer; animation: tin 220ms cubic-bezier(0.33, 1, 0.68, 1); }
+  .toast::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: var(--accent); }
+  .toast .logo { width: 40px; height: 40px; flex: none; box-shadow: inset 0 0 0 1px var(--line); }
+  .toast .logo svg { width: 40px; height: 40px; display: block; }
+  .toast .txt { min-width: 0; flex: 1; }
+  .toast .hd { display: flex; align-items: center; gap: 8px; }
+  .toast .hd .sq { width: 8px; height: 8px; flex: none; }
+  .toast .t1 { margin-top: 4px; font-size: 15px; line-height: 20px; color: var(--text-hi); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .toast .t2 { font-size: 13px; line-height: 18px; color: var(--text-mid); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .toast .x { position: absolute; top: 8px; right: 8px; width: 24px; height: 24px; border: 0; background: transparent; display: flex; align-items: center; justify-content: center; }
+  .toast .x svg * { stroke: var(--text-lo); }
+  .toast .x:hover { background: var(--bg2); }
+  .toast .x:hover svg * { stroke: var(--text-hi); }
+  .toast .time { position: absolute; left: 4px; right: 0; bottom: 0; height: 2px; background: var(--accent); opacity: 0.8; transform-origin: left;
+                 animation: run linear forwards; }
+  .toast:hover .time { animation-play-state: paused; opacity: 0.35; }
+  .toast.out { animation: tout 180ms ease-in forwards; }
+  @keyframes tin { from { transform: translateX(32px); opacity: 0; } }
+  @keyframes tout { to { transform: translateX(32px); opacity: 0; } }
+  @keyframes run { to { transform: scaleX(0); } }
+  .tray-note { position: fixed; left: 50%; top: 40%; transform: translate(-50%, -50%); background: var(--bg1); padding: 32px;
+               display: flex; flex-direction: column; gap: 16px; align-items: flex-start; max-width: 420px; }
+  .tray-note[hidden], .stage[hidden] { display: none; }
+  .btn:disabled { opacity: 0.4; cursor: default; }
+  .btn.primary:disabled:hover { background: var(--accent); }
+  .btn.secondary:disabled:hover { background: var(--bg2); }
+  .mon.peer-mon:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+</style>
+</head>
+<body>
+<div class="proto" aria-label="Prototype controls (not part of the app)">
+  <span class="lbl">PROTOTYPE · CONNECTION</span>
+  <div class="seg" id="protoStates"></div>
+  <span class="lbl">THIS PC HAS</span>
+  <div class="seg" id="protoMons">
+    <button data-mons="1" aria-pressed="true">1 MONITOR</button><button data-mons="2" aria-pressed="false">2 MONITORS</button>
+  </div>
+</div>
+
+<div class="stage" id="stage">
+  <div class="scaler" id="scaler">
+    <div class="app" id="app">
+      <header class="titlebar">
+        <div class="brand">
+          <svg width="16" height="16" viewBox="0 0 16 16" shape-rendering="crispEdges" aria-hidden="true"><rect width="16" height="16" fill="#0B0B0C"/><rect x="2" y="3" width="2" height="8" fill="#EDEDED"/><rect x="3" y="11" width="6" height="2" fill="#EDEDED"/><rect x="8" y="6" width="2" height="5" fill="#EDEDED"/><rect x="11" y="5" width="3" height="8" fill="#FF5A1F"/></svg>
+          <span class="lbl hi">SARKE</span><span class="lbl">· HOST</span>
+        </div>
+        <div class="tb-status"><span class="sq" id="tbSq"></span><span class="lbl" id="tbText"></span></div>
+        <div class="caption">
+          <button aria-label="Minimize" id="capMin"><svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M0 5.5 H10" stroke-width="1"/></svg></button>
+          <button aria-label="Maximize" id="capMax"><svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><rect x="0.5" y="0.5" width="9" height="9" fill="none" stroke-width="1"/></svg></button>
+          <button class="close" aria-label="Close" id="capClose"><svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M0 0 L10 10 M10 0 L0 10" stroke-width="1"/></svg></button>
+        </div>
+      </header>
+
+      <nav class="nav" aria-label="Sarke">
+        <button class="item" data-page="stream"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><rect x="1.5" y="2.5" width="13" height="9" stroke-width="1.2"/><path d="M5 14.5 H11" stroke-width="1.2"/></svg>Stream</button>
+        <button class="item" data-page="displays"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><rect x="0.5" y="4.5" width="7" height="6" stroke-width="1.2"/><rect x="8.5" y="2.5" width="7" height="8" stroke-width="1.2"/><path d="M3 13.5 H6 M10 13.5 H14" stroke-width="1.2"/></svg>Displays</button>
+        <button class="item" data-page="settings"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M2 4.5 H14 M2 11.5 H14" stroke-width="1.2"/><rect x="4.5" y="2.5" width="3" height="4" stroke-width="1.2"/><rect x="9.5" y="9.5" width="3" height="4" stroke-width="1.2"/></svg>Settings</button>
+        <div class="peer" aria-label="Other PC">
+          <span class="lbl">OTHER PC</span>
+          <div class="row1"><span class="sq" id="peerSq"></span><span class="readout" id="peerName">tabuladze</span></div>
+          <span class="lbl" id="peerAddr">172.20.10.2 · 1920×1200 · 150%</span>
+        </div>
+      </nav>
+
+      <main class="content" id="content">
+        <!-- STREAM -->
+        <section class="page" id="page-stream"></section>
+        <!-- DISPLAYS -->
+        <section class="page grid-bg" id="page-displays" hidden>
+          <div class="pad">
+            <span class="lbl">SETTINGS · DISPLAYS</span>
+            <h2 style="margin-top:8px">Where is the other PC?</h2>
+            <p class="body" style="max-width:680px;margin:12px 0 0">Drag the other PC to the side of your screens where it really stands. The orange edge is where your mouse crosses over. Arrow keys work too.</p>
+            <div class="disp-layout">
+              <div>
+                <div class="map grid-bg" id="arrMap" style="height:400px"></div>
+                <div class="msg" id="dispMsg"></div>
+              </div>
+              <div>
+                <div class="card">
+                  <span class="lbl">OTHER PC IS</span>
+                  <div class="seg" id="sideSeg">
+                    <button data-side="left">LEFT</button><button data-side="right">RIGHT</button><button data-side="top">TOP</button><button data-side="bottom">BOTTOM</button>
+                  </div>
+                  <span class="lbl note" id="sideNote">TOP / BOTTOM: NEXT HOST UPDATE</span>
+                  <span class="lbl" style="display:block;margin-top:16px">THIS PC IS THE</span>
+                  <div class="seg" id="roleSeg">
+                    <button data-role="host">HOST</button><button data-role="client">CLIENT</button>
+                  </div>
+                </div>
+                <div class="card">
+                  <div class="kv"><span class="lbl">MOUSE CROSSES</span><span class="readout" id="rdEdge">RIGHT EDGE</span></div>
+                  <div class="kv"><span class="lbl">CROSSING EDGE</span><span class="readout" id="rdLen">1080 PX</span></div>
+                  <div class="kv"><span class="lbl">CLIENT_SIDE</span><span class="readout" id="rdSide">"right"</span></div>
+                  <div class="kv"><span class="lbl">STATUS</span><span class="readout" id="rdState">SAVED</span></div>
+                </div>
+                <div style="display:flex;gap:12px;margin-top:16px">
+                  <button class="btn primary" id="applyBtn">APPLY</button>
+                  <button class="btn secondary" id="revertBtn">REVERT</button>
+                </div>
+              </div>
+            </div>
+            <div class="monlist">
+              <div style="display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap">
+                <div><h3>This PC's monitors <span class="tag" id="monSource">SAMPLE</span></h3>
+                  <p class="body" style="margin:6px 0 0">As Windows arranges them. Change resolution, scale or order in Windows.</p></div>
+                <div class="monbtns">
+                  <button class="btn secondary small" id="detectBtn">DETECT MY SCREENS</button>
+                  <button class="btn secondary small" id="identifyBtn">IDENTIFY</button>
+                  <a class="btn secondary small" href="ms-settings:display">WINDOWS DISPLAY SETTINGS
+                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true"><path d="M4 1.5 H10.5 V8 M10.5 1.5 L2 10" stroke="currentColor" stroke-width="1.2"/></svg></a>
+                </div>
+              </div>
+              <div id="monRows" style="margin-top:16px"></div>
+            </div>
+          </div>
+        </section>
+        <!-- SETTINGS -->
+        <section class="page grid-bg" id="page-settings" hidden>
+          <div class="pad">
+            <span class="lbl">SARKE · SETTINGS</span>
+            <h2 style="margin-top:8px">Settings</h2>
+            <div class="settings">
+              <div class="card">
+                <h3>Connection</h3>
+                <div class="setrow"><div><div class="t">This PC</div><div class="d">host · waits for the other PC</div></div><span class="readout">HOST</span></div>
+                <div class="setrow"><div><div class="t">This PC's address</div><div class="d">type it on the other PC · ports 50500–50502</div></div><span class="readout" id="setThisIp">172.20.10.3</span></div>
+                <div class="setrow"><div><div class="t">Other PC</div><div class="d" id="setPeerD">tabuladze · reconnects by itself</div></div><span class="readout" id="setPeerIp">172.20.10.2</span></div>
+                <div class="setrow"><div><div class="t">Displays</div><div class="d">where the other PC stands</div></div><button class="btn secondary small" data-goto="displays">ARRANGE</button></div>
+              </div>
+              <div class="card">
+                <h3>Stream</h3>
+                <div class="setrow"><div><div class="t">Show HUD</div><div class="d">link quality over the picture</div></div><button class="switch" role="switch" aria-checked="true" id="setHud" aria-label="Show HUD"></button></div>
+                <div class="setrow"><div><div class="t">Quality of windows you send</div><div class="d">JPEG <span id="qVal">75</span> · higher looks better, uses more Wi-Fi</div></div><input type="range" min="40" max="95" step="5" value="75" id="qRange" aria-label="Quality of windows you send"></div>
+                <div class="setrow"><div><div class="t">Frames per second you send</div><div class="d">lower it on a slow network</div></div>
+                  <div class="seg" style="margin:0;width:150px" id="fpsSeg"><button data-fps="15" aria-pressed="false">15</button><button data-fps="30" aria-pressed="true">30</button><button data-fps="60" aria-pressed="false">60</button></div></div>
+              </div>
+              <div class="card">
+                <h3>Keyboard</h3>
+                <div class="setrow"><div><div class="t">Send a window</div><div class="d">the window in front moves to the other PC</div></div><span class="keycap">Ctrl+Alt+Shift+W</span></div>
+                <div class="setrow"><div><div class="t">Send files</div><div class="d">drop box at the cursor</div></div><span class="keycap">Ctrl+Alt+Shift+F</span></div>
+                <div class="setrow"><div><div class="t">Emergency: take control back</div><div class="d">always on, can't be changed</div></div><span class="keycap">Ctrl+Alt+Shift+Q</span></div>
+              </div>
+              <div class="card">
+                <h3>Notifications</h3>
+                <div class="setrow"><div><div class="t">Connected</div><div class="d">when the other PC links up</div></div><button class="switch" role="switch" aria-checked="true" id="setNotifyUp" aria-label="Notify when connected"></button></div>
+                <div class="setrow"><div><div class="t">Connection lost</div><div class="d">when the link drops</div></div><button class="switch" role="switch" aria-checked="true" id="setNotifyLost" aria-label="Notify when connection is lost"></button></div>
+                <div class="setrow"><div><div class="t">About</div><div class="d">Sarke · <span lang="ka">სარკე</span> · protocol v2</div></div><span class="tag">MIRROR</span></div>
+              </div>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+</div>
+<div class="tray-note" id="trayNote" hidden>
+  <span class="body">Sarke is still running in the tray (<span lang="ka">ს</span> under ^ in the taskbar).</span>
+  <button class="btn primary small" id="reopen">OPEN SARKE</button>
+</div>
+
+<script>
+// ---------------- data ----------------
+const COLORS = { lo: '#8A8A92', warn: '#FFC21A', ok: '#3DDC84', accent: '#FF5A1F', err: '#FF4D4D' };
+const PEER = { name: 'tabuladze', ip: '172.20.10.2', w: 1920, h: 1200, scale: 150 };
+const THIS = { name: 'DESKTOP-7Q0UR7J', ip: '172.20.10.3' };
+const STATES = {
+  waiting:    { word: 'WAITING', sq: COLORS.lo, title: 'WAITING', details: ['looking for the other pc · it can start any time'], status: 'WAITING' },
+  connecting: { word: 'CONNECTING', sq: COLORS.warn, blink: true, title: 'CONNECTING', details: ['connecting to ' + PEER.ip], status: 'CONNECTING' },
+  linked:     { word: 'LINKED', sq: COLORS.ok, title: 'LINKED', details: ['rtt 14 ms · ' + PEER.name + ' is ready'], status: 'LINKED · RTT 14 MS', hint: true },
+  stream:     { word: 'STREAM', sq: COLORS.accent, stream: true, status: 'STREAM · 30 FPS' },
+  stalled:    { word: 'STALLED', sq: COLORS.warn, stream: true, stalled: true, status: 'STALLED' },
+  lost:       { word: 'LOST', sq: COLORS.err, title: 'CONNECTION LOST', details: ['reconnecting by itself'], status: 'CONNECTION LOST' },
+};
+const ORDER = ['waiting', 'connecting', 'linked', 'stream', 'stalled', 'lost'];
+const LOGO = '<svg width="16" height="16" viewBox="0 0 16 16" shape-rendering="crispEdges" aria-hidden="true"><rect width="16" height="16" fill="#0B0B0C"/><rect x="2" y="3" width="2" height="8" fill="#EDEDED"/><rect x="3" y="11" width="6" height="2" fill="#EDEDED"/><rect x="8" y="6" width="2" height="5" fill="#EDEDED"/><rect x="11" y="5" width="3" height="8" fill="#FF5A1F"/></svg>';
+const SHARED = `<svg viewBox="0 0 1600 900" xmlns="http://www.w3.org/2000/svg" font-family="Segoe UI, system-ui, sans-serif">
+  <rect width="1600" height="900" fill="#F3F3F3"/><rect width="1600" height="40" fill="#FFFFFF"/><text x="20" y="26" font-size="14" fill="#1F1F1F">untitled.png — Sketchpad</text>
+  <rect y="40" width="1600" height="32" fill="#F7F7F7"/><g font-size="13" fill="#333"><text x="20" y="61">File</text><text x="64" y="61">Edit</text><text x="108" y="61">Image</text><text x="164" y="61">Layer</text><text x="218" y="61">View</text></g>
+  <rect y="73" width="56" height="799" fill="#EDEDED"/><rect x="8" y="88" width="40" height="40" fill="#D8E7FF"/>
+  <g stroke="#555" stroke-width="2" fill="none"><path d="M18 118 q10 -22 20 -12"/><rect x="18" y="146" width="20" height="16"/><circle cx="28" cy="200" r="10"/></g>
+  <rect x="1340" y="73" width="260" height="799" fill="#F7F7F7"/><text x="1360" y="104" font-size="13" font-weight="600" fill="#222">Layers</text>
+  <g font-size="13" fill="#333"><rect x="1352" y="118" width="236" height="34" fill="#D8E7FF"/><text x="1372" y="140">Sketch</text><text x="1372" y="174">Color</text><text x="1372" y="208">Background</text></g>
+  <rect x="57" y="73" width="1283" height="799" fill="#E3E3E3"/><rect x="148" y="118" width="1100" height="710" fill="#FFFFFF"/>
+  <circle cx="1060" cy="250" r="64" fill="#F6AD55"/><path d="M148 700 L420 430 L590 600 L780 380 L1060 700 L1248 560 L1248 828 L148 828 Z" fill="#9AE6B4"/>
+  <path d="M148 740 L420 520 L620 690 L860 500 L1248 760 L1248 828 L148 828 Z" fill="#38A169" opacity="0.85"/>
+  <path d="M300 300 q60 -80 140 -10 t150 0" fill="none" stroke="#2B6CB0" stroke-width="10" stroke-linecap="round"/>
+  <text x="300" y="400" font-size="40" fill="#1A202C" font-family="Segoe Print, Comic Sans MS, cursive">hello from the other PC</text>
+  <rect y="872" width="1600" height="28" fill="#F7F7F7"/><text x="20" y="891" font-size="12" fill="#555">1600 × 900 px · 100%</text>
+  <path d="M905 455 l0 26 l7 -6 l5 11 l5 -2 l-5 -11 l9 0 z" fill="#FFFFFF" stroke="#000" stroke-width="1.2"/></svg>`;
+
+const app = {
+  state: 'linked', page: 'stream', mons: 1, hud: true, fit: true, maximized: false, hidden: false,
+  // The arrangement is what the apps really use: config.json "client_side" = where the client (B)
+  // stands next to the host (A). One side, nothing else: the KVM maps this PC's whole outer edge on
+  // that side onto the other PC's edge (kvm::display::OuterEdge), so there is no offset to store.
+  role: 'host', cfg: 'right', arr: 'right', justSaved: false,
+  detected: null, detectNote: '',
+  stalledAt: performance.now(), notifyUp: true, notifyLost: true, quality: 75, fps: 30,
+};
+
+// ---------------- arrangement (same rules as client_b/display_layout.cpp) ----------------
+const SIDES = ['left', 'right', 'top', 'bottom'];
+// = kVerticalSidesAccepted: the KVM code handles top / bottom, but kvm_host / kvm_client still
+// accept only left / right in config.json until Luka's update.
+const VERTICAL_SIDES_ACCEPTED = false;
+const accepted = side => VERTICAL_SIDES_ACCEPTED || side === 'left' || side === 'right';
+const opposite = side => ({ left: 'right', right: 'left', top: 'bottom', bottom: 'top' })[side];
+const alongX = side => side === 'top' || side === 'bottom';
+const clientSideFor = side => app.role === 'host' ? side : opposite(side);   // what Apply writes
+const savedSide = () => app.role === 'host' ? app.cfg : opposite(app.cfg);   // what config.json means here
+
+function hostMonitors() {
+  if (app.detected) return app.detected;
+  return app.mons === 1 ? [{ n: 1, x: 0, y: 0, w: 1920, h: 1080, scale: 100, primary: true }]
+                        : [{ n: 1, x: 0, y: 0, w: 1920, h: 1080, scale: 100, primary: true },
+                           { n: 2, x: 1920, y: -120, w: 2560, h: 1440, scale: 125 }];
+}
+function bbox(ms) {
+  const l = Math.min(...ms.map(m => m.x)), t = Math.min(...ms.map(m => m.y));
+  const r = Math.max(...ms.map(m => m.x + m.w)), b = Math.max(...ms.map(m => m.y + m.h));
+  return { l, t, r, b, w: r - l, h: b - t };
+}
+// The pieces of the outer edge where the cursor leaves this PC: every edge pixel of every monitor
+// with no other monitor directly beyond it (kvm::display::OuterEdge). 1 px thick, desktop px.
+function edgePieces(ms, side) {
+  const out = [];
+  for (const m of ms) {
+    const r = { l: m.x, t: m.y, r: m.x + m.w, b: m.y + m.h };
+    let from = alongX(side) ? r.l : r.t;
+    const to = alongX(side) ? r.r : r.b;
+    const fixed = side === 'left' ? r.l : side === 'right' ? r.r - 1 : side === 'top' ? r.t : r.b - 1;
+    const covered = [];
+    for (const n of ms) {
+      if (n === m) continue;
+      const o = { l: n.x, t: n.y, r: n.x + n.w, b: n.y + n.h };
+      const touches = side === 'left' ? o.r === r.l : side === 'right' ? o.l === r.r : side === 'top' ? o.b === r.t : o.t === r.b;
+      if (!touches) continue;
+      const lo = Math.max(alongX(side) ? o.l : o.t, from), hi = Math.min(alongX(side) ? o.r : o.b, to);
+      if (lo < hi) covered.push([lo, hi]);
+    }
+    covered.sort((a, b) => a[0] - b[0]);
+    const piece = (a, b) => out.push(alongX(side) ? { x: a, y: fixed, w: b - a, h: 1 } : { x: fixed, y: a, w: 1, h: b - a });
+    for (const [lo, hi] of covered) { if (lo > from) piece(from, lo); from = Math.max(from, hi); }
+    if (from < to) piece(from, to);
+  }
+  return out;
+}
+const edgeLength = side => edgePieces(hostMonitors(), side).reduce((n, p) => n + (alongX(side) ? p.w : p.h), 0);
+// The other PC at its own size, right outside this desktop on `side`, centred on the crossing edge.
+function peerRect(side) {
+  const ms = hostMonitors(), H = bbox(ms);
+  let lo = Infinity, hi = -Infinity;
+  for (const p of edgePieces(ms, side)) {
+    lo = Math.min(lo, alongX(side) ? p.x : p.y);
+    hi = Math.max(hi, alongX(side) ? p.x + p.w : p.y + p.h);
+  }
+  if (lo > hi) { lo = alongX(side) ? H.l : H.t; hi = alongX(side) ? H.r : H.b; }
+  const mid = lo + Math.floor((hi - lo) / 2), w = PEER.w, h = PEER.h;
+  if (side === 'left') return { x: H.l - w, y: mid - Math.floor(h / 2), w, h };
+  if (side === 'right') return { x: H.r, y: mid - Math.floor(h / 2), w, h };
+  if (side === 'top') return { x: mid - Math.floor(w / 2), y: H.t - h, w, h };
+  return { x: mid - Math.floor(w / 2), y: H.b, w, h };
+}
+// Which side a dropped box centre is closest to (offsets scaled by the desktop's size).
+function nearestSide(H, cx, cy, vertical) {
+  const hw = Math.max(1, H.w) / 2, hh = Math.max(1, H.h) / 2;
+  const dx = (cx - (H.l + hw)) / hw, dy = (cy - (H.t + hh)) / hh;
+  if (vertical && Math.abs(dy) > Math.abs(dx)) return dy < 0 ? 'top' : 'bottom';
+  return dx < 0 ? 'left' : 'right';
+}
+
+// ---------------- arrangement drawing ----------------
+// One scale for this PC plus the other PC on every side it may go to, so nothing jumps while dragging.
+function fitFor(boxW, boxH, margin, side) {
+  const H = bbox(hostMonitors());
+  let u = { l: H.l, t: H.t, r: H.r, b: H.b };
+  for (const s of SIDES) {
+    if (!accepted(s) && s !== side) continue;
+    const P = peerRect(s);
+    u = { l: Math.min(u.l, P.x), t: Math.min(u.t, P.y), r: Math.max(u.r, P.x + P.w), b: Math.max(u.b, P.y + P.h) };
+  }
+  const scale = Math.min((boxW - 2 * margin) / (u.r - u.l), (boxH - 2 * margin) / (u.b - u.t));
+  return { scale, ox: Math.round(boxW / 2 - (u.l + u.r) / 2 * scale), oy: Math.round(boxH / 2 - (u.t + u.b) / 2 * scale) };
+}
+function mapHTML(f, opts) {
+  const ms = hostMonitors(), P = peerRect(opts.side);
+  const px = v => Math.round(v * f.scale), X = v => f.ox + px(v), Y = v => f.oy + px(v);
+  let html = '';
+  for (const m of ms) {
+    html += `<div class="mon" data-mon="${m.n}" style="left:${X(m.x)}px;top:${Y(m.y)}px;width:${px(m.w) - 4}px;height:${px(m.h) - 4}px">
+      <span class="num">${m.n}</span><span class="lbl">${m.n === 1 ? 'THIS PC ' : ''}${m.w}×${m.h}</span></div>`;
+  }
+  const peerCls = opts.peerState === 'lost' ? 'lost' : (opts.peerState === 'waiting' || opts.peerState === 'connecting') ? 'dim' : '';
+  const dragAttrs = opts.draggable ? `tabindex="0" role="button" aria-label="Other PC, on the ${opts.side}. Drag it, or use the arrow keys."` : '';
+  html += `<div class="mon peer-mon ${peerCls}" data-peer ${dragAttrs} style="left:${X(P.x)}px;top:${Y(P.y)}px;width:${px(P.w) - 4}px;height:${px(P.h) - 4}px">
+      <span class="num">${opts.peerState === 'waiting' ? '?' : 'B'}</span><span class="lbl">${PEER.name} ${PEER.w}×${PEER.h}</span></div>`;
+  if (opts.glow) html += glowHTML(opts.side, edgePieces(ms, opts.side), X, Y, px);
+  return html;
+}
+// The orange edge sits on this PC's side of each crossing piece: 3 px solid + a fade inward.
+function glowHTML(side, pieces, X, Y, px) {
+  const thick = 3, fade = 18;
+  let html = '';
+  for (const p of pieces) {
+    if (!alongX(side)) {
+      const edge = side === 'right' ? X(p.x + 1) - 4 : X(p.x);
+      const y = Y(p.y), h = Math.max(0, px(p.h) - 4);
+      const solid = side === 'right' ? edge - thick : edge, fadeX = side === 'right' ? edge - thick - fade : edge + thick;
+      html += `<div class="glow" style="left:${solid}px;top:${y}px;width:${thick}px;height:${h}px;background:#FF5A1F"></div>
+               <div class="glow" style="left:${fadeX}px;top:${y}px;width:${fade}px;height:${h}px;background:linear-gradient(${side === 'right' ? 'to left' : 'to right'}, rgba(255,90,31,0.35), rgba(255,90,31,0))"></div>`;
+    } else {
+      const edge = side === 'bottom' ? Y(p.y + 1) - 4 : Y(p.y);
+      const x = X(p.x), w = Math.max(0, px(p.w) - 4);
+      const solid = side === 'bottom' ? edge - thick : edge, fadeY = side === 'bottom' ? edge - thick - fade : edge + thick;
+      html += `<div class="glow" style="left:${x}px;top:${solid}px;width:${w}px;height:${thick}px;background:#FF5A1F"></div>
+               <div class="glow" style="left:${x}px;top:${fadeY}px;width:${w}px;height:${fade}px;background:linear-gradient(${side === 'bottom' ? 'to top' : 'to bottom'}, rgba(255,90,31,0.35), rgba(255,90,31,0))"></div>`;
+    }
+  }
+  return `<div class="glowset" data-glow>${html}</div>`;
+}
+
+// ---------------- stream page ----------------
+function renderStream() {
+  const s = STATES[app.state], el = document.getElementById('page-stream');
+  el.classList.toggle('grid-bg', !s.stream);
+  if (!s.stream) {
+    const side = savedSide();
+    const m = mapHTML(fitFor(380, 300, 24, side), { side, glow: app.state === 'linked', peerState: app.state });
+    el.innerHTML = `<div class="hero">
+      <div>
+        <span class="lbl">SARKE · HOST · ${THIS.name}</span>
+        <div class="disp"><span class="w" data-word>${s.title}</span><span class="caret"></span></div>
+        <div class="details">${s.details.map(d => `<div>${d}</div>`).join('')}
+          ${s.hint ? '<div style="margin-top:12px">send a window from either pc: <kbd>Ctrl+Alt+Shift+W</kbd></div>' : ''}</div>
+        <div class="actions"><button class="btn secondary" data-goto="displays">ARRANGE DISPLAYS</button></div>
+      </div>
+      <div class="map" style="width:380px;height:300px" data-hero-map>${m}</div>
+    </div>
+    <div class="foot lbl">${THIS.name} · ${THIS.ip} · 1920×1080 · 100% · protocol v2</div>`;
+    el.querySelectorAll('[data-goto]').forEach(b => b.addEventListener('click', () => go(b.dataset.goto)));
+    return;
+  }
+  el.innerHTML = `<div class="cmdbar">
+      <span class="lbl">FROM ${PEER.name.toUpperCase()}</span>
+      <span class="title">untitled.png — Sketchpad</span>
+      <span class="spacer"></span>
+      <button class="cmd ${app.fit ? '' : 'on'}" data-cmd="fit">${app.fit ? 'FIT' : '1:1'}</button>
+      <button class="cmd ${app.hud ? 'on' : ''}" data-cmd="hud" aria-pressed="${app.hud}">HUD</button>
+      <button class="cmd" data-cmd="back"><svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true"><path d="M5 2 L1.5 5.5 L5 9 M1.5 5.5 H9 Q11 5.5 11 8 V10" stroke="currentColor" stroke-width="1.2"/></svg>GIVE BACK</button>
+    </div>
+    <div class="picture-area" id="picArea"></div>`;
+  el.querySelectorAll('[data-cmd]').forEach(b => b.addEventListener('click', () => {
+    const c = b.dataset.cmd;
+    if (c === 'back') { setState('linked'); return; }  // sends stream_stop; the window goes back
+    if (c === 'fit') app.fit = !app.fit;
+    if (c === 'hud') setHud(!app.hud);
+    renderStream();
+  }));
+  drawPicture(false);
+}
+
+function pictureRect(cw, ch) {
+  if (!app.fit) return { x: Math.floor((cw - 1600) / 2), y: Math.floor((ch - 900) / 2), w: 1600, h: 900 };
+  let w = cw, h = Math.floor(cw * 900 / 1600);
+  if (h > ch) { h = ch; w = Math.floor(ch * 1600 / 900); }
+  return { x: Math.floor((cw - w) / 2), y: Math.floor((ch - h) / 2), w, h };
+}
+
+function drawPicture(reveal) {
+  const s = STATES[app.state], area = document.getElementById('picArea');
+  if (!area) return;
+  const cw = area.clientWidth, ch = area.clientHeight;
+  const r = pictureRect(cw, ch);
+  let html = `<div class="pic" data-pic style="left:${r.x}px;top:${r.y}px;width:${r.w}px;height:${r.h}px">${SHARED}</div>`;
+  if (s.stalled) html += `<div class="stall"><span class="w">STALLED</span><span class="body" id="stallT">${stallText()}</span></div>`;
+  if (app.hud) {
+    const rows = [['RTT', '14', 'ms'], s.stalled ? ['FPS', '0', '', COLORS.err] : ['FPS', '30'], ['LAT', '38', 'ms'],
+                  ['MBPS', s.stalled ? '0.0' : '12.4'], ['RES', '1600×900'], ['Q', '75'], ['DROP', '0']];
+    html += `<div class="hud" data-hud><div class="hdr"><span class="lbl">SARKE · HUD</span><span class="sq" style="background:${s.sq}"></span></div>
+      ${rows.map(([l, v, u, c]) => `<div class="r"><span class="lbl">${l}</span><span class="readout" style="${c ? 'color:' + c : ''}">${v}${u ? `<span class="u">${u}</span>` : ''}</span></div>`).join('')}</div>`;
+  }
+  if (reveal && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    // "Mirror" reveal of a new stream: 8 bands uncover the picture top to bottom, one every 30 ms.
+    for (let i = 0; i < 8; i++) {
+      const top = Math.floor(i * ch / 8), bottom = Math.floor((i + 1) * ch / 8);
+      html += `<div class="band grid-bg" data-band="${i}" style="top:${top}px;height:${bottom - top}px"></div>`;
+    }
+  }
+  area.innerHTML = html;
+  if (reveal) for (let i = 0; i < 8; i++) setTimeout(() => area.querySelector(`[data-band="${i}"]`)?.remove(), 30 * (i + 1));
+}
+function stallText() { return Math.max(0, (performance.now() - app.stalledAt) / 1000).toFixed(1) + 's without frames'; }
+setInterval(() => { const t = document.getElementById('stallT'); if (t) t.textContent = stallText(); }, 100);
+
+// ---------------- displays page ----------------
+let drag = null;
+function renderDisplays() {
+  const map = document.getElementById('arrMap');
+  const f = fitFor(map.clientWidth, map.clientHeight, 40, app.arr);
+  const ms = hostMonitors(), H = bbox(ms);
+  map.innerHTML = mapHTML(f, { side: app.arr, glow: true, peerState: 'linked', draggable: true }) +
+    `<div class="live"><span class="sq ${app.detected ? '' : 'sample'}"></span><span class="lbl">${app.detected ? 'LIVE' : 'SAMPLE'} · ${ms.length} MONITOR${ms.length === 1 ? '' : 'S'} · ${H.w}×${H.h}</span></div>`;
+  map.dataset.scale = f.scale; map.dataset.ox = f.ox; map.dataset.oy = f.oy;
+  const peerEl = map.querySelector('[data-peer]');
+  peerEl.style.cursor = 'grab';
+  peerEl.addEventListener('pointerdown', startDrag);
+  peerEl.addEventListener('keydown', onPeerKey);
+  renderPanel(app.arr);
+  document.getElementById('monSource').textContent = app.detected ? app.detectNote : 'SAMPLE';
+  document.getElementById('monRows').innerHTML = ms.map(mn => `<div class="monrow"><span class="n">${mn.n}</span>
+      <div><div class="readout">${mn.label || (mn.primary ? 'Main display' : 'Display ' + mn.n)}</div><div class="lbl">${mn.w}×${mn.h} · ${mn.scale}% · at ${mn.x}, ${mn.y}</div></div>
+      ${mn.primary ? '<span class="tag">MAIN</span>' : '<span></span>'}</div>`).join('');
+}
+// Side buttons, readouts and the status line for `side` (the arrangement, or where a drag would drop).
+function renderPanel(side) {
+  document.querySelectorAll('#sideSeg button').forEach(b => {
+    b.setAttribute('aria-pressed', String(b.dataset.side === side));
+    b.disabled = !accepted(b.dataset.side);
+  });
+  document.getElementById('sideNote').hidden = VERTICAL_SIDES_ACCEPTED;
+  document.querySelectorAll('#roleSeg button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.role === app.role)));
+  document.getElementById('rdEdge').textContent = side.toUpperCase() + ' EDGE';
+  document.getElementById('rdLen').textContent = edgeLength(side) + ' PX';
+  document.getElementById('rdSide').textContent = '"' + clientSideFor(side) + '"';
+  const dirty = app.arr !== savedSide(), unsaved = dirty || side !== savedSide();
+  const st = document.getElementById('rdState');
+  st.textContent = unsaved ? 'NOT SAVED' : 'SAVED';
+  st.style.color = unsaved ? COLORS.warn : app.justSaved ? COLORS.ok : '';
+  document.getElementById('applyBtn').disabled = !dirty;
+  document.getElementById('revertBtn').disabled = !dirty;
+  const msg = document.getElementById('dispMsg'), here = opposite(app.arr);
+  if (dirty) {
+    msg.textContent = `Not saved yet. Apply writes client_side "${clientSideFor(app.arr)}" to config.json, then restart Sarke.`;
+    msg.style.color = COLORS.warn;
+  } else if (app.justSaved) {
+    msg.textContent = `Saved. Restart Sarke on this PC - and on ${PEER.name} this PC must be on the ${here}.`;
+    msg.style.color = COLORS.ok;
+  } else {
+    msg.textContent = `Each PC keeps its own setting: on ${PEER.name}, this PC must be on the ${here}.`;
+    msg.style.color = '';
+  }
+}
+function setSide(side) {
+  if (!accepted(side)) return;
+  app.arr = side;
+  app.justSaved = false;
+  renderDisplays();
+}
+function onPeerKey(e) {
+  const keys = { ArrowLeft: 'left', ArrowRight: 'right', ArrowUp: 'top', ArrowDown: 'bottom' };
+  if (!keys[e.key]) return;
+  e.preventDefault();
+  setSide(keys[e.key]);
+  document.querySelector('#arrMap [data-peer]').focus();
+}
+function startDrag(e) {
+  if (e.button !== 0) return;
+  e.preventDefault();  // no text selection / native drag that would cancel this pointer drag
+  const map = document.getElementById('arrMap'), el = e.currentTarget;
+  el.setPointerCapture(e.pointerId);
+  el.classList.add('dragging');
+  const k = map.getBoundingClientRect().width / map.offsetWidth;  // the app may be scaled to fit the page
+  const r = el.getBoundingClientRect();
+  // Where the other PC can go, shown while dragging; the one it would drop on lights up.
+  const f = { scale: +map.dataset.scale, ox: +map.dataset.ox, oy: +map.dataset.oy };
+  const zones = SIDES.filter(accepted).map(s => {
+    const P = peerRect(s), px = v => Math.round(v * f.scale);
+    return `<div class="zone" data-zone="${s}" style="left:${f.ox + px(P.x)}px;top:${f.oy + px(P.y)}px;width:${px(P.w) - 4}px;height:${px(P.h) - 4}px"></div>`;
+  }).join('');
+  map.insertAdjacentHTML('afterbegin', zones);
+  drag = { el, map, k, f, dx: (e.clientX - r.left) / k, dy: (e.clientY - r.top) / k, moved: false, side: app.arr, glowSide: app.arr };
+  el.addEventListener('pointermove', onDrag);
+  el.addEventListener('pointerup', endDrag);
+  el.addEventListener('pointercancel', cancelDrag);
+}
+function onDrag(e) {
+  const mr = drag.map.getBoundingClientRect();
+  const w = drag.el.offsetWidth, h = drag.el.offsetHeight, mw = drag.map.offsetWidth, mh = drag.map.offsetHeight;
+  // Follows the pointer; its centre stays on the map.
+  const left = Math.max(-w / 2, Math.min(mw - w / 2, (e.clientX - mr.left) / drag.k - drag.dx));
+  const top = Math.max(-h / 2, Math.min(mh - h / 2, (e.clientY - mr.top) / drag.k - drag.dy));
+  drag.el.style.left = left + 'px';
+  drag.el.style.top = top + 'px';
+  drag.moved = true;
+  const cx = (left + w / 2 - drag.f.ox) / drag.f.scale, cy = (top + h / 2 - drag.f.oy) / drag.f.scale;
+  drag.side = nearestSide(bbox(hostMonitors()), cx, cy, VERTICAL_SIDES_ACCEPTED);
+  drag.map.querySelectorAll('[data-zone]').forEach(z => z.classList.toggle('hot', z.dataset.zone === drag.side));
+  if (drag.glowSide !== drag.side) {
+    const px = v => Math.round(v * drag.f.scale);
+    drag.map.querySelector('[data-glow]').outerHTML =
+      glowHTML(drag.side, edgePieces(hostMonitors(), drag.side), v => drag.f.ox + px(v), v => drag.f.oy + px(v), px);
+    drag.glowSide = drag.side;
+  }
+  renderPanel(drag.side);
+}
+function stopDrag() {
+  drag.el.removeEventListener('pointermove', onDrag);
+  drag.el.removeEventListener('pointerup', endDrag);
+  drag.el.removeEventListener('pointercancel', cancelDrag);
+  const d = drag; drag = null; return d;
+}
+function cancelDrag() { stopDrag(); renderDisplays(); }
+function endDrag() {
+  const d = stopDrag();
+  if (d.moved) setSide(d.side); else renderDisplays();
+}
+document.getElementById('sideSeg').addEventListener('click', e => { const b = e.target.closest('button'); if (b && !b.disabled) setSide(b.dataset.side); });
+document.getElementById('roleSeg').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b || b.dataset.role === app.role) return;
+  app.role = b.dataset.role;  // config.json now means the other thing here: show that, drop unsaved edits
+  app.arr = savedSide(); app.justSaved = false;
+  renderDisplays();
+});
+document.getElementById('applyBtn').addEventListener('click', () => { app.cfg = clientSideFor(app.arr); app.justSaved = true; renderDisplays(); });
+document.getElementById('revertBtn').addEventListener('click', () => { app.arr = savedSide(); app.justSaved = false; renderDisplays(); });
+
+// This PC's real screens. Chromium's Window Management API gives all of them (after the browser
+// asks "manage windows on all your displays"), and screenschange keeps the map live; without it,
+// window.screen gives the one this page is on.
+async function detectScreens() {
+  const toMonitors = list => {
+    const primary = list.find(s => s.isPrimary) || list[0], k = primary.devicePixelRatio || 1;
+    const ms = list.map(s => ({ x: Math.round((s.left - primary.left) * k), y: Math.round((s.top - primary.top) * k),
+                                w: Math.round(s.width * (s.devicePixelRatio || 1)), h: Math.round(s.height * (s.devicePixelRatio || 1)),
+                                scale: Math.round((s.devicePixelRatio || 1) * 100), primary: s === primary, label: s.label || '' }));
+    ms.sort((a, b) => (b.primary - a.primary) || (a.x - b.x) || (a.y - b.y));
+    ms.forEach((m, i) => { m.n = i + 1; });
+    return ms;
+  };
+  try {
+    if (!('getScreenDetails' in window)) throw new Error('no Window Management API');
+    const details = await window.getScreenDetails();
+    app.detected = toMonitors(details.screens);
+    app.detectNote = 'DETECTED · ' + app.detected.length;
+    details.addEventListener('screenschange', () => {
+      app.detected = toMonitors(details.screens);
+      app.detectNote = 'DETECTED · ' + app.detected.length;
+      if (app.page === 'displays' || app.page === 'stream') renderPage();
+    });
+  } catch (err) {
+    const sc = window.screen;
+    app.detected = toMonitors([{ left: 0, top: 0, width: sc.width, height: sc.height, devicePixelRatio: window.devicePixelRatio, isPrimary: true, label: '' }]);
+    app.detectNote = sc.isExtended ? 'DETECTED · 1 OF MORE (ALLOW WINDOW MANAGEMENT)' : 'DETECTED · 1';
+  }
+  app.arr = savedSide(); app.justSaved = false;
+  renderPage();
+}
+document.getElementById('detectBtn').addEventListener('click', detectScreens);
+// Identify: each monitor's number, big, for 2.5 s (the app shows it on the real screens).
+let identTimer = 0;
+document.getElementById('identifyBtn').addEventListener('click', () => {
+  const map = document.getElementById('arrMap');
+  map.querySelectorAll('.ident').forEach(x => x.remove());
+  map.querySelectorAll('[data-mon]').forEach(m => {
+    const d = document.createElement('div');
+    d.className = 'ident'; d.style.cssText = m.style.cssText; d.textContent = m.dataset.mon;
+    map.appendChild(d);
+  });
+  clearTimeout(identTimer);
+  identTimer = setTimeout(() => map.querySelectorAll('.ident').forEach(x => x.remove()), 2500);
+});
+
+// ---------------- settings page ----------------
+function setHud(on) {
+  app.hud = on;
+  document.getElementById('setHud').setAttribute('aria-checked', String(on));
+}
+document.querySelectorAll('.switch').forEach(sw => sw.addEventListener('click', () => {
+  const on = sw.getAttribute('aria-checked') !== 'true';
+  sw.setAttribute('aria-checked', String(on));
+  if (sw.id === 'setHud') app.hud = on;
+  if (sw.id === 'setNotifyUp') app.notifyUp = on;
+  if (sw.id === 'setNotifyLost') app.notifyLost = on;
+}));
+document.getElementById('qRange').addEventListener('input', e => { app.quality = +e.target.value; document.getElementById('qVal').textContent = e.target.value; });
+document.getElementById('fpsSeg').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  app.fps = +b.dataset.fps;
+  document.querySelectorAll('#fpsSeg button').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+});
+document.querySelectorAll('#page-settings [data-goto]').forEach(b => b.addEventListener('click', () => go(b.dataset.goto)));
+
+// ---------------- shell ----------------
+function renderChrome() {
+  const s = STATES[app.state];
+  for (const id of ['tbSq', 'peerSq']) {
+    const sq = document.getElementById(id);
+    sq.style.background = s.sq;
+    sq.classList.toggle('blinking', !!s.blink);
+  }
+  document.getElementById('tbText').textContent = s.status;
+  document.querySelectorAll('.nav .item').forEach(i => {
+    if (i.dataset.page === app.page) i.setAttribute('aria-current', 'page'); else i.removeAttribute('aria-current');
+  });
+  for (const p of ['stream', 'displays', 'settings']) document.getElementById('page-' + p).hidden = p !== app.page;
+  document.querySelectorAll('#protoStates button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.st === app.state)));
+}
+function renderPage() {
+  if (app.page === 'stream') renderStream();
+  if (app.page === 'displays') renderDisplays();
+}
+function go(page) { app.page = page; renderChrome(); renderPage(); }
+const linkUp = k => ['linked', 'stream', 'stalled'].includes(k);
+function setState(k) {
+  const before = app.state;
+  if (k === before) return;
+  app.state = k;
+  if (linkUp(k) && !linkUp(before) && app.notifyUp)
+    toast('connected', 'Connected to ' + PEER.name, `${PEER.ip} · ${PEER.w}×${PEER.h} · ${PEER.scale}%`);
+  if (k === 'lost' && app.notifyLost) toast('lost', 'Connection lost', 'reconnecting to ' + PEER.ip);
+  if (k === 'stalled') app.stalledAt = performance.now() - 1200;
+  renderChrome();
+  if (app.page === 'stream') {
+    renderStream();
+    if (k === 'stream' && !STATES[before].stream) drawPicture(true);  // a new stream starts
+  }
+}
+document.getElementById('protoStates').innerHTML = ORDER.map(k => `<button data-st="${k}" aria-pressed="false">${STATES[k].word}</button>`).join('');
+document.getElementById('protoStates').addEventListener('click', e => { const b = e.target.closest('button'); if (b) setState(b.dataset.st); });
+document.getElementById('protoMons').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  app.mons = +b.dataset.mons;
+  document.querySelectorAll('#protoMons button').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+  // Other monitors here: the saved side still holds (it is only a side); unsaved edits are dropped.
+  app.detected = null;
+  app.arr = savedSide(); app.justSaved = false;
+  renderPage();
+});
+document.querySelectorAll('.nav .item').forEach(i => i.addEventListener('click', () => go(i.dataset.page)));
+
+// Window buttons: minimize / close keep Sarke running in the tray; maximize fills the page.
+function setHidden(hidden) {
+  app.hidden = hidden;
+  document.getElementById('stage').hidden = hidden;
+  document.getElementById('trayNote').hidden = !hidden;
+  if (!hidden) { fit(); renderPage(); }
+}
+document.getElementById('capMin').addEventListener('click', () => setHidden(true));
+document.getElementById('capClose').addEventListener('click', () => setHidden(true));
+document.getElementById('reopen').addEventListener('click', () => setHidden(false));
+document.getElementById('capMax').addEventListener('click', () => {
+  app.maximized = !app.maximized;
+  const b = document.getElementById('capMax');
+  b.setAttribute('aria-label', app.maximized ? 'Restore' : 'Maximize');
+  b.innerHTML = app.maximized
+    ? '<svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M2.5 0.5 H9.5 V7.5" fill="none" stroke-width="1"/><rect x="0.5" y="2.5" width="7" height="7" fill="none" stroke-width="1"/></svg>'
+    : '<svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><rect x="0.5" y="0.5" width="9" height="9" fill="none" stroke-width="1"/></svg>';
+  fit(); renderPage();
+});
+
+// One card at a time, top-right, like the app (client_b/toast.cpp): a new one replaces the old.
+// 5 s, held while the pointer is on it; a click opens Sarke, × closes it.
+const TOAST_MS = 5000;
+const LOGO40 = LOGO.replace('width="16" height="16"', 'width="40" height="40"');
+function toast(kind, title, body) {
+  document.querySelectorAll('.toast').forEach(t => t.remove());
+  const t = document.createElement('div');
+  t.className = 'toast'; t.setAttribute('role', 'status'); t.dataset.kind = kind;
+  const sq = kind === 'connected' ? COLORS.ok : kind === 'lost' ? COLORS.err : COLORS.accent;
+  t.innerHTML = `<div class="logo">${LOGO40}</div>
+    <div class="txt"><div class="hd"><span class="sq" style="background:${sq}"></span><span class="lbl hi">SARKE</span><span class="lbl">· LINK</span></div>
+      <div class="t1">${title}</div><div class="t2">${body}</div></div>
+    <button class="x" aria-label="Close notification"><svg width="8" height="8" viewBox="0 0 8 8" aria-hidden="true"><path d="M0 0 L8 8 M8 0 L0 8" stroke-width="1"/></svg></button>
+    <div class="time" style="animation-duration:${TOAST_MS}ms"></div>`;
+  let left = TOAST_MS, since = performance.now(), timer = setTimeout(() => dismissToast(t), left);
+  t.addEventListener('mouseenter', () => { clearTimeout(timer); left -= performance.now() - since; });
+  t.addEventListener('mouseleave', () => { since = performance.now(); timer = setTimeout(() => dismissToast(t), Math.max(0, left)); });
+  t.addEventListener('click', e => {
+    clearTimeout(timer);
+    if (!e.target.closest('.x')) { if (app.hidden) setHidden(false); go('stream'); }
+    dismissToast(t);
+  });
+  document.body.appendChild(t);
+}
+function dismissToast(t) {
+  if (!t.isConnected || t.classList.contains('out')) return;
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) { t.remove(); return; }
+  t.classList.add('out');
+  t.addEventListener('animationend', () => t.remove(), { once: true });
+}
+
+// Normal size: 1200x760, scaled down if the page is narrower. Maximized: fills the page at 100 %.
+function fit() {
+  const stage = document.getElementById('stage'), sc = document.getElementById('scaler'), el = document.getElementById('app');
+  const availW = stage.clientWidth - 48;
+  if (app.maximized) {
+    const h = Math.max(600, window.innerHeight - stage.getBoundingClientRect().top - 32);
+    el.style.width = Math.max(960, availW) + 'px'; el.style.height = h + 'px';
+    sc.style.transform = ''; sc.style.height = h + 'px';
+    return;
+  }
+  el.style.width = '1200px'; el.style.height = '760px';
+  const s = Math.min(1, availW / 1200);
+  sc.style.transform = s < 1 ? `scale(${s})` : '';
+  sc.style.height = (760 * s) + 'px';
+}
+let resizeTimer = 0;
+window.addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(() => { fit(); renderPage(); }, 50); });
+
+// #<state>-<page>, e.g. #stream-stream, #linked-displays, opens straight there.
+const [hState, hPage] = location.hash.slice(1).split('-');
+if (STATES[hState]) app.state = hState;
+if (['stream', 'displays', 'settings'].includes(hPage)) app.page = hPage;
+if (app.state === 'stalled') app.stalledAt = performance.now() - 1200;
+fit(); renderChrome(); renderPage();
+</script>
+</body>
+</html>
