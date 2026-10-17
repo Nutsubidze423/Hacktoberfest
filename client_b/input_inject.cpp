@@ -32,14 +32,41 @@ bool InputInject::handle(const proto::Message& msg) {
         overloaded{
             [&](const proto::FocusEnter& m) { enter(m.y_norm); return true; },
             [&](const proto::FocusLeave&) {
-                if (active_) log::info("input inject: control -> A (taken back by A)");
+                if (active_) {
+                    log::info("input inject: control -> A (taken back by A)");
+                    log_received();
+                }
                 release_all();
                 return true;
             },
-            [&](const proto::MouseMove& m) { if (active_) move(m.dx, m.dy); return true; },
-            [&](const proto::MouseButtonEvent& m) { if (active_) button(m.button, m.down); return true; },
-            [&](const proto::MouseWheel& m) { if (active_) check(input::send_wheel(m.delta, m.horizontal)); return true; },
-            [&](const proto::Key& k) { if (active_) key(k); return true; },
+            [&](const proto::MouseMove& m) {
+                if (active_) {
+                    ++received_.moves;
+                    move(m.dx, m.dy);
+                }
+                return true;
+            },
+            [&](const proto::MouseButtonEvent& m) {
+                if (active_) {
+                    ++received_.buttons;
+                    button(m.button, m.down);
+                }
+                return true;
+            },
+            [&](const proto::MouseWheel& m) {
+                if (active_) {
+                    ++received_.wheels;
+                    check(input::send_wheel(m.delta, m.horizontal));
+                }
+                return true;
+            },
+            [&](const proto::Key& k) {
+                if (active_) {
+                    ++received_.keys;
+                    key(k);
+                }
+                return true;
+            },
             [](const auto&) { return false; },
         },
         msg);
@@ -57,6 +84,7 @@ void InputInject::enter(double y_norm) {
     edge_ = display::OuterEdge(display::monitors(), host_side_);
     const auto p = display::inward(edge_.point(y_norm), host_side_, kEnterInset);
     warned_blocked_ = false;
+    received_ = {};
     check(input::move_cursor_abs(p.x, p.y));
     active_ = true;
     log::info("input inject: control -> B, cursor at ({}, {})", p.x, p.y);
@@ -66,6 +94,12 @@ void InputInject::leave_to_host(double y_norm) {
     release_all();
     to_host_(proto::FocusLeave{.y_norm = y_norm});
     log::info("input inject: control -> A (edge at {:.3f})", y_norm);
+    log_received();
+}
+
+void InputInject::log_received() const {
+    log::info("input inject: received from A: {} moves, {} buttons, {} wheel, {} keys", received_.moves,
+              received_.buttons, received_.wheels, received_.keys);
 }
 
 bool InputInject::towards_host(int dx, int dy) const {

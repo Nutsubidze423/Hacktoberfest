@@ -25,6 +25,10 @@ constexpr UINT kMsgStop = WM_APP + 5;
 // next small movement does not bounce it straight back to B.
 constexpr int kReturnInset = 2;
 
+// Hook moves seen on B without any Raw Input motion before motion is taken
+// from the hook instead (devices whose movement never shows up in Raw Input).
+constexpr int kRawGrace = 12;
+
 constexpr wchar_t kWindowClass[] = L"KvmInputCapture";
 
 WPARAM pack(double y) {
@@ -49,9 +53,38 @@ struct CaptureThread {
     static inline unsigned buttons_down = 0;       // physical mouse buttons held (bit per button)
     static inline bool have_abs = false;           // absolute raw input (VMs, tablets, RDP)
     static inline input::Point last_abs;
+    // Per stay on B:
+    static inline input::Point exit_point;         // where the cursor left A
+    static inline int hook_moves = 0;
+    static inline int raw_moves = 0;
+    static inline bool hook_motion = false;        // motion from the hook (cursor parked) instead of Raw Input
+    static inline input::Point park;
 
     static void push(proto::Message msg, bool send = true, bool emergency = false) {
         cap->events_.push({std::move(msg), send, emergency});
+    }
+
+    static void note(const char* text) {
+        cap->events_.push({proto::MouseMove{}, false, false, text});
+    }
+
+    static input::Point cursor_pos() {
+        POINT pt{};
+        GetCursorPos(&pt);
+        return {pt.x, pt.y};
+    }
+
+    // Parks A's cursor in the middle of its monitor; from now on each hook move
+    // is measured from there (and swallowed, so the cursor stays put).
+    static void start_hook_motion() {
+        hook_motion = true;
+        MONITORINFO mi{};
+        mi.cbSize = sizeof(mi);
+        const POINT at{exit_point.x, exit_point.y};
+        GetMonitorInfoW(MonitorFromPoint(at, MONITOR_DEFAULTTONEAREST), &mi);
+        park = {(mi.rcMonitor.left + mi.rcMonitor.right) / 2, (mi.rcMonitor.top + mi.rcMonitor.bottom) / 2};
+        SetCursorPos(park.x, park.y);
+        if (cap->options_.raw_input) note("input capture: no Raw Input motion from this device, taking motion from the hook");
     }
 
     static void refresh_monitors() {
@@ -63,25 +96,28 @@ struct CaptureThread {
         return !injected || cap->options_.accept_injected;
     }
 
-    static void enter_remote(double y_norm) {
-        if (cap->remote_ || cap->disabled_ || !cap->has_client_) return;
+    // Returns true if control moved to B.
+    static bool enter_remote(double y_norm, input::Point at) {
+        if (cap->remote_ || cap->disabled_ || !cap->has_client_) return false;
         cap->remote_ = true;
         keys_pass_up = keys_down;
         have_abs = false;
+        exit_point = at;
+        hook_moves = raw_moves = 0;
+        hook_motion = false;
         push(proto::FocusEnter{.y_norm = y_norm});
+        if (!cap->options_.raw_input) start_hook_motion();
+        return true;
     }
 
-    // A takes control back on its own (switch_to_local, client gone, send failed).
+    // A takes control back on its own (switch_to_local, client gone, send failed):
+    // the cursor goes back to where it left, 2 px inside the edge.
     static void leave_remote(bool tell_b) {
         if (!cap->remote_) return;
         cap->remote_ = false;
-        POINT pt{};
-        GetCursorPos(&pt);
-        const auto on_edge = edge.position({pt.x, pt.y});
-        if (on_edge) {
-            const auto in = display::inward({pt.x, pt.y}, edge.side(), kReturnInset);
-            SetCursorPos(in.x, in.y);
-        }
+        const auto on_edge = edge.position(exit_point);
+        const auto back = on_edge ? display::inward(exit_point, edge.side(), kReturnInset) : exit_point;
+        SetCursorPos(back.x, back.y);
         push(proto::FocusLeave{.y_norm = on_edge.value_or(0.5)}, tell_b);
     }
 
@@ -95,6 +131,10 @@ struct CaptureThread {
     }
 
     static void emergency() {
+        if (cap->remote_) {
+            const auto back = edge.position(exit_point) ? display::inward(exit_point, edge.side(), kReturnInset) : exit_point;
+            SetCursorPos(back.x, back.y);
+        }
         cap->remote_ = false;
         cap->disabled_ = true;
         push(proto::FocusLeave{.y_norm = 0.5}, /*send=*/true, /*emergency=*/true);
@@ -138,14 +178,27 @@ struct CaptureThread {
         if (!cap->remote_) {
             // Never switch mid-drag: the button release would be lost on A.
             if (wp == WM_MOUSEMOVE && cap->options_.edge_switching && buttons_down == 0) {
-                if (const auto t = edge.position({m.pt.x, m.pt.y})) enter_remote(*t);
+                if (const auto t = edge.position({m.pt.x, m.pt.y})) {
+                    // With the cursor parked, this move must not land on the edge.
+                    if (enter_remote(*t, {m.pt.x, m.pt.y}) && hook_motion) return 1;
+                }
             }
             return CallNextHookEx(nullptr, code, wp, lp);
         }
 
         // Control is on B: swallow everything, forward what matters. Motion
-        // comes from Raw Input (the hook only sees the clipped cursor position).
-        if (button) {
+        // normally comes from Raw Input (the hook only sees the clipped cursor
+        // position at the edge); see start_hook_motion() for the fallback.
+        if (wp == WM_MOUSEMOVE) {
+            ++hook_moves;
+            if (hook_motion) {
+                const int dx = m.pt.x - park.x;
+                const int dy = m.pt.y - park.y;
+                if (dx != 0 || dy != 0) push(proto::MouseMove{.dx = dx, .dy = dy});
+            } else if (raw_moves == 0 && hook_moves >= kRawGrace) {
+                start_hook_motion();
+            }
+        } else if (button) {
             push(proto::MouseButtonEvent{.button = *button, .down = down});
         } else if (wp == WM_MOUSEWHEEL || wp == WM_MOUSEHWHEEL) {
             push(proto::MouseWheel{.delta = static_cast<short>(HIWORD(m.mouseData)), .horizontal = wp == WM_MOUSEHWHEEL});
@@ -187,10 +240,11 @@ struct CaptureThread {
         RAWINPUT raw{};
         UINT size = sizeof(raw);
         if (GetRawInputData(handle, RID_INPUT, &raw, &size, sizeof(RAWINPUTHEADER)) == static_cast<UINT>(-1)) return;
-        if (raw.header.dwType != RIM_TYPEMOUSE || !cap->remote_) return;
+        if (raw.header.dwType != RIM_TYPEMOUSE || !cap->remote_ || hook_motion) return;
         const RAWMOUSE& rm = raw.data.mouse;
-        // Injected input has no device handle.
-        if (!is_physical(rm.ulExtraInformation, raw.header.hDevice == nullptr)) return;
+        // Only our own injected moves are skipped. A null hDevice does NOT mean
+        // injected: precision touchpads deliver all their motion that way.
+        if (input::is_own_injection(rm.ulExtraInformation)) return;
 
         int dx = 0, dy = 0;
         if (rm.usFlags & MOUSE_MOVE_ABSOLUTE) {
@@ -209,7 +263,10 @@ struct CaptureThread {
             dx = rm.lLastX;
             dy = rm.lLastY;
         }
-        if (dx != 0 || dy != 0) push(proto::MouseMove{.dx = dx, .dy = dy});
+        if (dx != 0 || dy != 0) {
+            ++raw_moves;
+            push(proto::MouseMove{.dx = dx, .dy = dy});
+        }
     }
 
     static LRESULT CALLBACK wnd_proc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
@@ -220,7 +277,7 @@ struct CaptureThread {
             case WM_DISPLAYCHANGE:
                 refresh_monitors();
                 return 0;
-            case kMsgRemote: enter_remote(unpack(wp)); return 0;
+            case kMsgRemote: enter_remote(unpack(wp), cursor_pos()); return 0;
             case kMsgLocal: leave_remote(wp != 0); return 0;
             case kMsgReturned: returned(unpack(wp)); return 0;
             case kMsgUnhook: unhook(); return 0;
@@ -357,6 +414,9 @@ void InputCapture::hook_thread_main() {
 void InputCapture::worker_main() {
     std::vector<Event> batch;
     bool send_failed = false;  // warn once per stay on B
+    struct {
+        int moves = 0, buttons = 0, wheels = 0, keys = 0;
+    } sent;  // per stay on B, for the log
     while (auto first = events_.pop()) {
         batch.clear();
         batch.push_back(std::move(*first));
@@ -364,7 +424,7 @@ void InputCapture::worker_main() {
             // Merge consecutive mouse moves into one message.
             auto* prev = std::get_if<proto::MouseMove>(&batch.back().msg);
             const auto* next = std::get_if<proto::MouseMove>(&more->msg);
-            if (prev && next) {
+            if (prev && next && !batch.back().note && !more->note) {
                 prev->dx += next->dx;
                 prev->dy += next->dy;
             } else {
@@ -373,8 +433,13 @@ void InputCapture::worker_main() {
         }
 
         for (const Event& ev : batch) {
+            if (ev.note) {
+                log::info("{}", ev.note);
+                continue;
+            }
             if (const auto* enter = std::get_if<proto::FocusEnter>(&ev.msg)) {
                 send_failed = false;
+                sent = {};
                 log::info("input capture: control -> B (edge at {:.3f})", enter->y_norm);
             } else if (const auto* leave = std::get_if<proto::FocusLeave>(&ev.msg)) {
                 if (ev.emergency) {
@@ -382,10 +447,18 @@ void InputCapture::worker_main() {
                 } else {
                     log::info("input capture: control -> A (edge at {:.3f})", leave->y_norm);
                 }
+                log::info("input capture: sent to B: {} moves, {} buttons, {} wheel, {} keys", sent.moves, sent.buttons,
+                          sent.wheels, sent.keys);
             }
             if (!ev.send) continue;
             std::lock_guard lock(sink_mutex_);
-            if (sink_ && !sink_(ev.msg) && remote_ && !send_failed) {
+            if (!sink_) continue;
+            if (sink_(ev.msg)) {
+                if (std::holds_alternative<proto::MouseMove>(ev.msg)) ++sent.moves;
+                if (std::holds_alternative<proto::MouseButtonEvent>(ev.msg)) ++sent.buttons;
+                if (std::holds_alternative<proto::MouseWheel>(ev.msg)) ++sent.wheels;
+                if (std::holds_alternative<proto::Key>(ev.msg)) ++sent.keys;
+            } else if (remote_ && !send_failed) {
                 send_failed = true;
                 log::warn("input capture: send to B failed, control back on A");
                 post(kMsgLocal, 0);

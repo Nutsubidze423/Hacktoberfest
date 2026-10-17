@@ -53,12 +53,16 @@ private:
     void button(proto::MouseButton b, bool down);
     void key(const proto::Key& k);
     void check(bool ok);  // warns once when Windows rejects injected input
+    void log_received() const;
 
     display::Side host_side_;
     Sink to_host_;
     display::OuterEdge edge_;
     bool active_ = false;
     bool warned_blocked_ = false;
+    struct {
+        int moves = 0, buttons = 0, wheels = 0, keys = 0;
+    } received_;  // per stay on B, for the log
     std::set<proto::MouseButton> buttons_down_;
     std::set<std::tuple<std::uint16_t, std::uint16_t, bool>> keys_down_;  // vk, scan, extended
 };

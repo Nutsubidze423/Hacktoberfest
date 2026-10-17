@@ -7,7 +7,7 @@
 // B's opposite edge to return to A.
 //
 // Ctrl+Alt+Shift+Q returns control to A and removes the hooks (and ends the test).
-// Usage: kvm_local_test.exe [--side left|right] [--config <path>]
+// Usage: kvm_local_test.exe [--side left|right] [--config <path>] [--log <file>]
 
 #include <windows.h>
 
@@ -110,6 +110,8 @@ int wmain(int argc, wchar_t** argv) {
         const std::wstring_view arg = argv[i];
         if (arg == L"--config" && i + 1 < argc) {
             config_path = argv[++i];
+        } else if (arg == L"--log" && i + 1 < argc) {
+            kvm::log::open_file(argv[++i]);
         } else if (arg == L"--side" && i + 1 < argc) {
             side_arg.emplace();
             for (const wchar_t c : std::wstring_view(argv[++i])) side_arg->push_back(c < 0x80 ? static_cast<char>(c) : '?');

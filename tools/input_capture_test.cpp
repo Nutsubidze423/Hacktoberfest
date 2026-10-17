@@ -345,6 +345,46 @@ int main() {
     }
     check(true, "destructor stops a capture that is on B");
 
+    // -- touchpad regression: precision touchpads deliver Raw Input with a null
+    //    hDevice. SendInput motion looks the same in Raw Input, so with
+    //    accept_injected = false it must still be forwarded while on B.
+    {
+        InputCapture cap({.client_side = display::Side::Right});
+        check(cap.start(), "start with default options (accept_injected = false)");
+        cap.set_client(sink);
+        cap.switch_to_remote(0.5);
+        check(wait_until([&] { return cap.remote(); }), "on B");
+        take_sent();
+        rel_move(9, 4); rel_move(3, -1); settle();
+        int dx = 0, dy = 0;
+        for (const auto& m : only<proto::MouseMove>(take_sent())) dx += m.dx, dy += m.dy;
+        check(dx == 12 && dy == 3, "Raw Input with a null device (touchpad) is forwarded (dx " + std::to_string(dx) +
+                                       ", dy " + std::to_string(dy) + ")");
+    }
+
+    // -- no Raw Input motion: motion comes from the hook, cursor parked mid-monitor
+    {
+        InputCapture cap({.client_side = display::Side::Right, .accept_injected = true, .raw_input = false});
+        check(cap.start(), "start with raw_input = false");
+        cap.set_client(sink);
+        abs_move(inside); settle();
+        const auto exit_at = edge_at(0.4);
+        abs_move(exit_at);
+        check(wait_until([&] { return cap.remote(); }), "edge -> B");
+        const auto& r = mons.front().rect;
+        const display::Point park{(r.left + r.right) / 2, (r.top + r.bottom) / 2};
+        check(wait_until([&] { return cursor_at(park); }), "cursor parked mid-monitor (the edge move was swallowed)");
+        take_sent();
+        rel_move(10, 0); rel_move(10, 0); rel_move(0, -10); settle();
+        int dx = 0, dy = 0;
+        for (const auto& m : only<proto::MouseMove>(take_sent())) dx += m.dx, dy += m.dy;
+        check(dx > 0 && dy < 0, "hook motion forwarded (dx " + std::to_string(dx) + ", dy " + std::to_string(dy) + ")");
+        check(cursor_at(park), "cursor stays parked while on B");
+        cap.switch_to_local();
+        const auto back = display::inward(exit_at, display::Side::Right, 2);
+        check(wait_until([&] { return cursor_at(back); }), "A takes control back: cursor returns to where it left");
+    }
+
     SetCursorPos(orig.x, orig.y);
     PostThreadMessageW(obs_tid, WM_QUIT, 0, 0);
     observer.join();

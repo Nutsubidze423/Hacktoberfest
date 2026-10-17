@@ -37,6 +37,10 @@ struct CaptureOptions {
     // Test only: treat input injected by other programs as physical input.
     // Our own injected events (kvm::input::kInjectedMarker) are always ignored.
     bool accept_injected = false;
+    // Take motion from Raw Input (unaccelerated). If Raw Input delivers no motion
+    // while on B (or this is false), motion comes from the hook instead, with A's
+    // cursor parked in the middle of its monitor.
+    bool raw_input = true;
 };
 
 class InputCapture {
@@ -78,8 +82,9 @@ private:
 
     struct Event {
         proto::Message msg;
-        bool send = true;        // false = only logged (e.g. B's own focus_leave)
-        bool emergency = false;  // FocusLeave caused by Ctrl+Alt+Shift+Q
+        bool send = true;            // false = only logged (e.g. B's own focus_leave)
+        bool emergency = false;      // FocusLeave caused by Ctrl+Alt+Shift+Q
+        const char* note = nullptr;  // log line only, msg is ignored
     };
 
     void hook_thread_main();
