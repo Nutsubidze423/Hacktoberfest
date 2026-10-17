@@ -154,14 +154,18 @@ Claude წაიკითხავს ამ ფაილს, იპოვის
 - [ ] M1: რეალური ფანჯრის სტრიმი B-ზე (ლუკასთან და სანდროსთან ერთად)
 - [ ] ფაზა 2: (სურვ.) H.264 Media Foundation
 
-### სანდრო — Viewer B + უკუ-ინფუთი
-- [ ] `jpeg_decoder.*`: TurboJPEG → BGRA
-- [ ] `viewer_window.*`: Win32 + `StretchDIBits`, aspect ratio, FPS/latency overlay
-- [ ] `tools/fake_streamer.cpp`
-- [ ] `video_receiver.*`: ქსელი → decode → ჩვენება
-- [ ] viewer-ის ინფუთი → `remote_mouse_move`, `mouse_button`, `mouse_wheel`, `key`
-- [ ] M1: რეალური სტრიმი B-ზე
-- [ ] ფაზა 2: `host_a/remote_input.*` — client area-ზე გადათვლა, ფოკუსი, კლავიატურა
+### სანდრო — Viewer (ორივე მხარეს) + უკუ-ინფუთი
+დეტალები: `ARTEFACT/გადაწყვეტილებები 2 (ლუკა → თემო, სანდრო, დემეტრე).md` (S1–S3), პასუხი: `ARTEFACT/სანდრო — პასუხი და viewer-ის ჩართვა (სანდრო → თემო, ლუკა).md`.
+- [x] `jpeg_decoder.*`: TurboJPEG → BGRA (1080p decode ≈ 7 ms; ტესტი: `tools/viewer_test.cpp`)
+- [x] `viewer_window.*`: Direct2D (`docs/DESIGN.md` 4): aspect ratio, სათაურის ზოლი, მდგომარეობის ეკრანები, HUD (FPS/LAT/RTT/MBPS…)
+- [x] `tools/fake_streamer.cpp` (`VideoServer`-ით) + `viewer_test.exe --connect <host>`
+- [x] S1: `video_receiver.*` კითხულობს გარედან მიცემულ `FrameChannel&`-ს (არხს და reconnect-ს `main.cpp` ფლობს); LatestSlot, 1080p 30 fps / ~9 ms ლოკალურად; `kvm_host --no-kvm --test-video`-ის ფრეიმები მიიღო (codec `test` არ ჩანს, MBPS-ში ითვლება)
+- [x] S3: viewer-ის ინფუთი → `remote_mouse_move`, `mouse_button`, `mouse_wheel`, `key` (`viewer_input.*`, ორივე exe-ში; მხოლოდ გამოსახულებაზე, drag-ისას clamp, ფოკუსის დაკარგვისას ყველაფერი up, Alt+F4 ლოკალურია). viewer-ის დახურვა სტრიმისას → `stream_stop {hwnd}`. გაგზავნა: `set_message_sink` → `conn.send_json`
+- [x] S2: ბრენჩი `main`-ზე rebase და push (`sandro/viewer-design`)
+- [x] ლოგო (C „Caret“), tray icon, შეტყობინებები „Connected to host“ / „Connection lost“ (`docs/DESIGN.md` 9)
+- [ ] დიზაინის შემოწმება DPI 125 / 150 / 200%-ზე და ორ მონიტორს შორის (`docs/DESIGN.md` 7)
+- [ ] M1b (ლუკა): ფანჯარა A ⇄ B `main.cpp`-ში — viewer-ის მხარე მზადაა
+- [x] ~~ფაზა 2: `host_a/remote_input.*`~~ → თემოს გადაეცა (გადაწყვეტილებები 2, #3; T8 `5fc0ab5`)
 
 ## რისკები
 | რისკი | რა ვქნათ |
