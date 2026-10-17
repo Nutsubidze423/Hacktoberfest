@@ -122,7 +122,7 @@ Claude წაიკითხავს ამ ფაილს, იპოვის
 - [ ] M2: დემოს სცენარი, README
 
 ### დემეტრე — KVM ინფუთი
-- [ ] `win32_input.*` (SendInput wrappers) — **სანდროს სჭირდება, პირველ რიგში**
+- [x] `win32_input.*` (SendInput wrappers) — **სანდროს სჭირდება, პირველ რიგში**
 - [ ] `dpi.*`: DPI awareness, მონიტორები, ვირტუალური დესკტოპის კიდეები
 - [ ] `input_capture.*`: hooks thread + `Ctrl+Alt+Shift+Q`
 - [ ] edge detection + suppress + Raw Input deltas; `--local-test` რეჟიმი
