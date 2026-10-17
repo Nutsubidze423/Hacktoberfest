@@ -10,10 +10,11 @@
 
 namespace kvm {
 
-JpegEncoder::JpegEncoder(int quality) : handle_(tj3Init(TJINIT_COMPRESS)), quality_(std::clamp(quality, 1, 100)) {
+JpegEncoder::JpegEncoder(int quality, bool full_chroma)
+    : handle_(tj3Init(TJINIT_COMPRESS)), quality_(std::clamp(quality, 1, 100)), subsamp_(full_chroma ? TJSAMP_444 : TJSAMP_420) {
     if (!handle_) throw std::runtime_error("jpeg: tj3Init failed");
     tj3Set(handle_, TJPARAM_QUALITY, quality_);
-    tj3Set(handle_, TJPARAM_SUBSAMP, TJSAMP_420);
+    tj3Set(handle_, TJPARAM_SUBSAMP, subsamp_);
     tj3Set(handle_, TJPARAM_FASTDCT, 1);    // faster; the difference is invisible at quality 70+
     tj3Set(handle_, TJPARAM_NOREALLOC, 1);  // encode straight into the caller's buffer
 }
@@ -42,7 +43,7 @@ bool JpegEncoder::encode(const std::uint8_t* first, int width, int height, int s
 
     const auto start = std::chrono::steady_clock::now();
     // Worst-case JPEG size, so TurboJPEG never needs to reallocate.
-    out.resize(tj3JPEGBufSize(width, height, TJSAMP_420));
+    out.resize(tj3JPEGBufSize(width, height, subsamp_));
     unsigned char* dst = out.data();
     size_t size = out.size();
     if (tj3Compress8(handle_, first, width, stride, height, TJPF_BGRX, &dst, &size) != 0) {

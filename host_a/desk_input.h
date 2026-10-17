@@ -19,7 +19,7 @@ namespace kvm {
 
 class DeskInput {
 public:
-    explicit DeskInput(const desk::Region& region) : region_(region) {}
+    explicit DeskInput(desk::Region& region) : region_(region) {}
     ~DeskInput() { release_all(); }
 
     DeskInput(const DeskInput&) = delete;
@@ -32,7 +32,7 @@ public:
 private:
     bool move_to(double x_norm, double y_norm);
 
-    const desk::Region& region_;
+    desk::Region& region_;
     std::set<proto::MouseButton> buttons_;
     std::set<std::tuple<std::uint16_t, std::uint16_t, bool>> keys_;  // vk, scan, extended
 };

@@ -16,7 +16,8 @@ namespace kvm {
 class JpegEncoder {
 public:
     // quality 1..100 (config.json jpeg_quality). Throws std::runtime_error if TurboJPEG can't start.
-    explicit JpegEncoder(int quality = 75);
+    // full_chroma: 4:4:4 instead of 4:2:0 - sharper coloured text and edges, ~30 % bigger.
+    explicit JpegEncoder(int quality = 75, bool full_chroma = false);
     ~JpegEncoder();
     JpegEncoder(const JpegEncoder&) = delete;
     JpegEncoder& operator=(const JpegEncoder&) = delete;
@@ -36,6 +37,7 @@ public:
 private:
     void* handle_ = nullptr;  // tjhandle; keeps turbojpeg.h out of this header
     int quality_;
+    int subsamp_;  // TJSAMP_*
     double last_ms_ = 0.0;
 };
 

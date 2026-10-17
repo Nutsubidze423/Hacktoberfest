@@ -3,10 +3,14 @@
 #include <windowsx.h>
 
 #include <algorithm>
+#include <cstdio>
 #include <cstring>
+#include <set>
+#include <span>
 #include <string>
 #include <utility>
 
+#include "jpeg_decoder.h"
 #include "kvm/log.h"
 #include "kvm/win32_input.h"
 
@@ -15,30 +19,26 @@ namespace kvm {
 namespace {
 
 constexpr wchar_t kClassName[] = L"KvmDeskView";
-constexpr UINT kMsgFrame = WM_APP + 1;
-constexpr UINT kMsgClear = WM_APP + 2;
+constexpr UINT kMsgUpdate = WM_APP + 1;
+constexpr UINT kMsgSave = WM_APP + 2;  // wparam = const std::wstring* path; returns 1 on success
 
 bool injected_by_us() {
     return input::is_own_injection(static_cast<std::uintptr_t>(GetMessageExtraInfo()));
 }
 
 RECT primary_rect() {
-    const POINT origin{0, 0};
     MONITORINFO mi{sizeof(mi)};
-    GetMonitorInfoW(MonitorFromPoint(origin, MONITOR_DEFAULTTOPRIMARY), &mi);
+    GetMonitorInfoW(MonitorFromPoint({0, 0}, MONITOR_DEFAULTTOPRIMARY), &mi);
     return mi.rcMonitor;
 }
 
-RECT bounds(const std::vector<RECT>& rects) {
-    RECT b{};
-    for (const auto& r : rects) {
-        if (IsRectEmpty(&b)) {
-            b = r;
-        } else {
-            UnionRect(&b, &b, &r);
-        }
+void unite(RECT& into, const RECT& r) {
+    if (IsRectEmpty(&r)) return;
+    if (IsRectEmpty(&into)) {
+        into = r;
+    } else {
+        UnionRect(&into, &into, &r);
     }
-    return b;
 }
 
 LPCWSTR cursor_id(std::string_view shape) {
@@ -54,6 +54,39 @@ LPCWSTR cursor_id(std::string_view shape) {
     if (shape == "sizeall") return IDC_SIZEALL;
     if (shape == "no") return IDC_NO;
     return IDC_ARROW;
+}
+
+// Applies the run-length alpha (see proto::FrameHeader) to a decoded picture. False if the runs
+// don't fit the picture (then it stays opaque).
+bool apply_alpha(std::span<const std::uint8_t> runs, int width, int height, std::vector<std::uint8_t>& px,
+                 std::vector<std::uint8_t>& opaque_rows) {
+    size_t i = 0;
+    for (int y = 0; y < height; ++y) {
+        std::uint8_t* row = px.data() + static_cast<size_t>(y) * width * 4;
+        int x = 0;
+        bool opaque = true;
+        while (x < width) {
+            if (i + 3 > runs.size()) return false;
+            const std::uint8_t a = runs[i];
+            const int n = runs[i + 1] | (runs[i + 2] << 8);
+            i += 3;
+            if (n <= 0 || x + n > width) return false;
+            if (a != 255) {
+                opaque = false;
+                for (int k = x; k < x + n; ++k) {
+                    std::uint8_t* p = row + static_cast<size_t>(k) * 4;
+                    // Premultiplied: no colour above its alpha (JPEG noise could make one glow).
+                    p[0] = std::min(p[0], a);
+                    p[1] = std::min(p[1], a);
+                    p[2] = std::min(p[2], a);
+                    p[3] = a;
+                }
+            }
+            x += n;
+        }
+        opaque_rows[static_cast<size_t>(y)] = opaque ? 1 : 0;
+    }
+    return true;
 }
 
 }  // namespace
@@ -72,22 +105,50 @@ DeskView::DeskView() {
     auto started = ready.get_future();
     ui_thread_ = std::thread([this, &ready] { ui_main(&ready); });
     started.wait();
-    decode_thread_ = std::jthread([this] { decode_main(); });
+    decode_thread_ = std::jthread([this](std::stop_token stop) { decode_main(stop); });
 }
 
 DeskView::~DeskView() {
-    incoming_.close();
+    decode_thread_.request_stop();
+    incoming_cv_.notify_all();
     if (decode_thread_.joinable()) decode_thread_.join();
     if (const DWORD id = ui_thread_id_) PostThreadMessageW(id, WM_QUIT, 0, 0);
     if (ui_thread_.joinable()) ui_thread_.join();
 }
 
 void DeskView::present(net::Frame&& frame) {
-    incoming_.put(std::move(frame));
+    {
+        std::lock_guard lock(incoming_mutex_);
+        incoming_[frame.header.window] = std::move(frame);
+    }
+    incoming_cv_.notify_one();
+}
+
+void DeskView::set_layout(proto::DeskLayout layout) {
+    {
+        std::lock_guard lock(pending_mutex_);
+        pending_layout_ = std::move(layout);
+    }
+    if (const HWND h = hwnd_) PostMessageW(h, kMsgUpdate, 0, 0);
 }
 
 void DeskView::clear() {
-    if (const HWND h = hwnd_) PostMessageW(h, kMsgClear, 0, 0);
+    {
+        std::lock_guard lock(incoming_mutex_);
+        incoming_.clear();
+    }
+    {
+        std::lock_guard lock(pending_mutex_);
+        pending_layout_.reset();
+        pending_pictures_.clear();
+        pending_clear_ = true;
+    }
+    if (const HWND h = hwnd_) PostMessageW(h, kMsgUpdate, 0, 0);
+}
+
+bool DeskView::save_surface(const std::wstring& path) {
+    const HWND h = hwnd_;
+    return h && SendMessageW(h, kMsgSave, reinterpret_cast<WPARAM>(&path), 0) == 1;
 }
 
 void DeskView::set_input_sink(Sink sink) {
@@ -99,23 +160,39 @@ void DeskView::set_cursor_shape(std::string_view shape) {
     cursor_ = LoadCursorW(nullptr, cursor_id(shape));
 }
 
-void DeskView::decode_main() {
+void DeskView::decode_main(std::stop_token stop) {
     JpegDecoder decoder;
-    while (auto frame = incoming_.take()) {
-        Pending next{.header = std::move(frame->header)};
-        if (next.header.codec == "jpeg" && !next.header.rects.empty()) {
-            if (!decoder.decode(frame->payload, next.image)) {
-                log::warn("desk: frame {} dropped: {}", next.header.seq, decoder.last_error());
+    BgraImage image;
+    while (!stop.stop_requested()) {
+        std::map<std::uint64_t, net::Frame> frames;
+        {
+            std::unique_lock lock(incoming_mutex_);
+            incoming_cv_.wait(lock, [&] { return stop.stop_requested() || !incoming_.empty(); });
+            frames.swap(incoming_);
+        }
+        for (auto& [id, frame] : frames) {
+            const auto& h = frame.header;
+            if (h.codec != "jpeg" || h.alpha_bytes > frame.payload.size()) continue;
+            const size_t jpeg_size = frame.payload.size() - h.alpha_bytes;
+            if (!decoder.decode(std::span(frame.payload.data(), jpeg_size), image)) {
+                log::warn("desk: picture {} dropped: {}", h.seq, decoder.last_error());
                 continue;
             }
-        } else {
-            next.header.rects.clear();  // codec "none": nothing to draw
+            Picture pic{.width = image.width, .height = image.height, .x = h.x, .y = h.y};
+            pic.pixels = std::move(image.pixels);
+            pic.opaque_rows.assign(static_cast<size_t>(pic.height), 1);
+            if (h.alpha_bytes > 0 &&
+                !apply_alpha(std::span(frame.payload.data() + jpeg_size, h.alpha_bytes), pic.width, pic.height,
+                             pic.pixels, pic.opaque_rows)) {
+                log::warn("desk: picture {}: bad transparency, shown opaque", h.seq);
+            }
+            image = {};  // the pixels moved out
+            {
+                std::lock_guard lock(pending_mutex_);
+                pending_pictures_[id] = std::move(pic);
+            }
         }
-        {
-            std::lock_guard lock(pending_mutex_);
-            pending_ = std::move(next);
-        }
-        if (const HWND h = hwnd_) PostMessageW(h, kMsgFrame, 0, 0);
+        if (const HWND h = hwnd_) PostMessageW(h, kMsgUpdate, 0, 0);
     }
 }
 
@@ -169,7 +246,7 @@ bool DeskView::make_surface() {
     old_bitmap_ = SelectObject(mem_dc_, bitmap_);
     bits_ = static_cast<std::uint8_t*>(bits);
     std::memset(bits_, 0, static_cast<size_t>(w) * h * 4);  // fully transparent
-    drawn_.clear();
+    placed_.clear();
     first_update_ = true;
     return true;
 }
@@ -184,55 +261,91 @@ void DeskView::free_surface() {
     bits_ = nullptr;
 }
 
-void DeskView::show_pending() {
-    std::optional<Pending> next;
+void DeskView::update() {
+    std::optional<proto::DeskLayout> layout;
+    std::map<std::uint64_t, Picture> pictures;
+    bool clear = false;
     {
         std::lock_guard lock(pending_mutex_);
-        next = std::exchange(pending_, std::nullopt);
+        layout = std::exchange(pending_layout_, std::nullopt);
+        pictures.swap(pending_pictures_);
+        clear = std::exchange(pending_clear_, false);
     }
-    const HWND hwnd = hwnd_;
-    if (!next || !hwnd || !bits_) return;
-    const auto& h = next->header;
-    desk_w_ = h.desk_w;
-    desk_h_ = h.desk_h;
-    if (h.rects.empty()) {
+    if (clear) {
         hide();
-        return;
+        layout_ = {};
+        pictures_.clear();
+    }
+    if (!layout && pictures.empty()) return;
+    const HWND hwnd = hwnd_;
+    if (!hwnd || !bits_) return;
+
+    std::set<std::uint64_t> new_pictures;
+    for (auto& [id, pic] : pictures) {
+        new_pictures.insert(id);
+        pictures_[id] = std::move(pic);
+    }
+    if (layout) {
+        layout_ = std::move(*layout);
+        // Forget windows that are gone.
+        std::set<std::uint64_t> alive;
+        for (const auto& w : layout_.windows) alive.insert(w.id);
+        std::erase_if(pictures_, [&](const auto& kv) { return !alive.contains(kv.first); });
     }
 
+    // Where each window goes now, bottom first, clipped to the owner's virtual display and our screen.
     const int sw = screen_.right - screen_.left;
     const int sh = screen_.bottom - screen_.top;
-    const size_t pitch = static_cast<size_t>(sw) * 4;
-    // Clear what the previous frame drew, then copy the new rects out of the decoded crop.
-    std::vector<RECT> old = std::move(drawn_);
-    drawn_.clear();
-    for (const auto& r : old) {
-        for (int y = r.top; y < r.bottom; ++y) std::memset(bits_ + y * pitch + r.left * 4, 0, (r.right - r.left) * 4);
+    const RECT clip{0, 0, std::min(layout_.desk_w, sw), std::min(layout_.desk_h, sh)};
+    std::vector<Placed> placed;
+    for (auto it = layout_.windows.rbegin(); it != layout_.windows.rend(); ++it) {
+        const auto pic = pictures_.find(it->id);
+        if (pic == pictures_.end()) continue;  // its first picture is still on the way
+        const RECT full{it->x + pic->second.x, it->y + pic->second.y, it->x + pic->second.x + pic->second.width,
+                        it->y + pic->second.y + pic->second.height};
+        RECT r{};
+        if (!IntersectRect(&r, &full, &clip)) continue;
+        placed.push_back({.id = it->id, .rect = r, .src_x = r.left - full.left, .src_y = r.top - full.top});
     }
-    const BgraImage& img = next->image;
-    for (const auto& d : h.rects) {
-        const RECT r{std::max({d.x, h.x, 0}), std::max({d.y, h.y, 0}), std::min({d.x + d.w, h.x + img.width, sw}),
-                     std::min({d.y + d.h, h.y + img.height, sh})};
-        if (r.right <= r.left || r.bottom <= r.top) continue;
-        for (int y = r.top; y < r.bottom; ++y) {
-            std::memcpy(bits_ + y * pitch + r.left * 4,
-                        img.pixels.data() + (y - h.y) * img.stride() + static_cast<size_t>(r.left - h.x) * 4,
-                        static_cast<size_t>(r.right - r.left) * 4);  // decoded alpha is 255: already premultiplied
+
+    // Redraw only what changed: windows that moved, appeared, vanished or got a new picture.
+    RECT dirty{};
+    const auto find = [](const std::vector<Placed>& v, std::uint64_t id) -> const Placed* {
+        for (const auto& p : v) {
+            if (p.id == id) return &p;
         }
-        drawn_.push_back(r);
+        return nullptr;
+    };
+    for (const auto& p : placed) {
+        const Placed* before = find(placed_, p.id);
+        if (!before || !EqualRect(&before->rect, &p.rect) || before->src_x != p.src_x || before->src_y != p.src_y ||
+            new_pictures.contains(p.id)) {
+            unite(dirty, p.rect);
+            if (before) unite(dirty, before->rect);
+        }
     }
-    if (drawn_.empty()) {
+    for (const auto& p : placed_) {
+        if (!find(placed, p.id)) unite(dirty, p.rect);
+    }
+    // The order changed (a window came to the front): redraw where they overlap.
+    bool set_changed = placed.size() != placed_.size();
+    if (!set_changed) {
+        for (size_t i = 0; i < placed.size(); ++i) {
+            if (placed[i].id != placed_[i].id) {
+                set_changed = true;
+                unite(dirty, placed[i].rect);
+                unite(dirty, placed_[i].rect);
+            }
+        }
+    }
+    placed_ = std::move(placed);
+    if (placed_.empty()) {
         hide();
         return;
     }
+    if (IsRectEmpty(&dirty)) return;
+    compose(placed_, dirty);
 
-    RECT dirty = bounds(old);
-    const RECT now = bounds(drawn_);
-    if (IsRectEmpty(&dirty)) {
-        dirty = now;
-    } else {
-        UnionRect(&dirty, &dirty, &now);
-    }
     POINT dst{screen_.left, screen_.top};
     SIZE size{sw, sh};
     POINT src{0, 0};
@@ -252,19 +365,44 @@ void DeskView::show_pending() {
     }
     first_update_ = false;
     ++shown_;
-
-    // On top of everything, but never activated: clicks route by what the owner sees as its windows.
-    const bool rects_changed =
-        h.rects.size() != last_rects_.size() ||
-        !std::equal(h.rects.begin(), h.rects.end(), last_rects_.begin(), [](const auto& a, const auto& b) {
-            return a.x == b.x && a.y == b.y && a.w == b.w && a.h == b.h;
-        });
-    if (!visible_ || rects_changed) {
+    if (!visible_ || set_changed) {
+        // On top of everything, but never activated: clicks route by what the owner sees as its windows.
         SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0,
                      SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER | (visible_ ? 0 : SWP_SHOWWINDOW));
         visible_ = true;
     }
-    last_rects_ = h.rects;
+}
+
+void DeskView::compose(const std::vector<Placed>& placed, const RECT& dirty) {
+    const size_t pitch = static_cast<size_t>(screen_.right - screen_.left) * 4;
+    for (int y = dirty.top; y < dirty.bottom; ++y) {
+        std::memset(bits_ + y * pitch + static_cast<size_t>(dirty.left) * 4, 0, static_cast<size_t>(dirty.right - dirty.left) * 4);
+    }
+    for (const auto& p : placed) {  // bottom first: each one over what is below it
+        RECT r{};
+        if (!IntersectRect(&r, &p.rect, &dirty)) continue;
+        const Picture& pic = pictures_.at(p.id);
+        const int sx = p.src_x + (r.left - p.rect.left);
+        const int sy = p.src_y + (r.top - p.rect.top);
+        const int w = r.right - r.left;
+        for (int y = 0; y < r.bottom - r.top; ++y) {
+            std::uint8_t* dst = bits_ + (r.top + y) * pitch + static_cast<size_t>(r.left) * 4;
+            const std::uint8_t* src = pic.pixels.data() + (static_cast<size_t>(sy + y) * pic.width + sx) * 4;
+            if (pic.opaque_rows[static_cast<size_t>(sy + y)]) {
+                std::memcpy(dst, src, static_cast<size_t>(w) * 4);
+                continue;
+            }
+            for (int x = 0; x < w; ++x, dst += 4, src += 4) {  // premultiplied "over"
+                const unsigned a = src[3];
+                if (a == 255) {
+                    std::memcpy(dst, src, 4);
+                } else if (a != 0) {
+                    const unsigned keep = 255 - a;
+                    for (int c = 0; c < 4; ++c) dst[c] = static_cast<std::uint8_t>(src[c] + (dst[c] * keep + 127) / 255);
+                }
+            }
+        }
+    }
 }
 
 void DeskView::hide() {
@@ -275,12 +413,14 @@ void DeskView::hide() {
     input_.release_all();
     if (bits_) {
         const size_t pitch = static_cast<size_t>(screen_.right - screen_.left) * 4;
-        for (const auto& r : drawn_) {
-            for (int y = r.top; y < r.bottom; ++y) std::memset(bits_ + y * pitch + r.left * 4, 0, (r.right - r.left) * 4);
+        for (const auto& p : placed_) {
+            for (int y = p.rect.top; y < p.rect.bottom; ++y) {
+                std::memset(bits_ + y * pitch + static_cast<size_t>(p.rect.left) * 4, 0,
+                            static_cast<size_t>(p.rect.right - p.rect.left) * 4);
+            }
         }
     }
-    drawn_.clear();
-    last_rects_.clear();
+    placed_.clear();
     first_update_ = true;
     if (visible_) {
         ShowWindow(hwnd_, SW_HIDE);
@@ -290,9 +430,9 @@ void DeskView::hide() {
 
 NormPoint DeskView::norm(LPARAM lp) const {
     // Client coordinates = screen coordinates of the primary monitor (the window covers it from 0,0).
-    const double x = GET_X_LPARAM(lp) + (screen_.left);
-    const double y = GET_Y_LPARAM(lp) + (screen_.top);
-    return {desk_w_ > 0 ? x / desk_w_ : 0.0, desk_h_ > 0 ? y / desk_h_ : 0.0};
+    const double x = GET_X_LPARAM(lp) + screen_.left;
+    const double y = GET_Y_LPARAM(lp) + screen_.top;
+    return {layout_.desk_w > 0 ? x / layout_.desk_w : 0.0, layout_.desk_h > 0 ? y / layout_.desk_h : 0.0};
 }
 
 bool DeskView::on_input(UINT msg, WPARAM wp, LPARAM lp) {
@@ -314,7 +454,7 @@ bool DeskView::on_input(UINT msg, WPARAM wp, LPARAM lp) {
 
     switch (msg) {
         case WM_MOUSEMOVE:
-            if (!injected_by_us() && desk_w_ > 0) input_.mouse_move(norm(lp));
+            if (!injected_by_us() && layout_.desk_w > 0) input_.mouse_move(norm(lp));
             return true;
         case WM_MOUSEWHEEL:
         case WM_MOUSEHWHEEL:
@@ -330,7 +470,7 @@ bool DeskView::on_input(UINT msg, WPARAM wp, LPARAM lp) {
         default: break;
     }
     if (const auto b = button_of(msg, wp)) {
-        if (injected_by_us() || desk_w_ <= 0) return true;
+        if (injected_by_us() || layout_.desk_w <= 0) return true;
         if (b->second) {
             // Keys typed after this click belong to the owner's window too.
             SetForegroundWindow(hwnd_);
@@ -356,18 +496,41 @@ LRESULT CALLBACK DeskView::wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
 
 LRESULT DeskView::handle(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     switch (msg) {
-        case kMsgFrame:
-            show_pending();
+        case kMsgUpdate:
+            update();
             return 0;
-        case kMsgClear:
-            hide();
-            return 0;
+        case kMsgSave: {
+            const auto& path = *reinterpret_cast<const std::wstring*>(wp);
+            if (!bits_) return 0;
+            const int w = screen_.right - screen_.left, h = screen_.bottom - screen_.top;
+            BITMAPINFOHEADER bh{sizeof(bh)};
+            bh.biWidth = w;
+            bh.biHeight = -h;  // top-down
+            bh.biPlanes = 1;
+            bh.biBitCount = 32;
+            BITMAPFILEHEADER fh{};
+            fh.bfType = 0x4D42;
+            fh.bfOffBits = sizeof(fh) + sizeof(bh);
+            fh.bfSize = fh.bfOffBits + static_cast<DWORD>(w) * h * 4;
+            FILE* f = nullptr;
+            if (_wfopen_s(&f, path.c_str(), L"wb") != 0 || !f) return 0;
+            fwrite(&fh, sizeof(fh), 1, f);
+            fwrite(&bh, sizeof(bh), 1, f);
+            fwrite(bits_, 1, static_cast<size_t>(w) * h * 4, f);
+            fclose(f);
+            return 1;
+        }
         case WM_DISPLAYCHANGE:
             hide();
             if (make_surface()) {
                 SetWindowPos(hwnd, HWND_TOPMOST, screen_.left, screen_.top, screen_.right - screen_.left,
                              screen_.bottom - screen_.top, SWP_NOACTIVATE);
             }
+            {
+                std::lock_guard lock(pending_mutex_);
+                pending_layout_ = layout_;  // draw everything again on the new surface
+            }
+            update();
             return 0;
         case WM_MOUSEACTIVATE:
             return MA_NOACTIVATE;  // a click doesn't activate it; on_input decides when it takes the keyboard

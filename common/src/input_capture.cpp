@@ -286,6 +286,37 @@ struct CaptureThread {
         set_key_peer(true);
     }
 
+    // The cursor is pushed past the real edge towards the peer where the VDD doesn't reach (e.g. a
+    // 1920x1200 screen next to a 1920x1080 VDD). The VDD widens the virtual screen, so the hook sees
+    // a point in the gap beside it, on no monitor at all; Windows would then put the cursor back on
+    // the edge and it would feel stuck. Returns the nearest point of the VDD instead, nullopt if p
+    // isn't in that gap.
+    static std::optional<input::Point> beside_vdd(input::Point p) {
+        if (vdd.contains(p)) return std::nullopt;
+        for (const auto& r : real_monitors) {
+            if (r.contains(p)) return std::nullopt;
+        }
+        input::Point onto = p;
+        switch (cap->options_.client_side) {
+            case display::Side::Left:
+            case display::Side::Right: {
+                const bool right = cap->options_.client_side == display::Side::Right;
+                if (right ? p.x < vdd.left : p.x >= vdd.right) return std::nullopt;  // not past the edge
+                onto.x = right ? vdd.left : vdd.right - 1;
+                onto.y = std::clamp(p.y, vdd.top, vdd.bottom - 1);
+                break;
+            }
+            default: {
+                const bool bottom = cap->options_.client_side == display::Side::Bottom;
+                if (bottom ? p.y < vdd.top : p.y >= vdd.bottom) return std::nullopt;
+                onto.y = bottom ? vdd.top : vdd.bottom - 1;
+                onto.x = std::clamp(p.x, vdd.left, vdd.right - 1);
+                break;
+            }
+        }
+        return onto;
+    }
+
     // The cursor tries to go onto the VDD from a real monitor. Returns the hook's answer.
     static std::optional<LRESULT> crossing_onto_vdd(input::Point p) {
         if (vdd_live && desk_enter(p)) return std::nullopt;  // like a real monitor: just go on
@@ -465,11 +496,23 @@ struct CaptureThread {
             const unsigned bit = 1u << static_cast<unsigned>(*button);
             buttons_down = down ? (buttons_down | bit) : (buttons_down & ~bit);
         }
+        if (desk::Region* region = cap->options_.desk) {
+            region->note_local_input();
+            if (button && down) region->note_click(vdd_live && vdd.contains({m.pt.x, m.pt.y}));
+        }
 
         if (!cap->remote_) {
-            if (wp == WM_MOUSEMOVE && vdd_attached && vdd.contains({m.pt.x, m.pt.y})) {
-                if (const auto answer = crossing_onto_vdd({m.pt.x, m.pt.y})) return *answer;
-                if (desk) return desk_mouse(code, wp, lp, m, button, down);  // just entered
+            const input::Point p{m.pt.x, m.pt.y};
+            if (wp == WM_MOUSEMOVE && vdd_attached) {
+                const auto beside = vdd.contains(p) ? std::nullopt : beside_vdd(p);
+                if (beside && vdd_live && desk_enter(*beside)) {  // past the edge where the VDD doesn't reach
+                    SetCursorPos(beside->x, beside->y);
+                    return 1;
+                }
+                if (beside || vdd.contains(p)) {
+                    if (const auto answer = crossing_onto_vdd(p)) return *answer;
+                    if (desk) return desk_mouse(code, wp, lp, m, button, down);  // just entered
+                }
             }
             // With desk mode live the VDD is the way to the peer: no edge switch there.
             if (wp == WM_MOUSEMOVE && cap->options_.edge_switching && !vdd_live) {
@@ -514,6 +557,7 @@ struct CaptureThread {
         if (code != HC_ACTION || !cap) return CallNextHookEx(nullptr, code, wp, lp);
         const auto& k = *reinterpret_cast<const KBDLLHOOKSTRUCT*>(lp);
         if (!is_physical(k.dwExtraInfo, (k.flags & LLKHF_INJECTED) != 0)) return CallNextHookEx(nullptr, code, wp, lp);
+        if (desk::Region* region = cap->options_.desk) region->note_local_input();
 
         const bool up = (k.flags & LLKHF_UP) != 0;
         const unsigned vk = k.vkCode & 0xFF;

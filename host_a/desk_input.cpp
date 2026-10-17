@@ -9,6 +9,14 @@
 
 namespace kvm {
 
+namespace {
+
+// While this PC's own user moves the mouse, the other PC's mere hovering doesn't pull the cursor
+// away from them (clicks and drags still go through: someone over there is using our window).
+constexpr unsigned long long kLocalWinsMs = 700;
+
+}  // namespace
+
 bool DeskInput::move_to(double x_norm, double y_norm) {
     display::Rect vdd;
     bool live = false;
@@ -24,6 +32,7 @@ bool DeskInput::handle(const proto::Message& msg) {
     return std::visit(
         proto::Overloaded{
             [&](const proto::RemoteMouseMove& m) {
+                if (buttons_.empty() && region_.local_input_within(kLocalWinsMs)) return true;
                 move_to(m.x_norm, m.y_norm);
                 return true;
             },
@@ -32,6 +41,7 @@ bool DeskInput::handle(const proto::Message& msg) {
                 if (m.down) {
                     if (!move_to(m.x_norm, m.y_norm)) return true;
                     buttons_.insert(m.button);
+                    region_.note_click(/*on_vdd=*/true);  // apps opened from here show up over there
                 } else if (!buttons_.erase(m.button)) {
                     return true;  // never an up for a down we didn't replay
                 }

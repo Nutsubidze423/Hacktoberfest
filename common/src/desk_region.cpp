@@ -1,5 +1,10 @@
 #include "kvm/desk_region.h"
 
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+
 #include <algorithm>
 #include <utility>
 
@@ -69,6 +74,23 @@ bool Region::hit(display::Point p) const {
 void Region::set_on_change(std::function<void()> callback) {
     std::lock_guard lock(callback_mutex_);
     on_change_ = std::move(callback);
+}
+
+void Region::note_click(bool on_vdd) {
+    click_on_vdd_ = on_vdd;
+    click_ms_ = GetTickCount64();
+}
+
+bool Region::clicked_on_vdd_within(unsigned long long ms) const {
+    return click_on_vdd_ && GetTickCount64() - click_ms_ <= ms;
+}
+
+void Region::note_local_input() {
+    local_input_ms_ = GetTickCount64();
+}
+
+bool Region::local_input_within(unsigned long long ms) const {
+    return GetTickCount64() - local_input_ms_ <= ms;
 }
 
 }  // namespace kvm::desk

@@ -102,6 +102,15 @@ void abs_move(display::Point p) {
     send(in);
 }
 
+void rel_move(int dx, int dy) {
+    INPUT in{};
+    in.type = INPUT_MOUSE;
+    in.mi.dx = dx;
+    in.mi.dy = dy;
+    in.mi.dwFlags = MOUSEEVENTF_MOVE;
+    send(in);
+}
+
 void mouse(DWORD flags, DWORD data = 0) {
     INPUT in{};
     in.type = INPUT_MOUSE;
@@ -293,6 +302,21 @@ int main() {
         check(!cap.remote(), "peer takeover ends the session");
         check(!v.contains(cursor()), "... and the cursor is back on our screen");
         check(only<proto::FocusLeave>(take_sent()).empty(), "... without telling the peer (it knows)");
+
+        // -- where the VDD doesn't reach (this screen is taller): the cursor still goes over
+        if (primary.bottom > v.bottom) {
+            abs_move({v.left - 6, v.bottom + 40});
+            settle();
+            take_sent();
+            rel_move(30, 0);
+            settle();
+            check(cap.desk(), "pushing at the edge beside the VDD goes onto it (no stuck cursor)");
+            const auto c = cursor();
+            check(c.x == v.left && c.y == v.bottom - 1, "... at its nearest point");
+            abs_move(home);
+            settle();
+            take_sent();
+        }
 
         // -- desk mode not live: the cursor stops at the real edge, the old edge switch works there
         region.set_vdd({.device = device, .rect = v, .live = false});

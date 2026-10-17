@@ -110,6 +110,7 @@ tools/
 | `focus_enter` | ორივე (KVM controller → controlled) | `y_norm` (კურსორის შესვლის წერტილი), `desk` (კურსორი `desk_move`-ს მიჰყვება) |
 | `desk_move` | ორივე (desk mode, controller → controlled) | `x`, `y` — კურსორი controlled-ის primary მონიტორზე, px (= controller-ის VDD) |
 | `desk_cursor` | ორივე (window owner → viewer) | `shape` (`arrow`/`ibeam`/`hand`/`sizewe`/…) — კურსორის ფორმა owner-ის ფანჯრებზე |
+| `desk_layout` | ორივე (window owner → viewer) | `desk_w`, `desk_h`, `windows` [`id`, `x`, `y`, `w`, `h`] — VDD-ზე მყოფი ფანჯრები (ზემოდან ქვემოთ), მათი ჩარჩო VDD-თან შედარებით; ფანჯრის გადაადგილება = მხოლოდ ეს შეტყობინება |
 | `focus_leave` | ორივე | `y_norm`. controller → controlled: „ინფუთი დავიბრუნე“; controlled → controller: „შენი კურსორი ჩემი კიდით დაბრუნდა“ |
 | `mouse_move` | ორივე (KVM controller → controlled) | `dx`, `dy` (relative) |
 | `mouse_button` | ორივე | `button` (`left`/`right`/`middle`/`x1`/`x2`), `down` (+ viewer → window owner-ზე `x_norm`, `y_norm`) |
@@ -120,7 +121,7 @@ tools/
 | `remote_mouse_move` | viewer → window owner (ორივე) | `x_norm`, `y_norm` (სტრიმულ ფანჯარაში, 0..1) |
 | `clipboard` | ორივე | `seq`, `kind` (`text`/`png`), `total`, `offset`, `data` (base64, ≤ 32 KB) — ერთი კოპირება რამდენიმე ნაწილად |
 | `ping` / `pong` | ორივე | `t` (+ `pong`-ში `t_peer` — clock offset-ისთვის) |
-| `frame` (50501 header) | window owner → viewer (ორივე, ერთი TCP არხი) | `seq`, `t_capture_us`, `width`, `height`, `codec`; desk mode: `layer:"desk"`, `x`, `y` (crop VDD-ში), `desk_w`, `desk_h`, `rects` (ფანჯრების ადგილი; ცარიელი + codec `none` = დამალე) |
+| `frame` (50501 header) | window owner → viewer (ორივე, ერთი TCP არხი) | `seq`, `t_capture_us`, `width`, `height`, `codec`; desk mode: `layer:"desk"`, `window` (ერთი ფანჯრის სურათი, WGC window capture), `x`, `y` (ფანჯრის ჩარჩოში), `alpha_bytes` (payload = JPEG 4:4:4 + alpha runs `[u8 a][u16 n]` — მომრგვალებული კუთხეები) |
 
 ## მნიშვნელოვანი წესები
 - **DPI:** ორივე პროცესი იწყება `SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2)`-ით (ან manifest-ით). ყოველთვის ფიზიკურ პიქსელებში იმუშავე.

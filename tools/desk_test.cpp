@@ -13,6 +13,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <format>
 #include <optional>
 #include <span>
 #include <string>
@@ -63,6 +64,45 @@ bool wait_until(Pred pred, std::chrono::milliseconds timeout) {
     return pred();
 }
 
+// The primary monitor as it looks now, layered windows included, as a 24-bit BMP.
+bool save_screen(const std::wstring& path) {
+    const auto r = kvm::display::primary_monitor().rect;
+    const int w = r.width(), h = r.height();
+    HDC screen = GetDC(nullptr);
+    HDC mem = CreateCompatibleDC(screen);
+    BITMAPINFO bi{};
+    bi.bmiHeader.biSize = sizeof(bi.bmiHeader);
+    bi.bmiHeader.biWidth = w;
+    bi.bmiHeader.biHeight = h;  // bottom-up, as BMP files store it
+    bi.bmiHeader.biPlanes = 1;
+    bi.bmiHeader.biBitCount = 24;
+    void* bits = nullptr;
+    HBITMAP bmp = CreateDIBSection(screen, &bi, DIB_RGB_COLORS, &bits, nullptr, 0);
+    const HGDIOBJ old = SelectObject(mem, bmp);
+    const bool ok = BitBlt(mem, 0, 0, w, h, screen, r.left, r.top, SRCCOPY | CAPTUREBLT) != FALSE;
+    SelectObject(mem, old);
+    const DWORD stride = static_cast<DWORD>((w * 3 + 3) & ~3);
+    BITMAPFILEHEADER fh{};
+    fh.bfType = 0x4D42;
+    fh.bfOffBits = sizeof(fh) + sizeof(bi.bmiHeader);
+    fh.bfSize = fh.bfOffBits + stride * h;
+    bool written = false;
+    if (ok) {
+        FILE* f = nullptr;
+        if (_wfopen_s(&f, path.c_str(), L"wb") == 0 && f) {
+            fwrite(&fh, sizeof(fh), 1, f);
+            fwrite(&bi.bmiHeader, sizeof(bi.bmiHeader), 1, f);
+            fwrite(bits, 1, static_cast<size_t>(stride) * h, f);
+            fclose(f);
+            written = true;
+        }
+    }
+    DeleteObject(bmp);
+    DeleteDC(mem);
+    ReleaseDC(nullptr, screen);
+    return written;
+}
+
 void print_windows(const kvm::DeskShare& share) {
     for (const auto& w : share.tracker().windows()) {
         kvm::log::info("  {} \"{}\" [{}] {},{} {}x{}", reinterpret_cast<void*>(w.hwnd), w.title, w.cls, w.rect.left,
@@ -80,6 +120,9 @@ int wmain(int argc, wchar_t** argv) {
     bool list = false;
     bool automatic = false;
     std::wstring title = L"Paint";
+    std::wstring shot;  // --shot <file.bmp>: the screen while the window is half over
+    bool no_scale = false;
+    int settle_s = 0;  // --settle N: wait after attaching (display-change animations) before testing
     for (int i = 1; i < argc; ++i) {
         const std::wstring_view a = argv[i];
         if (a == L"--side" && i + 1 < argc) {
@@ -92,6 +135,14 @@ int wmain(int argc, wchar_t** argv) {
             automatic = true;
         } else if (a == L"--title" && i + 1 < argc) {
             title = argv[++i];
+        } else if (a == L"--shot" && i + 1 < argc) {
+            shot = argv[++i];
+        } else if (a == L"--no-scale") {
+            no_scale = true;
+        } else if (a == L"--settle" && i + 1 < argc) {
+            settle_s = std::stoi(argv[++i]);
+        } else if (a == L"--shot-now" && i + 1 < argc) {
+            return save_screen(argv[i + 1]) ? 0 : 1;  // just the screenshot (checks save_screen itself)
         }
     }
 
@@ -114,7 +165,8 @@ int wmain(int argc, wchar_t** argv) {
     const kvm::display::Rect vr{vdd_rect->rect.left, vdd_rect->rect.top, vdd_rect->rect.right, vdd_rect->rect.bottom};
     kvm::log::info("VDD {} at {},{} {}x{}", kvm::to_utf8(vdd->device()), vr.left, vr.top, vr.width(), vr.height());
     // The "other PC" is this screen: give the VDD its scale, as kvm_host does with the peer's.
-    vdd->set_scale(primary.scale);
+    if (!no_scale) vdd->set_scale(primary.scale);
+    std::this_thread::sleep_for(std::chrono::seconds(settle_s));
 
     Checks check;
     {
@@ -127,7 +179,20 @@ int wmain(int argc, wchar_t** argv) {
             view.present(kvm::net::Frame{.header = h, .payload = {payload.begin(), payload.end()}});
             return true;
         };
-        kvm::DeskShare share(*vdd_rect, region, loopback, {.jpeg_quality = 75, .max_fps = 30});
+        std::atomic<int> layouts{0};
+        std::mutex layout_mutex;
+        kvm::proto::DeskLayout last_layout;
+        kvm::DeskShare share(
+            *vdd_rect, region, loopback,
+            [&](const kvm::proto::DeskLayout& layout) {
+                ++layouts;
+                {
+                    std::lock_guard lock(layout_mutex);
+                    last_layout = layout;
+                }
+                view.set_layout(layout);
+            },
+            {.jpeg_quality = 80, .max_fps = 30});
 
         if (automatic) {
             const auto window = window_with_title(title);
@@ -154,13 +219,42 @@ int wmain(int argc, wchar_t** argv) {
                     2s);
                 check(tracked, "the half on the VDD is tracked");
                 print_windows(share);
-                check(wait_until([&] { return share.frames_sent() > 0; }, 3s), "frames go out");
+                check(layouts > 0, "the layout goes out");
+                check(wait_until([&] { return share.frames_sent() > 0; }, 3s), "the window's picture goes out");
                 check(wait_until([&] { return view.frames_shown() > 0; }, 3s), "frames are drawn");
                 check(wait_until([&] { return IsWindowVisible(view.hwnd()) != FALSE; }, 2s), "the overlay is shown");
+                // Dragging it further over: the layout follows every step, no new pictures needed.
+                const int before_layouts = layouts;
+                for (int i = 1; i <= 10; ++i) {
+                    SetWindowPos(hwnd, nullptr, x + 20 * i, vr.top + 100, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+                    std::this_thread::sleep_for(30ms);
+                }
+                check(wait_until([&] { return layouts - before_layouts >= 5; }, 1s),
+                      std::format("moving it sends the new place ({} layouts for 10 steps)", layouts - before_layouts));
                 kvm::display::Point inside{side == kvm::display::Side::Right ? vr.left + 50 : vr.right - 50, vr.top + 300};
                 check(region.hit(inside), "a point on the window hits");
-                check(!region.hit({inside.x, vr.top + 900}), "a point below it doesn't");
-                std::this_thread::sleep_for(1500ms);  // look at it: the ghost is on the other side of the screen
+                check(!region.hit({inside.x, vr.top + 1000}), "a point below it doesn't");
+                std::this_thread::sleep_for(500ms);  // look at it: the ghost is on the other side of the screen
+                if (!shot.empty()) {
+                    check(save_screen(shot), "screenshot saved");
+                    check(view.save_surface(shot + L".overlay.bmp"), "overlay surface saved");
+                }
+                {
+                    RECT now{};
+                    GetWindowRect(hwnd, &now);
+                    std::lock_guard lock(layout_mutex);
+                    kvm::log::info("window at {},{} {}x{}; layout {}x{}:", now.left, now.top, now.right - now.left,
+                                   now.bottom - now.top, last_layout.desk_w, last_layout.desk_h);
+                    for (const auto& lw : last_layout.windows) {
+                        kvm::log::info("  {:x} at {},{} {}x{}", lw.id, lw.x, lw.y, lw.w, lw.h);
+                    }
+                    RECT overlay{};
+                    GetWindowRect(view.hwnd(), &overlay);
+                    kvm::log::info("overlay window {},{} {}x{} visible {}", overlay.left, overlay.top,
+                                   overlay.right - overlay.left, overlay.bottom - overlay.top,
+                                   IsWindowVisible(view.hwnd()) != FALSE);
+                }
+                std::this_thread::sleep_for(1000ms);
 
                 SetWindowPlacement(hwnd, &saved);
                 check(wait_until([&] { return region.rects().empty(); }, 2s), "back home: nothing tracked");

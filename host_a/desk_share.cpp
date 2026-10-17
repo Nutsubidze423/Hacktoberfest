@@ -2,7 +2,8 @@
 
 #include <algorithm>
 #include <chrono>
-#include <optional>
+#include <set>
+#include <string>
 #include <vector>
 
 #include "jpeg_encoder.h"
@@ -14,114 +15,251 @@ namespace kvm {
 namespace {
 
 using Clock = std::chrono::steady_clock;
-constexpr auto kPoll = std::chrono::milliseconds(10);  // how soon a rects-only change goes out
+constexpr auto kPoll = std::chrono::milliseconds(10);
 constexpr auto kLogEvery = std::chrono::seconds(5);
+
+// The alpha of a BGRA picture as runs per row: [u8 alpha][u16 count, little-endian]. Empty if the
+// picture is fully opaque (most windows: only rounded corners aren't).
+void alpha_runs(const std::uint8_t* first, int width, int height, int stride, std::vector<std::uint8_t>& out) {
+    out.clear();
+    bool any = false;
+    for (int y = 0; y < height; ++y) {
+        const std::uint8_t* row = first + static_cast<size_t>(y) * stride;
+        int x = 0;
+        while (x < width) {
+            const std::uint8_t a = row[x * 4 + 3];
+            int n = 1;
+            while (x + n < width && n < 0xFFFF && row[(x + n) * 4 + 3] == a) ++n;
+            if (a != 255) any = true;
+            out.push_back(a);
+            out.push_back(static_cast<std::uint8_t>(n & 0xFF));
+            out.push_back(static_cast<std::uint8_t>(n >> 8));
+            x += n;
+        }
+    }
+    if (!any) out.clear();
+}
 
 }  // namespace
 
-DeskShare::DeskShare(const VirtualDisplay::MonitorRect& vdd, desk::Region& region, SendFn send, Options options)
-    : region_(region), send_(std::move(send)), options_(options) {
-    tracker_ = std::make_unique<DeskTracker>(region_);
-    capture_ = ScreenCapture::for_monitor(vdd.monitor, /*capture_cursor=*/false);
-    capture_->start(frames_, [this] { lost_ = true; });
+struct DeskShare::Window {
+    std::uint64_t id = 0;
+    HWND hwnd = nullptr;
+    std::string title;
+    display::Rect frame;                     // screen coordinates (latest from the tracker)
+    std::unique_ptr<ScreenCapture> capture;  // nullptr: cut out of the whole-VDD capture
+    std::mutex mutex;                        // pending
+    std::optional<CapturedFrame> pending;    // newest picture not sent yet
+    Clock::time_point next_send{};
+    proto::FrameHeader last_header;          // for resend()
+    std::vector<std::uint8_t> last_payload;
+};
+
+DeskShare::DeskShare(const VirtualDisplay::MonitorRect& vdd, desk::Region& region, SendFn send, LayoutFn layout,
+                     Options options)
+    : region_(region),
+      send_(std::move(send)),
+      layout_(std::move(layout)),
+      options_(options),
+      vdd_{vdd.rect.left, vdd.rect.top, vdd.rect.right, vdd.rect.bottom} {
     thread_ = std::jthread([this](std::stop_token stop) { run(stop); });
-    log::info("desk: sharing the other screen's windows ({}x{} at {},{})", vdd.rect.right - vdd.rect.left,
-              vdd.rect.bottom - vdd.rect.top, vdd.rect.left, vdd.rect.top);
+    tracker_ = std::make_unique<DeskTracker>(region_, [this](const auto& windows) { on_windows(windows); });
+    log::info("desk: sharing the other screen's windows ({}x{} at {},{})", vdd_.width(), vdd_.height(), vdd_.left,
+              vdd_.top);
 }
 
 DeskShare::~DeskShare() {
+    tracker_.reset();  // no more on_windows()
     thread_.request_stop();
+    cv_.notify_all();
     if (thread_.joinable()) thread_.join();
-    if (capture_) capture_->stop();
-    frames_.close();
-    tracker_.reset();
-    log::info("desk: stopped after {} frames", sent_.load());
+    for (auto& [id, w] : windows_) {
+        if (w->capture) w->capture->stop();
+    }
+    if (screen_) screen_->stop();
+    log::info("desk: stopped after {} pictures", sent_.load());
+}
+
+void DeskShare::resend() {
+    {
+        std::lock_guard lock(mutex_);
+        resend_ = true;
+    }
+    cv_.notify_all();
+}
+
+void DeskShare::notify_frames() {
+    {
+        std::lock_guard lock(mutex_);
+        frames_ready_ = true;
+    }
+    cv_.notify_all();
+}
+
+void DeskShare::on_windows(const std::vector<DeskTracker::Window>& windows) {
+    display::Rect vdd = vdd_;
+    bool live = false;
+    region_.vdd_rect(vdd, live);
+    proto::DeskLayout layout{.desk_w = vdd.width(), .desk_h = vdd.height()};
+    for (const auto& w : windows) {
+        layout.windows.push_back({.id = reinterpret_cast<std::uint64_t>(w.hwnd),
+                                  .x = w.frame.left - vdd.left,
+                                  .y = w.frame.top - vdd.top,
+                                  .w = w.frame.width(),
+                                  .h = w.frame.height()});
+    }
+    layout_(layout);  // right away: a moved window is shown at its new place without a new picture
+    {
+        std::lock_guard lock(mutex_);
+        last_layout_ = std::move(layout);
+        new_windows_ = windows;
+    }
+    cv_.notify_all();
+}
+
+void DeskShare::sync(const std::vector<DeskTracker::Window>& windows) {
+    std::set<std::uint64_t> wanted;
+    bool need_screen = false;
+    for (const auto& tw : windows) {
+        const auto id = reinterpret_cast<std::uint64_t>(tw.hwnd);
+        wanted.insert(id);
+        auto& w = windows_[id];
+        if (!w) {
+            w = std::make_unique<Window>();
+            w->id = id;
+            w->hwnd = tw.hwnd;
+            w->title = tw.title;
+            try {
+                auto capture = ScreenCapture::for_window(tw.hwnd, /*capture_cursor=*/false);
+                Window* raw = w.get();
+                capture->start([this, raw](CapturedFrame&& f) {
+                    {
+                        std::lock_guard lock(raw->mutex);
+                        raw->pending = std::move(f);
+                    }
+                    notify_frames();
+                });
+                w->capture = std::move(capture);
+            } catch (const std::exception& e) {
+                log::info("desk: \"{}\" is cut out of the screen picture ({})", tw.title, e.what());
+            }
+        }
+        w->frame = tw.frame;
+        if (!w->capture) need_screen = true;
+    }
+    for (auto it = windows_.begin(); it != windows_.end();) {
+        if (wanted.contains(it->first)) {
+            ++it;
+            continue;
+        }
+        if (it->second->capture) it->second->capture->stop();  // no callback touches it after this
+        it = windows_.erase(it);
+    }
+    if (need_screen && !screen_) {
+        try {
+            const POINT center{vdd_.left + vdd_.width() / 2, vdd_.top + vdd_.height() / 2};
+            screen_ = ScreenCapture::for_monitor(MonitorFromPoint(center, MONITOR_DEFAULTTONULL), /*capture_cursor=*/false);
+            screen_->start([this](CapturedFrame&& f) {
+                {
+                    std::lock_guard lock(mutex_);
+                    screen_frame_ = std::move(f);
+                }
+                notify_frames();
+            });
+        } catch (const std::exception& e) {
+            log::warn("desk: no screen picture either: {}", e.what());
+            screen_.reset();
+        }
+    } else if (!need_screen && screen_) {
+        screen_->stop();
+        screen_.reset();
+    }
 }
 
 void DeskShare::run(std::stop_token stop) {
-    JpegEncoder jpeg(options_.jpeg_quality);
-    std::vector<std::uint8_t> encoded;
+    JpegEncoder jpeg(options_.jpeg_quality, /*full_chroma=*/true);
+    std::vector<std::uint8_t> encoded, alpha;
     const auto min_interval = options_.max_fps > 0
                                   ? std::chrono::duration_cast<Clock::duration>(std::chrono::seconds(1)) / options_.max_fps
                                   : Clock::duration::zero();
-    std::optional<CapturedFrame> full;  // the newest whole VDD picture
-    bool fresh = false;                 // `full` changed since the last send
-    std::uint64_t sent_version = ~0ull;
-    bool empty_sent = false;
     std::uint32_t seq = 0;
-    auto next_send = Clock::now();
-
     auto period_start = Clock::now();
     std::uint64_t period_frames = 0, period_bytes = 0, period_pixels = 0;
     double period_encode_ms = 0;
 
+    // Encodes one picture of window `w` (x, y = where it sits inside the window's frame) and sends it.
+    const auto send_picture = [&](Window& w, const std::uint8_t* first, int width, int height, int stride, int x, int y,
+                                  bool has_alpha, std::int64_t t_capture_us) {
+        if (width <= 0 || height <= 0 || !jpeg.encode(first, width, height, stride, encoded)) return;
+        if (has_alpha) {
+            alpha_runs(first, width, height, stride, alpha);
+        } else {
+            alpha.clear();
+        }
+        proto::FrameHeader header{.seq = seq++, .t_capture_us = t_capture_us, .width = width, .height = height,
+                                  .layer = "desk", .x = x, .y = y, .desk_w = vdd_.width(), .desk_h = vdd_.height()};
+        header.window = w.id;
+        header.alpha_bytes = static_cast<std::uint32_t>(alpha.size());
+        encoded.insert(encoded.end(), alpha.begin(), alpha.end());  // payload = JPEG + alpha runs
+        send_(header, encoded);
+        w.last_header = header;
+        w.last_payload = encoded;
+        ++sent_;
+        ++period_frames;
+        period_bytes += encoded.size();
+        period_pixels += static_cast<std::uint64_t>(width) * height;
+        period_encode_ms += jpeg.last_encode_ms();
+    };
+
     while (!stop.stop_requested()) {
-        if (auto frame = frames_.take_for(kPoll)) {
-            full = std::move(*frame);
-            fresh = true;
-        } else if (frames_.closed()) {
-            break;
+        std::optional<std::vector<DeskTracker::Window>> changed;
+        std::optional<CapturedFrame> screen;
+        bool resend = false;
+        proto::DeskLayout layout;
+        {
+            std::unique_lock lock(mutex_);
+            cv_.wait_for(lock, kPoll, [&] { return stop.stop_requested() || new_windows_ || frames_ready_ || resend_; });
+            changed = std::exchange(new_windows_, std::nullopt);
+            screen = std::exchange(screen_frame_, std::nullopt);
+            frames_ready_ = false;
+            resend = std::exchange(resend_, false);
+            if (resend) layout = last_layout_;
+        }
+        if (stop.stop_requested()) break;
+        if (changed) sync(*changed);
+        if (resend) {
+            layout_(layout);
+            for (auto& [id, w] : windows_) {
+                if (!w->last_payload.empty()) send_(w->last_header, w->last_payload);
+            }
         }
 
-        if (fresh || region_.version() != sent_version) {
-            // Respect max_fps, then send the newest picture and rects, not the ones we hold.
-            if (Clock::now() < next_send) {
-                std::this_thread::sleep_until(next_send);
-                if (auto newer = frames_.try_take()) full = std::move(*newer);
+        const auto now = Clock::now();
+        for (auto& [id, w] : windows_) {
+            if (!w->capture || now < w->next_send) continue;  // too soon: the newest one goes out next time
+            std::optional<CapturedFrame> f;
+            {
+                std::lock_guard lock(w->mutex);
+                f = std::exchange(w->pending, std::nullopt);
             }
-            next_send = std::max(next_send + min_interval, Clock::now());
-            fresh = false;
-            sent_version = region_.version();
-            const auto rects = region_.rects();
-            display::Rect vdd;
-            bool live = false;
-            const bool has_vdd = region_.vdd_rect(vdd, live);
-
-            proto::FrameHeader header{.seq = seq, .t_capture_us = steady_now_us(), .layer = "desk"};
-            header.desk_w = full ? full->width : vdd.width();
-            header.desk_h = full ? full->height : vdd.height();
-            // The windows, relative to the VDD and inside the captured picture; their bounding box is sent.
-            display::Rect box{header.desk_w, header.desk_h, 0, 0};
-            if (full && has_vdd) {
-                for (const auto& r : rects) {
-                    const proto::DeskRect d{
-                        .x = std::max(r.left - vdd.left, 0),
-                        .y = std::max(r.top - vdd.top, 0),
-                        .w = std::min(r.right - vdd.left, full->width) - std::max(r.left - vdd.left, 0),
-                        .h = std::min(r.bottom - vdd.top, full->height) - std::max(r.top - vdd.top, 0),
-                    };
-                    if (d.w <= 0 || d.h <= 0) continue;
-                    header.rects.push_back(d);
-                    box = {std::min(box.left, d.x), std::min(box.top, d.y), std::max(box.right, d.x + d.w),
-                           std::max(box.bottom, d.y + d.h)};
-                }
-            }
-
-            if (header.rects.empty()) {
-                if (!empty_sent) {  // tell the peer once that there is nothing to draw
-                    header.codec = "none";
-                    send_(header, {});
-                    ++seq;
-                    empty_sent = true;
-                }
-            } else {
-                const std::uint8_t* first =
-                    full->bgra.data() + static_cast<size_t>(box.top) * full->stride + static_cast<size_t>(box.left) * 4;
-                if (jpeg.encode(first, box.width(), box.height(), full->stride, encoded)) {
-                    header.t_capture_us = full->t_capture_us;
-                    header.width = box.width();
-                    header.height = box.height();
-                    header.x = box.left;
-                    header.y = box.top;
-                    send_(header, encoded);
-                    ++seq;
-                    ++sent_;
-                    empty_sent = false;
-                    ++period_frames;
-                    period_bytes += encoded.size();
-                    period_pixels += static_cast<std::uint64_t>(box.width()) * box.height();
-                    period_encode_ms += jpeg.last_encode_ms();
-                }
+            if (!f) continue;
+            send_picture(*w, f->bgra.data(), f->width, f->height, f->stride, 0, 0, /*has_alpha=*/true, f->t_capture_us);
+            w->next_send = std::max(w->next_send + min_interval, now);
+        }
+        if (screen) {
+            // Windows without their own capture: their part of the VDD picture, opaque.
+            for (auto& [id, w] : windows_) {
+                if (w->capture || now < w->next_send) continue;
+                w->next_send = std::max(w->next_send + min_interval, now);
+                const display::Rect part{std::max(w->frame.left, vdd_.left), std::max(w->frame.top, vdd_.top),
+                                         std::min(w->frame.right, vdd_.left + screen->width),
+                                         std::min(w->frame.bottom, vdd_.top + screen->height)};
+                if (part.width() <= 0 || part.height() <= 0) continue;
+                const std::uint8_t* first = screen->bgra.data() +
+                                            static_cast<size_t>(part.top - vdd_.top) * screen->stride +
+                                            static_cast<size_t>(part.left - vdd_.left) * 4;
+                send_picture(*w, first, part.width(), part.height(), screen->stride, part.left - w->frame.left,
+                             part.top - w->frame.top, /*has_alpha=*/false, screen->t_capture_us);
             }
         }
 
@@ -130,7 +268,7 @@ void DeskShare::run(std::stop_token stop) {
             if (period_frames > 0) {
                 const double seconds = std::chrono::duration<double>(elapsed).count();
                 const double n = static_cast<double>(period_frames);
-                log::info("desk video: {:.1f} fps, {:.0f}k px/frame, encode {:.1f} ms, {:.1f} Mbit/s",
+                log::info("desk video: {:.1f} pictures/s, {:.0f}k px each, encode {:.1f} ms, {:.1f} Mbit/s",
                           n / seconds, static_cast<double>(period_pixels) / n / 1000.0, period_encode_ms / n,
                           static_cast<double>(period_bytes) * 8.0 / seconds / 1e6);
             }

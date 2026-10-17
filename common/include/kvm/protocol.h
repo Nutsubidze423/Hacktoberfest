@@ -178,11 +178,32 @@ struct DeskRect {
     int h = 0;
 };
 
+// One window on the owner's virtual display: its frame (without the shadow) relative to the virtual
+// display. Parts outside desk_w x desk_h are on the owner's own screens and not drawn.
+struct DeskWindow {
+    std::uint64_t id = 0;  // the owner's HWND
+    int x = 0;
+    int y = 0;
+    int w = 0;
+    int h = 0;
+};
+
+// Desk mode, window owner -> viewer: the owner's windows on its virtual display, topmost first. Sent
+// whenever one moves, opens, closes or changes order; the pictures come separately on the video
+// channel (FrameHeader::window), so moving a window costs only this message.
+struct DeskLayout {
+    static constexpr std::string_view kType = "desk_layout";
+    int desk_w = 0;
+    int desk_h = 0;
+    std::vector<DeskWindow> windows;
+};
+
 // Video channel header (port 50501), followed by `payload_len` bytes of encoded image.
-// layer "" = a window stream for the viewer window. layer "desk" = desk mode: the payload is the
-// part (x, y, width, height) of the owner's desk_w x desk_h virtual display that holds its windows,
-// and only `rects` of it are drawn, at the same place on the viewer's primary monitor. Empty rects
-// with codec "none" = nothing to show.
+// layer "" = a window stream for the viewer window. layer "desk" = desk mode: the picture of one
+// window of the owner's virtual display (`window` = DeskWindow::id), drawn at that window's place
+// from the newest desk_layout, offset by (x, y). The payload is the JPEG, followed by `alpha_bytes`
+// of its transparency (rounded corners): per row, runs of [u8 alpha][u16 count, little-endian];
+// alpha_bytes 0 = fully opaque. The JPEG's colours are premultiplied by that alpha.
 struct FrameHeader {
     static constexpr std::string_view kType = "frame";
     std::uint32_t seq = 0;
@@ -196,6 +217,8 @@ struct FrameHeader {
     int desk_w = 0;
     int desk_h = 0;
     std::vector<DeskRect> rects;
+    std::uint64_t window = 0;
+    std::uint32_t alpha_bytes = 0;
 };
 
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(Hello, protocol_version, screen_w, screen_h, dpi_scale, hostname, desk)
@@ -214,13 +237,15 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(Pong, t, t_peer)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(DeskMove, x, y)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(DeskCursor, shape)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(DeskRect, x, y, w, h)
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(DeskWindow, id, x, y, w, h)
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(DeskLayout, desk_w, desk_h, windows)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(FrameHeader, seq, t_capture_us, width, height, codec, layer, x, y,
-                                                desk_w, desk_h, rects)
+                                                desk_w, desk_h, rects, window, alpha_bytes)
 
 // Any message that travels on the control channel (port 50500).
 using Message = std::variant<Hello, FocusEnter, FocusLeave, MouseMove, MouseButtonEvent, MouseWheel,
                              Key, StreamStart, StreamStop, RemoteMouseMove, Clipboard, Ping, Pong,
-                             DeskMove, DeskCursor>;
+                             DeskMove, DeskCursor, DeskLayout>;
 
 // Serializes a message struct (including FrameHeader) to JSON with its "type" field set.
 template <class M>

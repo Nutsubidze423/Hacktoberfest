@@ -246,6 +246,10 @@ bool WindowLink::handle(const proto::Message& msg) {
                 if (desk_view_) desk_view_->set_cursor_shape(c.shape);
                 return true;
             },
+            [this](const proto::DeskLayout& l) {
+                if (desk_view_) desk_view_->set_layout(l);  // the other PC's windows: where, in what order
+                return true;
+            },
             [&](const proto::RemoteMouseMove&) {
                 remote_input();
                 return true;
@@ -404,13 +408,27 @@ void WindowLink::desk_main(std::stop_token stop) {
         stop_at.reset();
         log::info("desk: off");
     };
+    const auto make_share = [&](const VirtualDisplay::MonitorRect& r) {
+        try {
+            share = std::make_unique<DeskShare>(
+                r, region, [this](const proto::FrameHeader& hdr, std::span<const std::uint8_t> p) { return send_frame(hdr, p); },
+                [this](const proto::DeskLayout& layout) { send(layout); },
+                DeskShare::Options{.jpeg_quality = std::max(options_.jpeg_quality, 80), .max_fps = options_.max_fps});
+            return true;
+        } catch (const std::exception& e) {
+            log::error("desk: {}", e.what());
+            share.reset();
+            return false;
+        }
+    };
     const auto start = [&](int w, int h, double scale) {
         stop_at.reset();
         if (!vdd || disabled) return;
         const SIZE want = vdd->best_mode(w, h);
         if (share && want.cx == size.cx && want.cy == size.cy && vdd->attached()) {
             vdd->set_scale(scale);
-            go_live(true);  // reconnected within the grace period: everything stayed where it was
+            go_live(true);   // reconnected within the grace period: everything stayed where it was
+            share->resend();  // the peer starts from nothing
             log::info("desk: back on");
             return;
         }
@@ -429,12 +447,7 @@ void WindowLink::desk_main(std::stop_token stop) {
         vdd->set_scale(scale);
         vdd_rect = to_rect(r->rect);
         region.set_vdd({.device = device, .rect = vdd_rect, .live = false});
-        try {
-            share = std::make_unique<DeskShare>(
-                *r, region, [this](const proto::FrameHeader& hdr, std::span<const std::uint8_t> p) { return send_frame(hdr, p); },
-                DeskShare::Options{.jpeg_quality = options_.jpeg_quality, .max_fps = options_.max_fps});
-        } catch (const std::exception& e) {
-            log::error("desk: {}", e.what());
+        if (!make_share(*r)) {
             vdd->detach();
             vdd_rect = {};
             region.set_vdd({.device = device});
@@ -465,15 +478,18 @@ void WindowLink::desk_main(std::stop_token stop) {
         }
         const auto now = Clock::now();
         if (stop_at && now >= *stop_at) finish();
-        if (share && !share->alive()) {
-            log::warn("desk: the virtual display went away");
-            finish();
-        }
         if (share && now >= next_recheck) {
             next_recheck = now + kVddRecheck;
-            if (const auto r = vdd->rect(); r && to_rect(r->rect) != vdd_rect) {
-                vdd_rect = to_rect(r->rect);  // moved in the display settings
+            const auto r = vdd->rect();
+            if (!r) {
+                log::warn("desk: the virtual display went away");
+                finish();
+            } else if (to_rect(r->rect) != vdd_rect) {
+                // Moved in the display settings: positions are relative to it, so start sharing anew.
+                vdd_rect = to_rect(r->rect);
                 region.set_vdd({.device = device, .rect = vdd_rect, .live = desk_live_.load()});
+                share.reset();
+                if (!make_share(*r)) finish();
             }
         }
         // The cursor shape over our windows on the other PC's screen (I-beam, hand, resize arrows...).

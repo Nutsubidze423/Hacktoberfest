@@ -67,6 +67,17 @@ public:
     // Runs after set_vdd(), on the caller's thread (e.g. posts a refresh to the hook thread).
     void set_on_change(std::function<void()> callback);
 
+    // Where the user clicked last: on the VDD (the other PC's screen) or on this PC's own screens.
+    // Windows that open soon after a click over there are moved over there (desk_tracker), like
+    // apps opening on the monitor you work on. Hook-safe.
+    void note_click(bool on_vdd);
+    bool clicked_on_vdd_within(unsigned long long ms) const;
+
+    // This PC's own mouse or keyboard was used (hook-safe). The other PC's mouse on our windows
+    // doesn't pull our cursor away while our user is moving it.
+    void note_local_input();
+    bool local_input_within(unsigned long long ms) const;
+
 private:
     mutable std::shared_mutex mutex_;
     std::string device_;
@@ -78,6 +89,10 @@ private:
 
     std::mutex callback_mutex_;
     std::function<void()> on_change_;
+
+    std::atomic<unsigned long long> click_ms_{0};  // GetTickCount64() of the last click
+    std::atomic<bool> click_on_vdd_{false};
+    std::atomic<unsigned long long> local_input_ms_{0};
 };
 
 }  // namespace kvm::desk

@@ -84,21 +84,22 @@ winrt::com_ptr<ID3D11Texture2D> to_texture(const d3d::IDirect3DSurface& surface)
 // are allowed to turn it off; older Windows versions don't have the property at all.
 void try_disable_border(const wgc::GraphicsCaptureSession& session) {
     if (!ApiInformation::IsPropertyPresent(kSessionClass, L"IsBorderRequired")) return;
-    bool allowed = false;
-    // The access request is async and .get() must not block an STA thread, so wait on a helper thread.
-    std::thread([&allowed] {
-        try {
-            const auto status =
-                wgc::GraphicsCaptureAccess::RequestAccessAsync(wgc::GraphicsCaptureAccessKind::Borderless).get();
-            allowed = status == winrt::Windows::Security::Authorization::AppCapabilityAccess::
-                                    AppCapabilityAccessStatus::Allowed;
-        } catch (const winrt::hresult_error&) {
-        }
-    }).join();
-    if (!allowed) {
-        log::warn("capture: borderless capture not allowed, Windows will draw a border");
-        return;
-    }
+    // Asked once per process: desk mode starts a capture for every window it shows.
+    static const bool allowed = [] {
+        bool ok = false;
+        // The access request is async and .get() must not block an STA thread, so wait on a helper thread.
+        std::thread([&ok] {
+            try {
+                const auto status =
+                    wgc::GraphicsCaptureAccess::RequestAccessAsync(wgc::GraphicsCaptureAccessKind::Borderless).get();
+                ok = status == winrt::Windows::Security::Authorization::AppCapabilityAccess::AppCapabilityAccessStatus::Allowed;
+            } catch (const winrt::hresult_error&) {
+            }
+        }).join();
+        if (!ok) log::warn("capture: borderless capture not allowed, Windows will draw a border");
+        return ok;
+    }();
+    if (!allowed) return;
     try {
         session.IsBorderRequired(false);
     } catch (const winrt::hresult_error& e) {
