@@ -130,14 +130,18 @@ Claude წაიკითხავს ამ ფაილს, იპოვის
 - [ ] M1: მაუსი + კლავიატურა A → B ქსელით
 - [ ] ფაზა 2: სქროლი (ჰორიზ. ჩათვლით), extended კლავიშები, გაჭედილი კლავიშების გასუფთავება
 
-### თემო — ვიდეო A მხარეს
-- [x] `window_picker.*`: ფანჯრების სია და არჩევა (`capture_test.exe` ჯერ მხოლოდ ირჩევს ფანჯარას)
-- [ ] `capture.*`: WGC → D3D11 staging → BGRA
-- [ ] `tools/capture_test.cpp`: 10 ფრეიმი → `captures/*.jpg`
-- [ ] `jpeg_encoder.*`: TurboJPEG + დროის გაზომვა
-- [ ] `video_sender.*`: `LatestSlot` → ქსელი (მხოლოდ ბოლო ფრეიმი)
-- [ ] M1: რეალური ფანჯრის სტრიმი B-ზე
-- [ ] ფაზა 2: `stream_start/stop`, ზომის ცვლილება, max FPS; (სურვ.) H.264 Media Foundation
+### თემო — ფანჯარა B-ზე და უკან (VDD + ვიდეო A მხარეს)
+დეტალები: `ARTEFACT/თემო — დავალებები (ლუკა → თემო).md`.
+- [x] `window_picker.*`: ფანჯრების სია და არჩევა
+- [ ] T1: `capture_test` — `#include` .cpp-ის ნაცვლად `kvm_host_lib`
+- [ ] T2: `virtual_display.*`: პოვნა, რეჟიმი, მხარე, attach/detach + `tools/vdd_test.cpp`
+- [ ] T3: `window_mover.*`: ფანჯარა VDD-ზე (maximize) და უკან
+- [ ] T4: `capture.*`: WGC `CreateForMonitor` → BGRA → `LatestSlot`
+- [ ] T5: `jpeg_encoder.*`: TurboJPEG + დროის გაზომვა
+- [ ] T6: `capture_test`: ფანჯარა VDD-ზე → 10 ფრეიმი `captures/*.jpg` → უკან
+- [ ] T7: `video_sender.*`: `LatestSlot` → `FrameChannel::send_frame` (ლუკას `video.h`)
+- [ ] M1: რეალური ფანჯრის სტრიმი B-ზე (ლუკასთან და სანდროსთან ერთად)
+- [ ] ფაზა 2: (სურვ.) H.264 Media Foundation
 
 ### სანდრო — Viewer B + უკუ-ინფუთი
 - [ ] `jpeg_decoder.*`: TurboJPEG → BGRA
