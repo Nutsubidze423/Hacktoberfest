@@ -26,6 +26,7 @@
 #include "kvm/clipboard.h"
 #include "kvm/config.h"
 #include "kvm/desk_region.h"
+#include "kvm/discovery.h"
 #include "kvm/dpi.h"
 #include "kvm/file_link.h"
 #include "kvm/file_transfer.h"
@@ -330,6 +331,17 @@ int wmain(int argc, wchar_t** argv) {
         g_file_server = &file_server;
         kvm::log::info("kvm_host: protocol v{}, listening on ports {} + {} (client on the {}). Ctrl+C to quit.",
                        proto::kProtocolVersion, cfg.control_port, cfg.video_port, cfg.client_side);
+
+        // Lets the other PC find this one by name on the local network (no IP to type there).
+        std::optional<kvm::discovery::Responder> discovery;
+        try {
+            const std::string name = make_hello(false).hostname;
+            discovery.emplace(name, cfg.control_port);
+            kvm::log::info("discovery: the other PC can find '{}' on the local network (UDP {})", name,
+                           kvm::discovery::kDiscoveryPort);
+        } catch (const std::exception& e) {
+            kvm::log::warn("{} - the other PC needs this PC's IP (--host)", e.what());
+        }
 
         // Windows A <-> B (Ctrl+Alt+Shift+W): a window of A goes to B's viewer and back; B's windows
         // show up in the viewer here.

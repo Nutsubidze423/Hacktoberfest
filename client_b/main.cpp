@@ -8,19 +8,23 @@
 #include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <cstdio>
 #include <exception>
 #include <filesystem>
+#include <iostream>
 #include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <thread>
+#include <vector>
 
 #include <windows.h>
 
 #include "kvm/clipboard.h"
 #include "kvm/config.h"
 #include "kvm/desk_region.h"
+#include "kvm/discovery.h"
 #include "kvm/dpi.h"
 #include "kvm/file_link.h"
 #include "kvm/file_transfer.h"
@@ -171,6 +175,35 @@ void run_session(kvm::net::Connection& conn, const kvm::Config& cfg, kvm::KvmLin
     windows.set_video(nullptr);  // closes the video channel and joins the viewer's reader
 }
 
+// Finds the host on the local network. Prefers `preferred` (the host of the last session) so that a
+// reconnect after its IP changed (common on phone hotspots) finds the same PC; asks in the console
+// when several hosts answer. nullopt = nobody answered.
+std::optional<kvm::discovery::Host> discover_host(const std::string& preferred) {
+    auto hosts = kvm::discovery::find();
+    std::erase_if(hosts, [](const kvm::discovery::Host& h) {
+        if (h.protocol_version == proto::kProtocolVersion) return false;
+        kvm::log::warn("discovery: '{}' ({}) speaks protocol v{}, this PC v{} - update it to the same commit", h.name,
+                       h.ip, h.protocol_version, proto::kProtocolVersion);
+        return true;
+    });
+    if (hosts.empty()) return std::nullopt;
+    for (const auto& h : hosts) {
+        if (!preferred.empty() && h.name == preferred) return h;
+    }
+    if (hosts.size() == 1) return hosts.front();
+
+    std::printf("\nKVM hosts on this network:\n");
+    for (std::size_t i = 0; i < hosts.size(); ++i) {
+        std::printf("  %zu) %s  (%s)\n", i + 1, hosts[i].name.c_str(), hosts[i].ip.c_str());
+    }
+    std::printf("Connect to [1]: ");
+    std::fflush(stdout);
+    std::string line;
+    std::getline(std::cin, line);
+    const std::size_t pick = line.empty() ? 1 : static_cast<std::size_t>(std::atoi(line.c_str()));
+    return (pick >= 1 && pick <= hosts.size()) ? hosts[pick - 1] : hosts.front();
+}
+
 }  // namespace
 
 int wmain(int argc, wchar_t** argv) {
@@ -212,8 +245,14 @@ int wmain(int argc, wchar_t** argv) {
         }
         cfg.desk = cfg.desk && desk_enabled;
         g_desk = cfg.desk && desk_own_vdd;
-        kvm::log::info("kvm_client: protocol v{}, host {}:{}. Ctrl+C to quit.", proto::kProtocolVersion, cfg.host_ip,
-                       cfg.control_port);
+        const bool auto_host = cfg.host_ip.empty() || cfg.host_ip == "auto";
+        if (auto_host) {
+            kvm::log::info("kvm_client: protocol v{}, host: found on the local network. Ctrl+C to quit.",
+                           proto::kProtocolVersion);
+        } else {
+            kvm::log::info("kvm_client: protocol v{}, host {}:{}. Ctrl+C to quit.", proto::kProtocolVersion, cfg.host_ip,
+                           cfg.control_port);
+        }
 
         // client_side says where B stands next to A, so A is on the opposite side of B.
         const auto side = kvm::display::parse_side(cfg.client_side);
@@ -292,7 +331,21 @@ int wmain(int argc, wchar_t** argv) {
             kvm::log::info("Ctrl+Alt+Shift+W: send the window in front to the other PC, press again to bring it back");
         }
 
+        std::string host_name;  // the host of the last session, preferred when looking again
         while (g_running) {
+            if (auto_host) {
+                kvm::log::info("looking for a KVM host on the local network...");
+                const auto found = discover_host(host_name);
+                if (!found) {
+                    kvm::log::info("no KVM host found yet - is kvm_host running on the other PC, on the same Wi-Fi?");
+                    std::this_thread::sleep_for(kReconnectDelay);
+                    continue;
+                }
+                kvm::log::info("found '{}' at {}", found->name, found->ip);
+                host_name = found->name;
+                cfg.host_ip = found->ip;
+                cfg.control_port = found->control_port;
+            }
             if (auto conn = kvm::net::connect(cfg.host_ip, cfg.control_port)) {
                 run_session(*conn, cfg, kvm_link ? &*kvm_link : nullptr, clip_on ? &clip : nullptr, files, windows);
             }

@@ -125,6 +125,7 @@ Claude წაიკითხავს ამ ფაილს, იპოვის
 - [x] M1b: ფანჯარა A ⇄ B `main.cpp`-ში: ვიდეო არხი ორივე მიმართულებით, `WindowShare` + viewer + `remote_input`, hotkey `Ctrl+Alt+Shift+W`, დაბრუნება გამოსვლისას — გააკეთა თემომ გუნდის თხოვნით (`host_a/window_link.*`, სანდროს viewer-ის მერჯი); ერთ PC-ზე შემოწმებულია, ორ PC-ზე ჯერ არა
 - [x] KVM ორივე მიმართულებით + clipboard `main.cpp`-ში (დემეტრეს `KvmLink`, `ClipboardSync`), protocol `clipboard` (`0d7a7c1`)
 - [x] ფაილების არხი 50502 `main.cpp`-ში (თემოს T9) + `FileLink` + `Hotkeys` (`Ctrl+Alt+Shift+F` = drop ყუთი კურსორთან, სანამ დემეტრეს D1 არ არის)
+- [x] ავტომატური ძებნა ქსელში (UDP 50503): `"host_ip": "auto"`, B HOST-ს სახელით პოულობს და უკავშირდება; IP-ს შეცვლისას თავიდან პოულობს
 - [ ] ფაზა 2: end-to-end latency, კავშირის გაწყვეტის სცენარები
 - [ ] M2: დემოს სცენარი, README
 

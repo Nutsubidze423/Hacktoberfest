@@ -44,6 +44,10 @@ if ($Firewall) {
         New-NetFirewallRule -DisplayName 'KVM demo (TCP 50500-50502)' -Direction Inbound -Protocol TCP `
             -LocalPort 50500-50502 -RemoteAddress LocalSubnet -Profile Any -Action Allow | Out-Null
     }
+    if (-not (Get-NetFirewallRule -DisplayName 'KVM demo discovery (UDP 50503)' -ErrorAction SilentlyContinue)) {
+        New-NetFirewallRule -DisplayName 'KVM demo discovery (UDP 50503)' -Direction Inbound -Protocol UDP `
+            -LocalPort 50503 -RemoteAddress LocalSubnet -Profile Any -Action Allow | Out-Null
+    }
     Write-Host 'Firewall: TCP 50500-50502 open for the local network (any profile).'
 }
 

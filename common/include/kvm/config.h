@@ -9,7 +9,7 @@
 namespace kvm {
 
 struct Config {
-    std::string host_ip = "127.0.0.1";
+    std::string host_ip = "auto";  // "auto" (or empty) = find the host on the local network
     std::uint16_t control_port = 50500;
     std::uint16_t video_port = 50501;
     std::uint16_t file_port = 50502;

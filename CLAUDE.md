@@ -77,7 +77,7 @@ docs/PLAN.md               # როლები, ვადები, ჩეკ�
 common/                    # static lib kvm_common
   include/kvm/
     protocol.h             # შეტყობინებები (ლუკა) — გაყინული კონტრაქტი
-    net.h  video.h  config.h  log.h  queue.h  file_link.h  hotkeys.h   # (ლუკა)
+    net.h  video.h  config.h  log.h  queue.h  file_link.h  hotkeys.h  discovery.h   # (ლუკა)
     win32_input.h  dpi.h  input_capture.h  input_inject.h  kvm_link.h  clipboard.h   # (დემეტრე)
   src/*.cpp
 host_a/                    # kvm_host.exe
@@ -100,6 +100,7 @@ tools/
 - პორტი **50500** — control + input: `[u32 len][JSON]`, big-endian.
 - პორტი **50501** — ვიდეო: `[u32 header_len][u32 payload_len][header JSON][payload]`, big-endian.
 - პორტი **50502** — ფაილები (თემო, `common/.../file_transfer.*`): იგივე framing, header-ები `file_begin` / `file_chunk` / `file_end` / `transfer_end`.
+- პორტი **50503** (UDP) — discovery (ლუკა, `common/.../discovery.*`): B ქსელში ეძებს (`kvm_discover`, broadcast), A პასუხობს (`kvm_here`: სახელი, პორტი, ვერსია). config `"host_ip": "auto"` (ნაგულისხმევი) = IP-ს ჩაწერა არ სჭირდება; `--host <IP>` ხელით.
 - `TCP_NODELAY` ორივე სოკეტზე.
 
 შეტყობინებები (`type` ველით):
