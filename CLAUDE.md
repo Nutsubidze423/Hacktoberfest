@@ -85,7 +85,7 @@ client_b/                  # kvm_client.exe
   input_inject.*           # A-დან მოსული ინფუთის ემულაცია (დემეტრე)
   viewer_window.*  jpeg_decoder.*  video_receiver.*            # (სანდრო)
 tools/
-  ping_test.cpp            # (ლუკა)
+  protocol_test.cpp  queue_test.cpp            # ტესტები (ლუკა)
   capture_test.cpp         # ფანჯარა → .jpg (თემო)
   fake_streamer.cpp        # .jpg-ები → viewer (სანდრო)
 ```
@@ -135,7 +135,8 @@ build\x64-release\host_a\kvm_host.exe
 # B-ზე:
 build\x64-release\client_b\kvm_client.exe --host <A-ს IP>
 ```
-ლოკალური ტესტი ერთ კომპიუტერზე: `--host 127.0.0.1`.
+ლოკალური ტესტი ერთ კომპიუტერზე: ჯერ `kvm_host.exe`, მერე `kvm_client.exe --host 127.0.0.1` — ორივე ლოგში უნდა გამოჩნდეს `connected` და ყოველ 5 წმ-ში `link: rtt ...`.
+exe-ები static-ია: A-ზე ან B-ზე გადასატანად საკმარისია `.exe` + `config.json` (VS-ის დაყენება საჭირო არ არის).
 Windows Firewall-ში დაუშვი `kvm_host.exe` პორტებზე 50500–50501 (Private network).
 
 ## ჩეკლისტი (საერთო milestone-ები; დეტალური — docs/PLAN.md)

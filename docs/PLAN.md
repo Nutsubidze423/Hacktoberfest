@@ -113,9 +113,9 @@ Claude წაიკითხავს ამ ფაილს, იპოვის
 - [x] M0: CMake + presets + vcpkg, ცარიელი `kvm_host` / `kvm_client`, `.gitignore` (build/), `tools/setup_env.ps1`
 - [ ] M0: `protocol.h` — ყველა შეტყობინება, გუნდთან ერთად გაყინული (დაწერილია + `tools/protocol_test.cpp`; რჩება გუნდის review)
 - [x] `queue.h` (`BlockingQueue`, `LatestSlot`) + `tools/queue_test.cpp`, `log.h`, `config.h`
-- [ ] `net.*`: `Connection`, `Server`, `Client` + ხელახალი დაკავშირება
-- [ ] `hello`, `ping`/`pong` + clock offset
-- [ ] `tools/ping_test.cpp`; Python ფაილების (`ping_test.py`, `requirements.txt`) წაშლა
+- [x] `net.*`: `Connection`, `Server`, `connect()` + ხელახალი დაკავშირება (B: ყოველ 1 წმ-ში), dead-link 5 წმ
+- [x] `hello` (+ ვერსიის შემოწმება), `ping`/`pong` + clock offset (min-RTT, NTP-ს მსგავსად)
+- [x] ping ტესტი — `kvm_host`/`kvm_client` ყოველ 5 წმ-ში წერენ rtt-ს; Python ფაილები წაშლილია
 - [ ] ვიდეოს framing 50501 პორტზე (`send_frame` / `recv_frame`)
 - [ ] M1: KVM ინტეგრაცია დემეტრესთან; ვიდეოს ინტეგრაცია თემოსთან და სანდროსთან
 - [ ] ფაზა 2: end-to-end latency, კავშირის გაწყვეტის სცენარები

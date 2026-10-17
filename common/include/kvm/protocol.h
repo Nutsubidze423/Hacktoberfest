@@ -12,6 +12,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <utility>
 #include <variant>
 
@@ -165,6 +166,11 @@ nlohmann::json encode(const M& msg) {
 
 inline nlohmann::json encode(const Message& msg) {
     return std::visit([](const auto& m) { return encode(m); }, msg);
+}
+
+// The "type" string of a message, e.g. for logging.
+inline std::string_view type_of(const Message& msg) {
+    return std::visit([](const auto& m) { return std::decay_t<decltype(m)>::kType; }, msg);
 }
 
 // Parses a control-channel message. Returns nullopt for unknown types or malformed fields;
