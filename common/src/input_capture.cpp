@@ -229,6 +229,21 @@ struct CaptureThread {
         return vdd.height() > 0 ? std::clamp((p.y - vdd.top + 0.5) / vdd.height(), 0.0, 1.0) : 0.5;
     }
 
+    // The cursor left the VDD back toward our own monitors (the inner edge, the one facing our
+    // screen), as opposed to running off its top / bottom / outer edges (which are walls).
+    static bool left_vdd_inward(input::Point p) {
+        switch (cap->options_.client_side) {
+            case display::Side::Right: return p.x < vdd.left;
+            case display::Side::Left: return p.x >= vdd.right;
+            case display::Side::Top: return p.y >= vdd.bottom;
+            default: return p.y < vdd.top;  // Bottom
+        }
+    }
+
+    static input::Point clamp_to_vdd(input::Point p) {
+        return {std::clamp(p.x, vdd.left, vdd.right - 1), std::clamp(p.y, vdd.top, vdd.bottom - 1)};
+    }
+
     static void desk_move(input::Point p) {
         push(proto::DeskMove{.x = p.x - vdd.left, .y = p.y - vdd.top});
     }
@@ -352,8 +367,17 @@ struct CaptureThread {
 
         if (wp == WM_MOUSEMOVE) {
             if (!on_vdd && !peer_buttons() && !key_peer) {
-                desk_leave(/*tell=*/true);
-                return CallNextHookEx(nullptr, code, wp, lp);
+                // Only the inner edge (toward our own screen) ends the desk session. The VDD's top,
+                // bottom and outer edges are walls, like a real monitor's: clamp the cursor and stay,
+                // so it doesn't flap on/off and jump when it brushes the top or bottom border.
+                if (left_vdd_inward(p)) {
+                    desk_leave(/*tell=*/true);
+                    return CallNextHookEx(nullptr, code, wp, lp);
+                }
+                const auto in = clamp_to_vdd(p);
+                SetCursorPos(in.x, in.y);
+                desk_move(in);
+                return 1;
             }
             if (on_vdd || peer_buttons()) desk_move(p);
             // Files dragged from here over the peer's desktop: FileLink may catch them (as at the old edge).

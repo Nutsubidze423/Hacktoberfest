@@ -230,7 +230,19 @@ int main() {
             check(c.x == on_peer.x && c.y == on_peer.y, "the cursor really is on the VDD (like a third monitor)");
         }
 
+        // -- the top edge is a wall: brushing above the VDD must not end the session or jump the cursor
+        abs_move({v.left + v.width() / 2, v.top + 20});
+        settle();
+        take_sent();
+        abs_move({v.left + v.width() / 2, v.top - 40});  // push up, off the VDD top
+        settle();
+        check(cap.desk(), "pushing above the VDD top stays in the desk session (no flapping)");
+        check(cursor().y >= v.top && v.contains(cursor()), "... and the cursor is clamped onto the VDD");
+        check(only<proto::FocusLeave>(take_sent()).empty(), "... no focus_leave sent");
+
         // -- a click on the peer's desktop goes to the peer, not here
+        abs_move(on_peer);
+        settle();
         mouse(MOUSEEVENTF_LEFTDOWN);
         mouse(MOUSEEVENTF_LEFTUP);
         settle();
