@@ -77,19 +77,22 @@ public:
     VideoReceiver(const VideoReceiver&) = delete;
     VideoReceiver& operator=(const VideoReceiver&) = delete;
 
-    // A's clock minus B's clock (net::LinkStats::clock_offset_us). Needed for a correct latency on
-    // two PCs; 0 is exact when A and B are the same machine.
-    void set_clock_offset_us(std::int64_t offset) { clock_offset_us_ = offset; }
+    // A's clock minus B's clock (net::LinkStats::clock_offset_us). Until this is called the viewer
+    // shows latency as unknown; 0 is exact when A and B are the same machine.
+    void set_clock_offset_us(std::int64_t offset) {
+        clock_offset_us_ = offset;
+        has_clock_offset_ = true;
+    }
 
 private:
     void receive_loop(std::stop_token stop);
     void decode_loop(std::stop_token stop);
-    void show_status(std::wstring text);
 
     std::string host_;
     std::uint16_t port_;
     ViewerWindow& viewer_;
     std::atomic<std::int64_t> clock_offset_us_{0};
+    std::atomic<bool> has_clock_offset_{false};
 
     video_wire::Socket sock_;  // closed from the destructor to unblock recv()
     LatestSlot<video_wire::Frame> latest_;

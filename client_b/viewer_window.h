@@ -1,20 +1,40 @@
-// Win32 window that shows the streamed frames from A (v1: GDI StretchDIBits).
-// The image keeps its aspect ratio; unused space is black (letterboxing).
+// Viewer window on B (docs/DESIGN.md section 4): Direct2D renderer, custom title strip,
+// connection state screens, HUD. Shows A's streamed window with its aspect ratio preserved.
+//
+// Threads: create() and the message loop run on the UI thread. The "thread-safe" methods below
+// may be called from the network / video threads; they only store data and invalidate.
 #pragma once
-
-#include <chrono>
-#include <memory>
-#include <mutex>
-#include <string>
 
 #include <windows.h>
 
+#include <d2d1.h>
+
+#include <array>
+#include <atomic>
+#include <chrono>
+#include <cstdint>
+#include <mutex>
+#include <optional>
+#include <string>
+
 #include "jpeg_decoder.h"
+#include "ui_draw_tmp.h"
+#include "viewer_chrome.h"
+#include "viewer_hud.h"
 
 namespace kvm {
 
 // Largest rect with the image's aspect ratio that fits centered inside `area`.
 RECT fit_rect(int image_w, int image_h, const RECT& area);
+
+// Connection to A as seen by B. "Streaming" / "Stalled" are derived from frames while Linked.
+enum class LinkState { Waiting, Connecting, Linked, Lost };
+
+struct FrameInfo {
+    std::uint32_t seq = 0;
+    // Capture time converted to B's steady_now_us() clock; nullopt while the clock offset is unknown.
+    std::optional<std::int64_t> t_capture_local_us;
+};
 
 class ViewerWindow {
 public:
@@ -24,47 +44,103 @@ public:
     ViewerWindow(const ViewerWindow&) = delete;
     ViewerWindow& operator=(const ViewerWindow&) = delete;
 
-    // Creates and shows the window. The calling thread owns it and must run a message loop.
-    // Closing the window posts WM_QUIT to that thread.
-    bool create(const std::wstring& title, int client_w, int client_h);
-
+    // Creates and shows the window (client 960x600 dp). Closing it posts WM_QUIT.
+    bool create();
     HWND hwnd() const { return hwnd_; }
 
-    // Thread-safe (call from the video thread). Swaps `frame` with the pending one, so on return
-    // `frame` holds a spare buffer — decode the next frame into it to avoid allocations. If the
-    // previous frame was not painted yet, it is dropped: the window always shows the newest frame.
-    void present(BgraImage& frame);
+    // --- Thread-safe ---------------------------------------------------------------------
+    void set_endpoint(const std::string& host, std::uint16_t port);
+    void set_reconnects(bool reconnects);  // true: LOST says "reconnecting", else "restart the client"
+    void set_link_state(LinkState state);  // leaving Linked ends the current stream
+    void set_rtt_ms(std::optional<int> rtt_ms);
+    void set_jpeg_quality(std::optional<int> quality);
+    void start_stream(std::wstring title, int width, int height);  // stream_start from A
+    void stop_stream();                                             // stream_stop from A
+    // Swaps `frame` with the pending one; on return `frame` is a spare buffer to decode into.
+    // An unpainted pending frame is dropped, so the window always shows the newest frame.
+    void present(BgraImage& frame, const FrameInfo& info);
+    void count_payload_bytes(std::size_t bytes) { payload_bytes_ += bytes; }
 
-    // Thread-safe. Extra overlay line under the size/FPS line (e.g. decode time, latency).
-    void set_status(std::wstring text);
+    // --- UI thread -----------------------------------------------------------------------
+    // Client point -> 0..1 over the drawn image. nullopt over the strip, letterbox or no frame.
+    std::optional<D2D1_POINT_2F> to_normalized(POINT client) const;
 
 private:
-    struct FontDeleter {
-        void operator()(HFONT font) const { DeleteObject(font); }
-    };
+    enum class View { Waiting, Connecting, Linked, Streaming, Stalled, Lost };
+    using Clock = std::chrono::steady_clock;
 
     static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp);
     LRESULT handle_message(UINT msg, WPARAM wp, LPARAM lp);
-    void paint();
-    void update_font();
+
+    void render();
+    void draw_content(ui::Painter& p, View view, const D2D1_RECT_F& content);
+    void draw_state_block(ui::Painter& p, View view, const D2D1_RECT_F& content);
+    void draw_stalled(ui::Painter& p, const D2D1_RECT_F& content);
+    bool ensure_render_target();
+    void take_pending_frame();
+    void on_hud_tick();
+    void on_blink_tick();
+    void apply_dpi(UINT dpi);
+    void resize_for_stream(int width, int height);
+    void on_strip_click(viewer::StripButton button);
+    LRESULT hit_test_nc(POINT screen) const;
+    View current_view() const;
+    bool blinking_visible(View view) const;
 
     HWND hwnd_ = nullptr;
-    std::unique_ptr<HFONT__, FontDeleter> font_;
+    UINT dpi_ = 96;
 
-    // Three buffers: the video thread's spare, pending_ (newest, not yet painted) and displayed_.
-    // paint() moves pending_ into displayed_ under the lock, then draws without it, so a slow paint
-    // never blocks decoding of the next frame.
-    std::mutex mutex_;  // guards pending_, has_pending_, status_, and hwnd_ for the video thread
-    BgraImage pending_;
-    bool has_pending_ = false;
-    std::wstring status_;
+    // Shared with other threads.
+    mutable std::mutex mutex_;
+    struct Shared {
+        std::string host;
+        std::uint16_t port = 0;
+        bool reconnects = false;
+        LinkState link = LinkState::Waiting;
+        std::optional<int> rtt_ms;
+        std::optional<int> jpeg_quality;
+        std::wstring stream_title;
+        std::uint64_t generation = 0;  // bumped when a stream ends; the UI resets per-stream state
+        BgraImage pending;
+        FrameInfo pending_info;
+        bool has_pending = false;
+    } shared_;
+    std::atomic<std::uint64_t> payload_bytes_{0};
 
     // UI thread only.
+    ui::TextStyles text_;
+    ui::ComPtr<ID2D1HwndRenderTarget> rt_;
+    ui::ComPtr<ID2D1SolidColorBrush> brush_;
+    ui::ComPtr<ID2D1Bitmap> bitmap_;
+    bool bitmap_dirty_ = false;
+
     BgraImage displayed_;
-    int fps_ = 0;
-    int frames_in_window_ = 0;
-    std::chrono::steady_clock::time_point fps_window_start_ = std::chrono::steady_clock::now();
-    double paint_ms_ = 0;
+    bool have_frame_ = false;
+    std::uint64_t seen_generation_ = 0;
+    bool stream_sized_ = false;  // window already resized for this stream
+    Clock::time_point last_frame_time_{};
+    std::optional<std::uint32_t> last_seq_;
+    std::uint64_t dropped_ = 0;
+    std::optional<int> latency_ms_;
+    D2D1_RECT_F image_rect_{};  // where the frame was last drawn (client px)
+
+    std::uint64_t frames_shown_ = 0;
+    std::uint64_t frames_at_last_tick_ = 0;
+    std::uint64_t bytes_at_last_tick_ = 0;
+    std::array<std::uint64_t, 4> frame_buckets_{};  // 4 x 250 ms = the 1 s FPS/MBPS window
+    std::array<std::uint64_t, 4> byte_buckets_{};
+    std::size_t bucket_ = 0;
+    viewer::HudValues hud_;
+
+    bool hud_visible_ = true;
+    bool one_to_one_ = false;
+    bool blink_on_ = true;
+    bool reduced_motion_ = false;
+    viewer::StripButton hover_ = viewer::StripButton::None;
+    viewer::StripButton pressed_ = viewer::StripButton::None;
+    bool tracking_mouse_ = false;
+    std::wstring footer_;
+    std::wstring window_text_;
 };
 
 }  // namespace kvm

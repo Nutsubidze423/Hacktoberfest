@@ -213,17 +213,12 @@ namespace {
 constexpr auto kConnectTimeout = std::chrono::seconds(2);
 constexpr auto kReconnectDelay = std::chrono::seconds(1);
 
-std::wstring widen(const std::string& s) {
-    const int len = MultiByteToWideChar(CP_UTF8, 0, s.data(), static_cast<int>(s.size()), nullptr, 0);
-    std::wstring out(len, L'\0');
-    MultiByteToWideChar(CP_UTF8, 0, s.data(), static_cast<int>(s.size()), out.data(), len);
-    return out;
-}
-
 }  // namespace
 
 VideoReceiver::VideoReceiver(std::string host, std::uint16_t port, ViewerWindow& viewer)
     : host_(std::move(host)), port_(port), viewer_(viewer) {
+    viewer_.set_endpoint(host_, port_);
+    viewer_.set_reconnects(true);
     receive_thread_ = std::jthread([this](std::stop_token stop) { receive_loop(stop); });
     decode_thread_ = std::jthread([this](std::stop_token stop) { decode_loop(stop); });
 }
@@ -238,20 +233,22 @@ VideoReceiver::~VideoReceiver() {
     // jthread members join here.
 }
 
-void VideoReceiver::show_status(std::wstring text) {
-    viewer_.set_status(std::move(text));
-}
-
 void VideoReceiver::receive_loop(std::stop_token stop) {
     bool failure_logged = false;
+    bool lost = false;  // after a disconnect the viewer keeps showing LOST until we are back
     while (!stop.stop_requested()) {
+        if (!lost) {
+            viewer_.set_link_state(LinkState::Connecting);
+        }
         int err = 0;
         video_wire::Socket s = video_wire::connect_tcp(host_, port_, kConnectTimeout, &err);
         if (!s.valid()) {
+            if (!lost) {
+                viewer_.set_link_state(LinkState::Waiting);
+            }
             if (!failure_logged) {
                 log::warn("video: cannot connect to {}:{} (error {}), retrying every {} s", host_, port_, err,
                           kReconnectDelay.count());
-                show_status(std::format(L"Connecting to {}:{}...", widen(host_), port_));
                 failure_logged = true;
             }
             const auto until = std::chrono::steady_clock::now() + kReconnectDelay;
@@ -266,18 +263,21 @@ void VideoReceiver::receive_loop(std::stop_token stop) {
             break;
         }
         failure_logged = false;
+        lost = false;
         log::info("video: connected to {}:{}", host_, port_);
-        show_status(L"Connected, waiting for frames...");
+        viewer_.set_link_state(LinkState::Linked);
 
         while (true) {
             video_wire::Frame frame;
             if (const int rc = video_wire::recv_frame(sock_.get(), frame); rc != 0) {
                 if (!stop.stop_requested()) {
                     log::warn("video: connection lost (error {}), reconnecting", rc);
-                    show_status(L"Disconnected, reconnecting...");
+                    viewer_.set_link_state(LinkState::Lost);
+                    lost = true;
                 }
                 break;
             }
+            viewer_.count_payload_bytes(frame.payload.size());
             latest_.put(std::move(frame));
         }
         sock_.close();
@@ -303,21 +303,17 @@ void VideoReceiver::decode_loop(std::stop_token stop) {
             continue;
         }
 
-        const std::int64_t t0 = steady_now_us();
         if (!decoder.decode(frame->payload, spare)) {
             log::warn("video: frame {} dropped: {}", frame->header.seq, decoder.last_error());
             continue;
         }
-        const std::int64_t t1 = steady_now_us();
-        viewer_.present(spare);
+        FrameInfo info{.seq = frame->header.seq};
+        if (has_clock_offset_) {
+            // t_capture_us is A's clock; subtracting the offset maps it to ours.
+            info.t_capture_local_us = frame->header.t_capture_us - clock_offset_us_;
+        }
+        viewer_.present(spare, info);
         ++decoded_frames;
-
-        // Capture on A -> decoded on B. t_capture_us is A's clock; subtracting the offset maps it to ours.
-        const std::int64_t captured_local = frame->header.t_capture_us - clock_offset_us_;
-        const double latency_ms = static_cast<double>(t1 - captured_local) / 1000.0;
-        const double decode_ms = static_cast<double>(t1 - t0) / 1000.0;
-        show_status(std::format(L"latency {:.0f} ms   decode {:.1f} ms   {} KB   dropped {}", latency_ms, decode_ms,
-                                frame->payload.size() / 1024, latest_.overwritten()));
     }
     log::info("video: decode thread stopped after {} frames", decoded_frames);
 }

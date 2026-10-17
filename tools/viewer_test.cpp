@@ -1,20 +1,18 @@
-// viewer_test: show JPEGs in the B-side viewer window, no network needed.
+// viewer_test: run the B-side viewer without A.
 //
-//   viewer_test.exe <image.jpg>               decode once (+ timing benchmark) and show it
-//   viewer_test.exe <folder> [--fps 30]       play every *.jpg in the folder in a loop from a
-//                                             background thread, like the real video receiver
+//   viewer_test.exe <image.jpg | folder> [--fps 30]
+//       Local playback: decodes the JPEG(s) (logs a decode benchmark) and plays them in a loop from
+//       a background thread, like the real video receiver. No network.
 //   viewer_test.exe --connect <host> [--port 50501]
-//                                             live stream over the network via VideoReceiver
-//                                             (from tools/fake_streamer.exe, later from A)
+//       Live stream over the network via VideoReceiver (from tools/fake_streamer.exe, later from A).
 //
-// Check: the image looks right, keeps its aspect ratio when the window is resized, and the
-// overlay shows size, FPS and decode time.
+// Check: the image looks right, keeps its aspect ratio when resized, and the HUD shows FPS etc.
 
 #include <algorithm>
 #include <chrono>
+#include <cstdint>
 #include <cwctype>
 #include <filesystem>
-#include <format>
 #include <fstream>
 #include <iterator>
 #include <stop_token>
@@ -27,6 +25,7 @@
 #include "jpeg_decoder.h"
 #include "kvm/config.h"
 #include "kvm/log.h"
+#include "kvm/net.h"
 #include "video_receiver.h"
 #include "viewer_window.h"
 
@@ -42,10 +41,6 @@ std::string utf8(const std::wstring& s) {
     std::string out(len, '\0');
     WideCharToMultiByte(CP_UTF8, 0, s.data(), static_cast<int>(s.size()), out.data(), len, nullptr, nullptr);
     return out;
-}
-
-double ms_since(Clock::time_point start) {
-    return std::chrono::duration<double, std::milli>(Clock::now() - start).count();
 }
 
 bool is_jpeg(const fs::path& p) {
@@ -74,36 +69,21 @@ std::vector<uint8_t> read_file(const fs::path& path) {
     return {std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
 }
 
-// Initial client size: the image size, shrunk to fit 80% of the primary work area.
-SIZE initial_client_size(int image_w, int image_h) {
-    RECT work{};
-    SystemParametersInfoW(SPI_GETWORKAREA, 0, &work, 0);
-    const RECT limit{0, 0, (work.right - work.left) * 8 / 10, (work.bottom - work.top) * 8 / 10};
-    if (image_w <= limit.right && image_h <= limit.bottom) {
-        return {image_w, image_h};
-    }
-    const RECT fit = kvm::fit_rect(image_w, image_h, limit);
-    return {fit.right - fit.left, fit.bottom - fit.top};
-}
-
-void play_loop(std::stop_token stop, const std::vector<std::vector<uint8_t>>& jpegs, int fps,
-               kvm::ViewerWindow& viewer) {
+void play_loop(std::stop_token stop, const std::vector<std::vector<uint8_t>>& jpegs, int fps, kvm::ViewerWindow& viewer) {
     kvm::JpegDecoder decoder;
-    kvm::BgraImage spare;  // reused: present() hands back the previous frame's buffer
+    kvm::BgraImage spare;  // reused: present() hands back a spare buffer
     const auto period = std::chrono::microseconds(1'000'000 / fps);
     auto next = Clock::now();
-    size_t index = 0;
+    std::uint32_t seq = 0;
 
-    while (!stop.stop_requested()) {
-        const auto t0 = Clock::now();
+    for (std::size_t index = 0; !stop.stop_requested(); index = (index + 1) % jpegs.size()) {
         if (decoder.decode(jpegs[index], spare)) {
-            const double decode_ms = ms_since(t0);
-            viewer.present(spare);
-            viewer.set_status(std::format(L"decode {:.2f} ms  frame {}/{}", decode_ms, index + 1, jpegs.size()));
+            viewer.count_payload_bytes(jpegs[index].size());
+            // Decoded right now, so capture -> display is exact on this machine.
+            viewer.present(spare, {.seq = seq++, .t_capture_local_us = kvm::steady_now_us()});
         } else {
             kvm::log::warn("frame {}: {}", index + 1, decoder.last_error());
         }
-        index = (index + 1) % jpegs.size();
         next += period;
         std::this_thread::sleep_until(next);
     }
@@ -128,11 +108,68 @@ int run_connect(int argc, wchar_t** argv) {
     }
 
     kvm::ViewerWindow viewer;
-    if (!viewer.create(std::format(L"KVM viewer test - {}:{}", argv[2], port), 1280, 720)) {
+    if (!viewer.create()) {
         kvm::log::error("could not create the viewer window (error {})", GetLastError());
         return 1;
     }
+    viewer.set_jpeg_quality(cfg.jpeg_quality);
     kvm::VideoReceiver receiver(host, port, viewer);  // declared after viewer: its threads stop first
+    if (host == "127.0.0.1" || host == "localhost") {
+        receiver.set_clock_offset_us(0);  // same machine, same clock: latency is exact
+    }
+    pump_messages();
+    return 0;
+}
+
+int run_local(const fs::path& input, int fps) {
+    const auto files = collect_inputs(input);
+    if (files.empty()) {
+        kvm::log::error("no .jpg files at {}", utf8(input.wstring()));
+        return 1;
+    }
+    std::vector<std::vector<uint8_t>> jpegs;
+    for (const auto& f : files) {
+        jpegs.push_back(read_file(f));
+    }
+
+    // Decode every file once to catch broken ones, then benchmark the first.
+    kvm::JpegDecoder decoder;
+    kvm::BgraImage first;
+    for (std::size_t i = 0; i < jpegs.size(); ++i) {
+        kvm::BgraImage image;
+        if (!decoder.decode(jpegs[i], image)) {
+            kvm::log::error("{}: {}", utf8(files[i].filename().wstring()), decoder.last_error());
+            return 1;
+        }
+        if (i == 0) {
+            first = std::move(image);
+        }
+    }
+    double best_ms = 1e9;
+    double total_ms = 0;
+    kvm::BgraImage scratch;
+    for (int i = 0; i < kBenchmarkRuns; ++i) {
+        const auto t0 = Clock::now();
+        decoder.decode(jpegs[0], scratch);
+        const double ms = std::chrono::duration<double, std::milli>(Clock::now() - t0).count();
+        best_ms = std::min(best_ms, ms);
+        total_ms += ms;
+    }
+    kvm::log::info("{} file(s); {}: {}x{}, {} KB, decode avg {:.2f} ms / best {:.2f} ms ({} runs)", jpegs.size(),
+                   utf8(files[0].filename().wstring()), first.width, first.height, jpegs[0].size() / 1024,
+                   total_ms / kBenchmarkRuns, best_ms, kBenchmarkRuns);
+
+    kvm::ViewerWindow viewer;
+    if (!viewer.create()) {
+        kvm::log::error("could not create the viewer window (error {})", GetLastError());
+        return 1;
+    }
+    // Local playback stands in for a linked host streaming the folder.
+    viewer.set_link_state(kvm::LinkState::Linked);
+    viewer.start_stream(input.filename().wstring(), first.width, first.height);
+
+    kvm::log::info("playing at {} fps; close the window to quit", fps);
+    std::jthread player(play_loop, std::cref(jpegs), fps, std::ref(viewer));  // stops before viewer dies
     pump_messages();
     return 0;
 }
@@ -153,75 +190,11 @@ int wmain(int argc, wchar_t** argv) {
         }
         return run_connect(argc, argv);
     }
-    const fs::path input = argv[1];
     int fps = 30;
-    for (int i = 2; i < argc; ++i) {
-        if (std::wstring_view(argv[i]) == L"--fps" && i + 1 < argc) {
+    for (int i = 2; i + 1 < argc; ++i) {
+        if (std::wstring_view(argv[i]) == L"--fps") {
             fps = std::clamp(_wtoi(argv[++i]), 1, 240);
         }
     }
-
-    const auto files = collect_inputs(input);
-    if (files.empty()) {
-        kvm::log::error("no .jpg files at {}", utf8(input.wstring()));
-        return 1;
-    }
-
-    // Load everything up front so the benchmark and playback measure decoding only, not disk I/O.
-    std::vector<std::vector<uint8_t>> jpegs;
-    for (const auto& f : files) {
-        jpegs.push_back(read_file(f));
-    }
-    kvm::log::info("loaded {} file(s) from {}", jpegs.size(), utf8(input.wstring()));
-
-    // Decode every file once to catch broken ones, then benchmark the first.
-    kvm::JpegDecoder decoder;
-    kvm::BgraImage first;
-    for (size_t i = 0; i < jpegs.size(); ++i) {
-        kvm::BgraImage image;
-        if (!decoder.decode(jpegs[i], image)) {
-            kvm::log::error("{}: {}", utf8(files[i].filename().wstring()), decoder.last_error());
-            return 1;
-        }
-        if (!decoder.last_error().empty()) {
-            kvm::log::warn("{}: {}", utf8(files[i].filename().wstring()), decoder.last_error());
-        }
-        if (i == 0) {
-            first = std::move(image);
-        }
-    }
-
-    double best_ms = 1e9;
-    double total_ms = 0;
-    kvm::BgraImage scratch;
-    for (int i = 0; i < kBenchmarkRuns; ++i) {
-        const auto t0 = Clock::now();
-        decoder.decode(jpegs[0], scratch);
-        const double ms = ms_since(t0);
-        best_ms = std::min(best_ms, ms);
-        total_ms += ms;
-    }
-    const double avg_ms = total_ms / kBenchmarkRuns;
-    kvm::log::info("{}: {}x{}, {} KB, decode avg {:.2f} ms / best {:.2f} ms ({} runs)",
-                   utf8(files[0].filename().wstring()), first.width, first.height, jpegs[0].size() / 1024, avg_ms,
-                   best_ms, kBenchmarkRuns);
-
-    const SIZE size = initial_client_size(first.width, first.height);
-    kvm::ViewerWindow viewer;
-    if (!viewer.create(L"KVM viewer test", size.cx, size.cy)) {
-        kvm::log::error("could not create the viewer window (error {})", GetLastError());
-        return 1;
-    }
-
-    std::jthread player;  // declared after viewer: stopped and joined before the window is destroyed
-    if (jpegs.size() == 1) {
-        viewer.present(first);
-        viewer.set_status(std::format(L"decode avg {:.2f} ms / best {:.2f} ms", avg_ms, best_ms));
-    } else {
-        kvm::log::info("playing {} frames at {} fps; close the window to quit", jpegs.size(), fps);
-        player = std::jthread(play_loop, std::cref(jpegs), fps, std::ref(viewer));
-    }
-
-    pump_messages();
-    return 0;
+    return run_local(argv[1], fps);
 }
