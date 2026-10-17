@@ -154,10 +154,10 @@ Claude წაიკითხავს ამ ფაილს, იპოვის
 - [ ] ფაზა 2: (სურვ.) H.264 Media Foundation
 
 ### სანდრო — Viewer B + უკუ-ინფუთი
-- [ ] `jpeg_decoder.*`: TurboJPEG → BGRA
-- [ ] `viewer_window.*`: Win32 + `StretchDIBits`, aspect ratio, FPS/latency overlay
-- [ ] `tools/fake_streamer.cpp`
-- [ ] `video_receiver.*`: ქსელი → decode → ჩვენება
+- [x] `jpeg_decoder.*`: TurboJPEG → BGRA (1080p decode ≈ 7 ms; ტესტი: `tools/viewer_test.cpp`)
+- [x] `viewer_window.*`: Win32 + `StretchDIBits`, aspect ratio, FPS/latency overlay (latency-ს მნიშვნელობა ჩაჯდება net-ის ინტეგრაციისას `set_status()`-ით)
+- [x] `tools/fake_streamer.cpp` (+ `viewer_test.exe --connect <host>`)
+- [x] `video_receiver.*`: ქსელი → decode → ჩვენება (LatestSlot, reconnect; 1080p 30 fps / ~10 ms ლოკალურად). **დროებითი framing** `kvm::video_wire`-ში — ლუკას `send_frame`/`recv_frame`-ზე გადასვლა; `kvm_client`-ში ჩართვა M1-ზე
 - [ ] viewer-ის ინფუთი → `remote_mouse_move`, `mouse_button`, `mouse_wheel`, `key`
 - [ ] M1: რეალური სტრიმი B-ზე
 - [ ] ფაზა 2: `host_a/remote_input.*` — client area-ზე გადათვლა, ფოკუსი, კლავიატურა
