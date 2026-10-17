@@ -1,9 +1,38 @@
-# CLAUDE.md — KVM + Window Streaming დემო
+# CLAUDE.md — KVM + Window Streaming დემო (C++)
 
 ## კომუნიკაცია
 - მომხმარებელთან **ქართულად** ისაუბრე. კოდი, კომენტარები, ცვლადების სახელები და commit-ები: **ინგლისურად**.
-- მომხმარებელი AI-ს დახმარებით სწავლობს და აწყობს პროექტს. ცვლილების შემდეგ მოკლედ ახსენი, რა გააკეთე და როგორ გაუშვას/შეამოწმოს.
-- ერთდროულად ერთ ეტაპზე იმუშავე. ეტაპის დასრულების შემდეგ განაახლე ჩეკლისტი ამ ფაილში.
+- მომხმარებლები AI-ს დახმარებით სწავლობენ და აწყობენ პროექტს. ცვლილების შემდეგ მოკლედ ახსენი, რა გააკეთე და როგორ გაუშვან/შეამოწმონ.
+- ერთდროულად ერთ ამოცანაზე იმუშავე.
+
+## გუნდი — წაიკითხე პირველ რიგში
+პროექტზე მუშაობს 4 დეველოპერი, თითოეული საკუთარ კომპიუტერზე, საკუთარ Claude-ის სესიაში (vibe coding). სრული დეტალები (ვადები, ამოცანები, ჩეკლისტები) — [docs/PLAN.md](docs/PLAN.md).
+
+| სახელი | ტრეკი | ფაილები | პირველი ამოცანა |
+|---|---|---|---|
+| **ლუკა** (lead) | Core / ქსელი / ინტეგრაცია; PR review და merge | root CMake, `CMakePresets.json`, `vcpkg.json`, `common/` (protocol, net, config, log, queue), `host_a/main.cpp`, `client_b/main.cpp`, `tools/ping_test.cpp` | M0: repo-ს ჩონჩხი (CMake + vcpkg + ცარიელი exe-ები) და `protocol.h` |
+| **დემეტრე** | KVM ინფუთი: hooks, კიდიდან გადასვლა, suppress, გადაუდებელი ღილაკი, ემულაცია B-ზე | `common/win32_input.*`, `common/dpi.*`, `host_a/input_capture.*`, `client_b/input_inject.*` | `win32_input` (SendInput wrappers) — სანდროსაც სჭირდება |
+| **თემო** | ვიდეო A-ზე: ფანჯრის არჩევა, WGC capture, JPEG, გაგზავნა | `host_a/window_picker.*`, `capture.*`, `jpeg_encoder.*`, `video_sender.*`, `tools/capture_test.cpp` | `window_picker`, მერე capture ფაილში შენახვით |
+| **სანდრო** | Viewer B-ზე + უკუ-ინფუთი A-ს ფანჯარაში | `client_b/viewer_window.*`, `jpeg_decoder.*`, `video_receiver.*`, `host_a/remote_input.*`, `tools/fake_streamer.cpp` | JPEG decode + viewer ფანჯარა ფაილიდან წაკითხული სურათით |
+
+### როცა მომხმარებელი წერს „მე ვარ <სახელი>“
+1. **წაიკითხე** `docs/PLAN.md` — მისი როლი, ფაილები, ფაზის ამოცანები და ჩეკლისტი („პროგრესი“ სექციაში).
+2. **შეამოწმე** `git status`, `git log --oneline -15`, მიმდინარე ბრენჩი და შესაბამისი ფაილები — რა არის რეალურად გაკეთებული (ჩეკლისტს ბრმად ნუ ენდობი).
+3. **აუხსენი** მოკლედ, ქართულად:
+   - ვინ არის გუნდში და რა არის მისი როლი (1–2 წინადადება);
+   - რა არის უკვე გაკეთებული მის ტრეკზე და დანარჩენ გუნდში, რაც მას ეხება (მაგ. დამოკიდებულება სხვის ფაილზე);
+   - რომელია შემდეგი ამოცანა, როგორ გავაკეთებთ და როგორ შევამოწმებთ, რომ მუშაობს.
+4. **დაიწყე მუშაობა** იმავე პასუხში — ახალი ბრენჩი (`<name>/<task>`) და პირველი ნაბიჯი. ნებართვას ნუ ელოდები, თუ რამე ნამდვილად გაუგებარი არ არის.
+5. თუ ამოცანა სხვის ჯერ დაუმთავრებელ კოდზეა დამოკიდებული — დროებითი stub/mock გააკეთე **საკუთარ ფაილებში** და უთხარი, ვის ელოდება.
+
+გარემოს შემოწმება პირველ სესიაზე: თუ `cmake`, `cl`, `ninja` ან `VCPKG_ROOT` არ არსებობს — ჯერ დაეხმარე Visual Studio 2022 („Desktop development with C++“) და vcpkg-ის დაყენებაში.
+
+წესები გუნდურ მუშაობაზე:
+- შეცვალე **მხოლოდ იმ დეველოპერის ფაილები**, ვისთანაც მუშაობ. სხვისი ფაილის შეცვლა თუ საჭიროა — ნუ შეცვლი; უთხარი, ვის უნდა მიმართოს.
+- `common/include/kvm/protocol.h` იცვლება მხოლოდ ლუკასთან სესიაში.
+- თუ დეველოპერის სახელი არ იცი — ჰკითხე, სანამ კოდს შეცვლი.
+- ამოცანის დასრულებისას: build გადის → ტესტი გავლილია → მონიშნე პუნქტი (`[x]`) `docs/PLAN.md`-ში იმავე commit-ში.
+- ბრენჩი ამოცანაზე: `<სახელი ლათინურად>/<ამოცანა>`, მაგ. `temo/wgc-capture`. main-ში პირდაპირ commit არ გააკეთო.
 
 ## პროექტის მიზანი
 ორი Windows კომპიუტერი ერთ ლოკალურ ქსელში:
@@ -12,7 +41,7 @@
 
 საბოლოო მიზანი: A-ს მაუსი/კლავიატურა გადადის B-ს ეკრანზე (როგორც Deskflow / Mouse Without Borders), და A-ს ცალკეული ფანჯარა (მაგ. Photoshop) ტრანსლირდება B-ზე ისე, თითქოს B იყოს A-ს მესამე მონიტორი. ფანჯრის პროცესი ყოველთვის A-ზე მუშაობს; B მხოლოდ აჩვენებს სურათს და აბრუნებს ინფუთს.
 
-## დემოს ფარგლები (10 საათი)
+## დემოს ფარგლები (≈10 საათი, 4 ადამიანი)
 **შედის:**
 1. მაუსი/კლავიატურა A → B ეკრანის კიდიდან გადასვლით (B-ს კონტროლი).
 2. A-ზე არჩეული ერთი ფანჯრის სტრიმი B-ზე ცალკე ფანჯარაში.
@@ -21,47 +50,51 @@
 **არ შედის (მერე):** ვირტუალური მონიტორის დრაივერი (IddCx), ფანჯრის drag-ით გადატანა, დაშიფვრა/დაწყვილება, clipboard, ფაილები, ინსტალერი, პენის წნევა.
 
 ## ტექნოლოგიები
-- Python 3.11+, მხოლოდ Windows 10/11.
-- `pynput` — global mouse/keyboard hooks (A).
-- `ctypes` + Win32 `SendInput`, `SetCursorPos`, `SetForegroundWindow` — ინფუთის ემულაცია (A და B).
-- `windows-capture` (Windows.Graphics.Capture) — ერთი ფანჯრის გადაღება; fallback: `dxcam` + ფანჯრის rect crop.
-- კომპრესია: დასაწყისში **JPEG** (`turbojpeg` ან `opencv-python`). შემდეგ, თუ დრო დარჩა: `PyAV` + `h264_nvenc` / `h264_qsv` / `h264_amf`.
-- ქსელი: `asyncio` TCP.
-- B-ზე ჩვენება: `pygame` (ან `tkinter` + PIL).
-- `pywin32` — ფანჯრების სია, HWND, rect, DPI.
+- **C++20**, MSVC (Visual Studio 2022), **CMake ≥ 3.25 + Ninja**, **vcpkg** (manifest mode). მხოლოდ Windows 10/11 x64.
+- vcpkg: `nlohmann-json` (JSON), `libjpeg-turbo` (JPEG). C++/WinRT და D3D11 — Windows SDK-დან (≥ 10.0.19041).
+- ქსელი: Winsock2, ბლოკირებადი სოკეტები + ცალკე thread-ები.
+- A hooks: `SetWindowsHookEx` (`WH_MOUSE_LL`, `WH_KEYBOARD_LL`) + Raw Input relative მოძრაობისთვის.
+- ინფუთის ემულაცია: `SendInput`, `SetCursorPos`, `SetForegroundWindow`.
+- Capture: Windows.Graphics.Capture (C++/WinRT) → D3D11 → BGRA. Fallback: `PrintWindow`.
+- კომპრესია: v1 **JPEG** (TurboJPEG). v2: Media Foundation H.264 hardware MFT.
+- B-ზე ჩვენება: v1 Win32 + `StretchDIBits`; v2 D3D11 swapchain.
+- Thread-ებს შორის: `kvm::BlockingQueue<T>`, ვიდეოსთვის `kvm::LatestSlot<T>` (მხოლოდ ბოლო ფრეიმი).
 
-A-ს ვიდეოკარტა: _TODO — შეავსე (NVIDIA / AMD / Intel)_
+A-ს ვიდეოკარტა: _TODO — შეავსე (NVIDIA / AMD / Intel)_. B: Intel UHD 620.
 
 ## სტრუქტურა
 ```
-kvm-demo/
-  CLAUDE.md
-  requirements.txt
-  config.json              # IP-ები, პორტები, B-ს მდებარეობა (left/right), ხარისხი
-  common/
-    protocol.py            # შეტყობინებების ტიპები, encode/decode
-    net.py                 # length-prefixed TCP framing
-    win32_input.py         # SendInput wrappers
-    dpi.py                 # SetProcessDpiAwareness, მონიტორების გეომეტრია
-  host_a/
-    main.py                # გაშვება: python -m host_a.main
-    input_capture.py       # hooks + edge detection + ინფუთის გადამისამართება
-    window_picker.py       # ხილული ფანჯრების სია, არჩევა
-    window_stream.py       # capture → encode → send
-    remote_input.py        # B-დან მოსული ინფუთის ჩასმა A-ს ფანჯარაში
-  client_b/
-    main.py                # გაშვება: python -m client_b.main
-    input_inject.py        # A-დან მოსული ინფუთის ემულაცია B-ზე
-    viewer.py              # სტრიმის ჩვენება + ინფუთის უკან გაგზავნა
-  tools/
-    ping_test.py           # კავშირისა და latency-ს ტესტი
+CMakeLists.txt             # root  (ლუკა)
+CMakePresets.json          # x64-debug / x64-release  (ლუკა)
+vcpkg.json                 # (ლუკა)
+config.json                # IP, პორტები, B-ს მდებარეობა (left/right), ხარისხი
+docs/PLAN.md               # როლები, ვადები, ჩეკლისტები
+common/                    # static lib kvm_common
+  include/kvm/
+    protocol.h             # შეტყობინებები (ლუკა) — გაყინული კონტრაქტი
+    net.h  config.h  log.h  queue.h            # (ლუკა)
+    win32_input.h  dpi.h                       # (დემეტრე)
+  src/*.cpp
+host_a/                    # kvm_host.exe
+  main.cpp                 # (ლუკა)
+  input_capture.*          # hooks + edge detection + suppress (დემეტრე)
+  window_picker.*  capture.*  jpeg_encoder.*  video_sender.*   # (თემო)
+  remote_input.*           # B-დან მოსული ინფუთი → A-ს ფანჯარა (სანდრო)
+client_b/                  # kvm_client.exe
+  main.cpp                 # (ლუკა)
+  input_inject.*           # A-დან მოსული ინფუთის ემულაცია (დემეტრე)
+  viewer_window.*  jpeg_decoder.*  video_receiver.*            # (სანდრო)
+tools/
+  ping_test.cpp            # (ლუკა)
+  capture_test.cpp         # ფანჯარა → .jpg (თემო)
+  fake_streamer.cpp        # .jpg-ები → viewer (სანდრო)
 ```
 
 ## ქსელური პროტოკოლი
 - A არის სერვერი, B უკავშირდება.
-- პორტი **50500** — control + input (მცირე JSON შეტყობინებები, 4-ბაიტიანი length prefix).
-- პორტი **50501** — ვიდეო ფრეიმები (header JSON + binary payload, length-prefixed).
-- `Nagle` გამორთე (`TCP_NODELAY`) ორივე სოკეტზე.
+- პორტი **50500** — control + input: `[u32 len][JSON]`, big-endian.
+- პორტი **50501** — ვიდეო: `[u32 header_len][u32 payload_len][header JSON][payload]`, big-endian.
+- `TCP_NODELAY` ორივე სოკეტზე.
 
 შეტყობინებები (`type` ველით):
 | type | მიმართულება | ველები |
@@ -74,37 +107,38 @@ kvm-demo/
 | `key` | ორივე | `vk`, `scan`, `down`, `extended` |
 | `stream_start` / `stream_stop` | A→B | `hwnd`, `title`, `width`, `height` |
 | `remote_mouse_move` | B→A | `x_norm`, `y_norm` (სტრიმულ ფანჯარაში, 0..1) |
-| `ping` / `pong` | ორივე | `t` |
+| `ping` / `pong` | ორივე | `t` (+ `pong`-ში `t_peer` — clock offset-ისთვის) |
+| `frame` (50501 header) | A→B | `seq`, `t_capture_us`, `width`, `height`, `codec` |
 
 ## მნიშვნელოვანი წესები
-- **DPI:** ორივე პროცესი დაიწყოს `SetProcessDpiAwareness(2)`-ით (per-monitor). ყოველთვის ფიზიკურ პიქსელებში იმუშავე.
+- **DPI:** ორივე პროცესი იწყება `SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2)`-ით (ან manifest-ით). ყოველთვის ფიზიკურ პიქსელებში იმუშავე.
 - **კოორდინატები სტრიმულ ფანჯარაზე:** B აგზავნის ნორმალიზებულ (0..1) კოორდინატებს. A გადაითვლის ფანჯრის **client area**-ს მიმდინარე rect-ით (ფანჯარა შეიძლება გადაადგილდეს).
-- **Hook-ები:** როცა კონტროლი B-ზეა, A-ს ლოკალური ინფუთი უნდა დაიბლოკოს (suppress), ხოლო კურსორი A-ზე ეკრანის ცენტრში ჩაიკეტოს და relative მოძრაობა გაიგზავნოს.
-- **გადაუდებელი გამოსვლა:** `Ctrl+Alt+Shift+Q` ყოველთვის აბრუნებს კონტროლს A-ზე და აჩერებს hook-ებს. ეს არასოდეს წაშალო.
-- Hook callback-ებში მძიმე სამუშაო არ გააკეთო — მხოლოდ queue-ში ჩადება.
+- **Hook-ები:** როცა კონტროლი B-ზეა, A-ს ლოკალური ინფუთი იბლოკება (hook აბრუნებს 1), relative მოძრაობა მოდის Raw Input-იდან და იგზავნება B-ზე.
+- **გადაუდებელი გამოსვლა:** `Ctrl+Alt+Shift+Q` ყოველთვის აბრუნებს კონტროლს A-ზე და აჩერებს hook-ებს. ეს არასოდეს წაშალო და არასოდეს დაბლოკო.
+- Hook callback-ებში მძიმე სამუშაო არ გააკეთო (არც ლოგი, არც ქსელი) — მხოლოდ queue-ში ჩადება. ნელ hook-ს Windows ჩუმად ხსნის.
 - ვიდეო: თუ ქსელი ვერ ასწრებს, ძველი ფრეიმები გადააგდე (ყოველთვის ბოლო ფრეიმი), queue არ დააგროვო.
 - ელევირებული (Admin) ფანჯრებში ინფუთი ჩვეულებრივი პროცესიდან არ გადის — თუ საჭიროა, host ადმინით გაუშვი.
+- RAII Win32/COM რესურსებისთვის (`winrt::com_ptr`, `wil`-ის მსგავსი wrapper-ები ან საკუთარი `unique_handle`). raw `new`/`delete` არა.
 
-## გაშვება
+## Build და გაშვება
+„Developer PowerShell for VS 2022“-ში:
 ```
-pip install -r requirements.txt
+cmake --preset x64-release
+cmake --build --preset x64-release
 # A-ზე:
-python -m host_a.main
+build\x64-release\host_a\kvm_host.exe
 # B-ზე:
-python -m client_b.main --host <A-ს IP>
+build\x64-release\client_b\kvm_client.exe --host <A-ს IP>
 ```
-Windows Firewall-ში დაუშვი Python პორტებზე 50500–50501 (Private network).
+ლოკალური ტესტი ერთ კომპიუტერზე: `--host 127.0.0.1`.
+Windows Firewall-ში დაუშვი `kvm_host.exe` პორტებზე 50500–50501 (Private network).
 
-## ჩეკლისტი
-- [ ] 0. გარემო: Python, venv, requirements, firewall, `tools/ping_test.py` მუშაობს ორივე მხარეს
-- [ ] 1. `common/net.py` + `protocol.py` — კავშირი, hello, ping/pong, ხელახალი დაკავშირება
-- [ ] 2. A: hooks + edge detection; B: მაუსის მოძრაობა და კლიკები
-- [ ] 3. კლავიატურა + სქროლი + გადაუდებელი ღილაკი + A-ზე დაბრუნება
-- [ ] 4. A: ფანჯრების სია და არჩევა; ერთი ფანჯრის capture (ფაილში შენახვით ტესტი)
-- [ ] 5. JPEG სტრიმი → B viewer (FPS და latency ეკრანზე)
-- [ ] 6. B viewer → A: მაუსი/კლიკები/სქროლი სტრიმულ ფანჯარაზე
-- [ ] 7. B viewer → A: კლავიატურა, ფოკუსი
-- [ ] 8. ტესტი Photoshop-ით; latency/ხარისხის მორგება (სურვილისამებრ NVENC)
+## ჩეკლისტი (საერთო milestone-ები; დეტალური — docs/PLAN.md)
+- [ ] M0. ყველას აქვს VS 2022 + vcpkg; repo-ს ჩონჩხი აიწყობა 4-ივეზე; `protocol.h` გაყინულია
+- [ ] ფაზა 1. ყველა ტრეკი დამოუკიდებლად მუშაობს (net, hooks/inject, capture/encode, viewer)
+- [ ] M1. ფიზიკურ A+B-ზე: KVM A → B და ფანჯრის JPEG სტრიმი B-ზე
+- [ ] ფაზა 2. viewer → A: მაუსი/კლიკები/სქროლი/კლავიატურა/ფოკუსი; სქროლი და extended კლავიშები KVM-ში
+- [ ] M2. ტესტი Photoshop-ით; latency/ხარისხის მორგება; დემოს სცენარი
 
 ## შემდეგი ეტაპები (დემოს მერე)
-IddCx ვირტუალური მონიტორი A-ზე B-ს ზომით → ფანჯრის drag-ით გადატანა → B-ზე ფანჯრების overlay იმავე პოზიციაზე → TLS + PIN დაწყვილება → clipboard → C++/Rust-ზე გადატანა წარმადობისთვის.
+H.264 (Media Foundation / NVENC) → D3D11 zero-copy pipeline → IddCx ვირტუალური მონიტორი A-ზე B-ს ზომით → ფანჯრის drag-ით გადატანა → B-ზე ფანჯრების overlay იმავე პოზიციაზე → TLS + PIN დაწყვილება → clipboard.
