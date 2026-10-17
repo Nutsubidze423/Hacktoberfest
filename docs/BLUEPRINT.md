@@ -2,15 +2,16 @@
 
 Everything the app can do, every control, every setting and every operation it performs on
 Windows, as of 2026-10-18 (main `39c8f56` + Sandro's branches `sandro/displays`,
-`sandro/website-design`). Built from a full read of the code; file references are relative to the
-repo root.
+`sandro/website-design`, `sandro/launcher`). Built from a full read of the code; file references are
+relative to the repo root.
 
 **Status legend**
 
 | Mark | Meaning |
 |---|---|
-| ✅ | Works in the real apps (`kvm_host.exe` / `kvm_client.exe`) |
-| 🧪 | Built and tested, but only reachable from a tool exe — not wired into the apps yet |
+| ✅ | Works in the real apps (`kvm_host.exe` / `kvm_client.exe`, started directly or by `sarke.exe`) |
+| 🚀 | Works when Sarke is started with **`sarke.exe`** (the launcher, §2.0) |
+| 🧪 | Built and tested, but only reachable from a tool exe |
 | ⚠️ | Works with a limitation (stated) |
 | ⏳ | Planned or designed, not built |
 
@@ -23,13 +24,27 @@ Two Windows 10/11 PCs on the same local network become one desk. **A** (host) ru
 PC's mouse and keyboard can control the other, and either PC can send a window or files to the
 other. Apps never leave the PC they run on; the other PC shows their picture and sends input back.
 
-**Pieces you ship:** `kvm_host.exe`, `kvm_client.exe`, `config.json`, and `assets\fonts\` (the UI
-fonts; without them the UI falls back to Segoe UI). Static CRT: no installer, no redistributables.
+**Pieces you ship:** `sarke.exe` (start this), `kvm_host.exe`, `kvm_client.exe`, `config.json`, and
+`assets\fonts\` (the UI fonts; without them the UI falls back to Segoe UI). Static CRT: no
+installer, no redistributables.
 **Optional:** the Virtual Display Driver (VDD) on a PC that should send windows; firewall rules.
 
 ---
 
 ## 2. Feature catalogue
+
+### 2.0 Starting Sarke — `sarke.exe` 🚀
+Double-click `sarke.exe` on each PC. It runs `kvm_host.exe` (host) or `kvm_client.exe` (client) in
+the background — no console window — and gives it a face: the tray icon, the notification cards,
+the Display arrangement window and a settings menu (§3.3). It learns what the app does from its log
+and stops it with Ctrl+Break, so windows come home and the virtual display is detached.
+- **Role:** `--host` / `--client`, else the one remembered in `%LOCALAPPDATA%\Sarke\settings.json`, else on the first run: a host found on the network → client, none → host. Switch it in the menu.
+- **Config:** the `config.json` the apps would find (created with all defaults if missing); passed to the app with `--config`, so the menu, Displays and the app always use the same file.
+- **One per user session:** starting it again shows Display arrangement and "Sarke is already running".
+- **Scripts:** `sarke.exe --quit`, `sarke.exe --restart`; `-- <args>` passes options to the app.
+- **Log:** `%LOCALAPPDATA%\Sarke\logs\host.log` / `client.log` (this run; the previous one is `.old.log`).
+- **If it dies,** the app is ended with it (job object). If the app exits on its own, a card says why.
+- Code: `client_b/launcher.*`, `tools/sarke.cpp`; tested by `tools/launcher_test.exe` and end-to-end with a real host + client.
 
 ### 2.1 Connecting ✅
 | What | How |
@@ -81,13 +96,12 @@ States: Waiting · Connecting · Linked · Streaming · Stalled · Connection lo
 ### 2.8 Clipboard ✅ both ways
 Copy on one PC, paste on the other: text (UTF-8), images (PNG / bitmap → PNG), and **files copied in Explorer** (announced on the clipboard channel, sent over the file channel, pasted with Ctrl+V). Limits: 16 MB text/images; 4 GB / 20000 files. `--no-clipboard` turns it off. Code: `common/src/clipboard.cpp` (Demetre).
 
-### 2.9 Display arrangement ("Where is the other PC?") 🧪
-Shows this PC's real monitors live, the other PC, and the exact edge where the cursor crosses; drag the other PC to a side (or Left/Right buttons, arrow keys); **Apply writes `client_side` into config.json** (correctly for host or client, keeping every other key). Identify flashes each monitor's number; "Windows display settings ›" opens Windows' page. Open it with `tools\sarke_displays.exe` (or the tray menu in the tools). Code: `client_b/display_layout.*`, `display_settings.*`.
-⚠️ Not in the apps' UI yet (Luka: tray in `main.cpp`); the apps read the new side on their next start; each PC keeps its own config; top/bottom locked (see 2.2).
+### 2.9 Display arrangement ("Where is the other PC?") 🚀
+Shows this PC's real monitors live, the other PC, and the exact edge where the cursor crosses; drag the other PC to a side (or Left/Right buttons, arrow keys); **Apply writes `client_side` into config.json** (correctly for host or client, keeping every other key). Identify flashes each monitor's number; "Windows display settings ›" opens Windows' page. Open it from the Sarke tray icon (click, or Display arrangement... in the menu) — **after Apply the launcher restarts the app with the new side**. Also standalone: `tools\sarke_displays.exe`. Code: `client_b/display_layout.*`, `display_settings.*`.
+⚠️ Each PC keeps its own config (the status line says what to set on the other one); top/bottom locked (see 2.2).
 
-### 2.10 Tray icon and notification card 🧪
-Tray: the Sarke mark in "show hidden icons", tooltip "Sarke · state", menu Show viewer / Display arrangement... / Quit. Notifications: Sarke's own card at the **top-right** (like NVIDIA's overlay, in the website's style) on "Connected to host" / "Connection lost"; hover holds, click opens, × closes; fades only when Windows animations are off. Code: `client_b/tray_icon.*`, `toast.*`. Preview: `tools\ui_preview_toast.exe --sequence`.
-⚠️ Only the tool exes create the tray today; the apps run in a console window.
+### 2.10 Tray icon and notification card 🚀
+Tray: the Sarke mark in "show hidden icons", tooltip "Sarke · Host · Linked to tabuladze · 3 ms", the menu of §3.3. Notifications: Sarke's own card at the **top-right** (like NVIDIA's overlay, in the website's style): "Sarke is running", "Connected to {PC}" (address · screen · scale), "Connection lost" (host: waiting for it to come back; client: reconnecting), "Sarke has a problem" (an error line, e.g. a bad config), "Sarke stopped", "Restarting Sarke"; hover holds, click opens Display arrangement, × closes; fades only when Windows animations are off. Each kind can be turned off in the menu. Code: `client_b/tray_icon.*`, `toast.*`. Preview: `tools\ui_preview_toast.exe --sequence`.
 
 ### 2.11 Look and feel ✅
 The website's design system (docs/DESIGN.md v2): dark and light themes following Windows' app mode (`SARKE_THEME=light|dark` forces one), Google Sans + Geist Mono, rounded tiles, pill buttons, Windows 11 rounded windows, the Sarke mark as the icon everywhere.
@@ -120,8 +134,23 @@ The website's design system (docs/DESIGN.md v2): dark and light themes following
 | Arrow keys | Pick a side |
 | Minimize / Close | As in Windows |
 
-### 3.3 Tray menu 🧪 · Notification card 🧪
-Tray: left click / double click / Enter = show viewer; right click = Show viewer, Display arrangement..., Quit. Card: click = open, × = close, hover = hold.
+### 3.3 Tray icon and menu 🚀 · Notification card 🚀
+Left click / double click = Display arrangement. Right click:
+| Item | Does |
+|---|---|
+| Sarke · This PC is the host | (state, not clickable) |
+| **Display arrangement…** | Opens the window (§3.2); Apply restarts the app |
+| Window quality ▸ Low 50 · Medium 75 · High 90 · Best 95 | Writes `jpeg_quality`, restarts the app (a custom value shows as "Custom (n)") |
+| Frame rate ▸ 15 · 30 · 60 fps · No limit | Writes `max_fps` (0 = no limit), restarts |
+| Desk mode (the other PC as a monitor) ✓ | Writes `desk`, restarts |
+| Notifications ▸ When the other PC connects ✓ · When the connection drops ✓ | Saved in `settings.json`, no restart |
+| Open received files | `Downloads\KVM` in Explorer |
+| Open config.json | In Notepad |
+| Show log | This run's log in Notepad |
+| This PC is the ▸ Host (main PC) · Client | Saves the role, restarts as the other app |
+| Restart Sarke / Start Sarke | Restarts (or starts, if it stopped) the app |
+| Quit Sarke | Stops the app gracefully, then the launcher |
+Card: click = Display arrangement, × = close, hover = hold.
 
 ### 3.4 Drop box ✅
 Ctrl+Alt+Shift+F shows it; dropping files sends them; it hides after 5 s (or 0.7 s after a drag leaves).
@@ -144,6 +173,8 @@ While one PC controls the other, these keys are forwarded so they fire on the co
 
 **kvm_client.exe** — `--host <ip>` (skip discovery) · `--config <path>` · `--log <file>` · `--no-kvm` · `--no-clipboard` · `--no-desk` · `--desk-no-vdd` (show the host's windows but never attach this PC's VDD; one-PC tests).
 
+**sarke.exe** — `[--host | --client] [--config <path>] [-- <args for the app>]` · `--quit` · `--restart`.
+
 **Tools** — `sarke_displays.exe [--role host|client] [--config <path>] [--peer 1920x1200@1.5 <name>]`; `ui_preview_viewer.exe --state waiting|connecting|linked|streaming|stalled|lost [--hidden]`; `ui_preview_toast.exe [--kind connected|lost|info] [--sequence] [--motion on|off]`; `ui_preview_logo.exe [--ico <file>]`.
 
 ---
@@ -163,7 +194,7 @@ Found in the working directory, else next to the exe and up to three parent fold
 | `max_fps` | 30 | Frames per second sent (0 = no cap) |
 | `desk` | `true` | Desk mode on/off (also `--no-desk`) |
 
-Sarke's own files: `%LOCALAPPDATA%\Sarke\peer.json` (last peer seen, read by the Displays window; ⚠️ not written by the apps yet).
+Sarke's own files in `%LOCALAPPDATA%\Sarke\`: `settings.json` (launcher: role, notifications), `peer.json` (the last PC seen — written by the launcher, read by Display arrangement), `logs\host.log` / `client.log` (+ `.old.log`).
 
 ---
 
@@ -178,10 +209,10 @@ Sarke's own files: `%LOCALAPPDATA%\Sarke\peer.json` (last peer seen, read by the
 | **Screen capture** | Windows.Graphics.Capture of monitors and single windows (D3D11, WARP fallback), borderless | `capture.cpp` |
 | **Clipboard** | Read/write text, PNG/DIB, file lists (`CF_HDROP` + Preferred DropEffect) | `clipboard.cpp` |
 | **Drag and drop** | OLE drop target (drop box), `DoDragDrop` to continue a drag on the other PC | `file_drop.cpp`, `file_drag.cpp` |
-| **Files written** | `Downloads\KVM\…` (received), `%TEMP%\Sarke\drag\…` (⚠️ never cleaned), `--log` file; Displays: `config.json` (atomic) and reads `%LOCALAPPDATA%\Sarke\peer.json` | `file_transfer.cpp`, `display_layout.cpp` |
+| **Files written** | `Downloads\KVM\…` (received), `%TEMP%\Sarke\drag\…` (⚠️ never cleaned), `--log` file; Displays and the launcher menu: `config.json` keys (atomic, other keys kept); launcher: `%LOCALAPPDATA%\Sarke\settings.json`, `peer.json`, `logs\` | `file_transfer.cpp`, `display_layout.cpp`, `launcher.cpp` |
 | **Network** | Host listens on all interfaces: TCP 50500–50502, UDP 50503; client connects + broadcasts; `TCP_NODELAY`. **No encryption, no pairing** | `net.cpp`, `discovery.cpp` |
 | **Firewall** | Not touched by the apps. Scripts add inbound rules for TCP 50500–50502 and UDP 50503 (admin): `tools\setup_env.ps1 -Firewall`, `tools\test_package\1_allow_firewall.cmd` | scripts |
-| **Processes started** | `explorer.exe /select` (received files); `ms-settings:display` (Displays) | `file_link.cpp`, `display_settings.cpp` |
+| **Processes started** | `explorer.exe /select` (received files); `ms-settings:display` (Displays); the launcher starts `kvm_host.exe` / `kvm_client.exe` (hidden console, own process group, in a kill-on-close job), sends it Ctrl+Break to stop, ends it after 9 s if it hangs; opens Explorer / Notepad from the menu | `file_link.cpp`, `display_settings.cpp`, `launcher.cpp` |
 | **Registry** | Only indirectly (display changes); reads the app-mode theme value | — |
 
 Security note: anyone on the same network who can reach the ports can connect and inject input. Use it on trusted networks only (the website says the same).
@@ -196,10 +227,10 @@ Control `[u32 len][JSON]` on 50500 · video `[u32 hdr][u32 payload][header][payl
 
 ## 8. Tools and tests
 
-| Safe to run unattended | `protocol_test`, `queue_test`, `dpi_test`, `display_layout_test` (62 checks), `jpeg_test`, `video_sender_test`, `file_transfer_test`, `video_test`, `ui_preview_logo`; `clipboard_test` (overwrites your clipboard); `docs/preview/test_sarke_app.py` (99 browser checks) |
+| Safe to run unattended | `protocol_test`, `queue_test`, `dpi_test`, `display_layout_test` (62 checks), `launcher_test` (25), `jpeg_test`, `video_sender_test`, `file_transfer_test`, `video_test`, `ui_preview_logo`; `clipboard_test` (overwrites your clipboard); `docs/preview/test_sarke_app.py` (99 browser checks) |
 |---|---|
 | **Move the mouse / install hooks / attach the VDD** — don't touch the PC while they run | `win32_input_test`, `input_capture_test`, `input_inject_test`, `kvm_link_test`, `desk_hook_test`, `kvm_local_test` (interactive), `file_drag_test`, `vdd_test`, `window_mover_test`, `capture_test`, `window_share_test`, `remote_input_test`, `desk_test` |
-| **UI to look at** | `ui_preview_viewer`, `ui_preview_toast`, `sarke_displays`, `viewer_test`, `fake_streamer`, `kvm_fake_peer` |
+| **UI to look at** | `sarke` (the launcher), `ui_preview_viewer`, `ui_preview_toast`, `sarke_displays`, `viewer_test`, `fake_streamer`, `kvm_fake_peer` |
 | **Two PCs** | `kvm_host` + `kvm_client`, `tools\test_package\1–5` (firewall, run, diagnose, test video) |
 
 ---
@@ -208,7 +239,7 @@ Control `[u32 len][JSON]` on 50500 · video `[u32 hdr][u32 payload][header][payl
 
 | # | Gap | Who |
 |---|---|---|
-| 1 | Tray, notification card, Display arrangement and `peer.json` are not used by `kvm_host` / `kvm_client` (built and tested, waiting for `main.cpp`) | Luka (handoff in ARTEFACT) |
+| 1 | Tray, cards, Display arrangement and `peer.json` work through `sarke.exe`; running `kvm_host` / `kvm_client` directly still gives only a console. The viewer's HUD on/off isn't a saved setting (it is per window) | — (Luka may still build them into `main.cpp`) |
 | 2 | Top / bottom placement rejected by both `main.cpp` | Luka |
 | 3 | Website download: release repo is `TODO`, so "Download coming soon"; no release zip published yet | Website + whoever publishes releases |
 | 4 | Website says `sarke_host.exe` / `sarke_client.exe`; the exes are still `kvm_host.exe` / `kvm_client.exe` | Luka (exe names) or the website |
@@ -223,4 +254,6 @@ Control `[u32 len][JSON]` on 50500 · video `[u32 hdr][u32 payload][header][payl
 | 13 | Ctrl+Alt+Shift+Q doesn't stop being controlled; host and client on one PC conflict on the W/F hotkeys | Demetre / note |
 | 14 | No encryption or pairing; LAN only | planned |
 | 15 | No exe icon resource / FileDescription (`docs/brand/sarke.ico` is ready) | Luka |
-| 16 | Not verified yet: the v2 design at 125 / 150 / 200 % scale, and the full two-PC run with the new UI | Sandro |
+| 16 | Not verified yet: the v2 design at 125 / 150 / 200 % scale, and the full two-PC run with the new UI and `sarke.exe` (one-PC end-to-end run done: connect / lost cards, Apply → restart, `--restart`, `--quit`) | Sandro |
+| 17 | The packaging script and the website should ship and tell people to start `sarke.exe` | Luka (zip), website |
+| 18 | The tray menu is Windows' own menu (light even in dark mode) | — |

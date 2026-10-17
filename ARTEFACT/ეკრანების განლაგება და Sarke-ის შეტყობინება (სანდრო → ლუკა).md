@@ -51,3 +51,11 @@ build\x64-release\tools\display_layout_test.exe        # 62 შემოწმ�
 build\x64-release\tools\sarke_displays.exe              # ფანჯარა; Apply წერს config.json-ში
 build\x64-release\tools\ui_preview_toast.exe --sequence # ბარათები ზედა მარჯვნივ
 ```
+
+## განახლება 18.10.2026: `sarke.exe` (launcher) — პუნქტი 3 აღარ არის საჭირო
+
+სანდროს გადაწყვეტილებით tray, ბარათები და Displays რეალურ აპებში **`sarke.exe`-ით** მუშაობს (`client_b/launcher.*`, `tools/sarke.cpp`), `main.cpp`-ის შეცვლის გარეშე:
+- `sarke.exe` უშვებს `kvm_host.exe`-ს ან `kvm_client.exe`-ს ფონზე (კონსოლის გარეშე, `--config`-ით), კითხულობს მათ ლოგს (`client '…' connected from …`, `session ended`, `host '…': screen …`, `reconnecting in`, `link: rtt`, `[error]`) და აჩერებს **Ctrl+Break**-ით — თქვენი console handler ფანჯრებს აბრუნებს და VDD-ს ხსნის.
+- tray მენიუ წერს `config.json`-ში (`jpeg_quality`, `max_fps`, `desk`, `client_side`) და აპს თავიდან უშვებს; peer.json-საც ის წერს.
+- **გთხოვ:** ლოგის ეს ხაზები ნუ შეცვალე ისე, რომ `tools/launcher_test.exe` არ გაუშვა (ის ზუსტად ამ ფორმატებს ამოწმებს). zip-ში (`make_test_package.ps1`) ჩადე `sarke.exe` და `assets\fonts\`.
+- პუნქტი 1 (top/bottom) და 4 (hello-ში `client_side`) ისევ შენზეა.

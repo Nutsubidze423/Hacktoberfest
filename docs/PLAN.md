@@ -172,7 +172,9 @@ Claude წაიკითხავს ამ ფაილს, იპოვის
 - [x] Sarke-ის შეტყობინება ზედა მარჯვნივ, NVIDIA-ს მსგავსად (`client_b/toast.*`, `docs/DESIGN.md` 9.3, `tools/ui_preview_toast.exe`); tray-ში „Display arrangement...“
 - [x] ბრაუზერის პროტოტიპი `docs/preview/sarke-app.html` (+ `sarke-ui.html`): იგივე side-only მოდელი, ბრაუზერის რეალური ეკრანები, ახალი ბარათი; 95 ტესტი (`test_sarke_app.py`)
 - [x] დიზაინი v2 = საიტის სტილი (sarke-nine.vercel.app): პალიტრა, ბნელი/ნათელი თემა, Google Sans + Geist Mono (`assets/fonts`), მომრგვალებული ფილები, საიტის ლოგო — viewer, Displays, ბარათი, პრევიუები (`docs/DESIGN.md` v2, `ARTEFACT/დიზაინი v2 — საიტის სტილი`)
-- [ ] ლუკა: tray + Displays + peer-ის დამახსოვრება `main.cpp`-ებში, top/bottom-ის დაშვება (იხ. იგივე ARTEFACT)
+- [x] `sarke.exe` (launcher): kvm_host/kvm_client ფონზე + tray, ბარათები, Displays, პარამეტრების მენიუ (ხარისხი, fps, desk, შეტყობინებები, როლი) — config.json-ში წერს და აპს თავიდან უშვებს; `main.cpp` უცვლელია (`client_b/launcher.*`, `tools/launcher_test.exe` 25, ერთ PC-ზე end-to-end)
+- [x] `docs/BLUEPRINT.md`: ყველა ფუნქცია, ღილაკი, პარამეტრი და Windows-ის ოპერაცია; საიტთან შეუსაბამობები
+- [ ] ლუკა: top/bottom-ის დაშვება `main.cpp`-ებში; zip-ში `sarke.exe` + `assets\fonts`
 - [ ] დიზაინის შემოწმება DPI 125 / 150 / 200%-ზე და ორ მონიტორს შორის (`docs/DESIGN.md` 7)
 - [x] M1b (ლუკა): ფანჯარა A ⇄ B `main.cpp`-ში — viewer-ის მხარე მზადაა (ჩართო თემომ, `host_a/window_link.*`)
 - [x] ~~ფაზა 2: `host_a/remote_input.*`~~ → თემოს გადაეცა (გადაწყვეტილებები 2, #3; T8 `5fc0ab5`)
