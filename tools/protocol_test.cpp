@@ -45,6 +45,8 @@ int main() {
     round_trip(proto::Clipboard{.seq = 3, .kind = "text", .total = 5, .offset = 0, .data = "aGVsbG8="});
     round_trip(proto::DeskMove{.x = -40, .y = 1300});
     round_trip(proto::DeskCursor{.shape = "ibeam"});
+    round_trip(proto::DeskLayout{.desk_w = 1920, .desk_h = 1080,
+                                 .windows = {{.id = 0x10A2B, .x = -8, .y = 0, .w = 800, .h = 600}, {.id = 0x20C3D, .x = 100, .y = 40, .w = 300, .h = 200}}});
     round_trip(proto::Ping{.t = 123456789});
     round_trip(proto::Pong{.t = 123456789, .t_peer = 987654321});
 
@@ -59,9 +61,10 @@ int main() {
     check(header.at("type") == "frame" && header.get<proto::FrameHeader>().seq == 7, "frame header");
 
     const proto::FrameHeader desk_in{.seq = 9, .width = 400, .height = 300, .layer = "desk", .x = 100, .y = 50,
-                                      .desk_w = 1920, .desk_h = 1080, .rects = {{100, 50, 400, 300}, {120, 60, 10, 10}}};
+                                      .desk_w = 1920, .desk_h = 1080, .rects = {{100, 50, 400, 300}, {120, 60, 10, 10}}, .window = 0x10A2B, .alpha_bytes = 42};
     const auto desk_out = proto::encode(desk_in).get<proto::FrameHeader>();
-    check(desk_out.layer == "desk" && desk_out.desk_w == 1920 && desk_out.rects.size() == 2 && desk_out.rects[1].w == 10,
+    check(desk_out.layer == "desk" && desk_out.desk_w == 1920 && desk_out.rects.size() == 2 && desk_out.rects[1].w == 10 &&
+              desk_out.window == 0x10A2B && desk_out.alpha_bytes == 42,
           "desk frame header with rects");
     check(proto::encode(proto::FrameHeader{}).get<proto::FrameHeader>().layer.empty(), "frame header: layer defaults to window stream");
 
