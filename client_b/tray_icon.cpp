@@ -21,6 +21,7 @@ constexpr UINT kTrayCallbackMsg = WM_APP + 10;
 constexpr UINT kIconId = 1;
 constexpr UINT kMenuShowViewer = 1;
 constexpr UINT kMenuQuit = 2;
+constexpr UINT kMenuDisplays = 3;
 
 struct MenuDeleter {
     void operator()(HMENU menu) const { DestroyMenu(menu); }
@@ -114,10 +115,17 @@ void TrayIcon::set_state_word(std::wstring_view word) {
     Shell_NotifyIconW(NIM_MODIFY, &nid);
 }
 
-void TrayIcon::notify(std::wstring_view title, std::wstring_view text) {
+void TrayIcon::notify(std::wstring_view title, std::wstring_view text, Toast::Kind kind) {
+    if (toast_.show({.kind = kind, .tag = L"Link", .title = std::wstring(title), .text = std::wstring(text)},
+                    [this] {
+                        if (actions_.open) actions_.open();
+                    })) {
+        return;
+    }
     if (!hwnd_) {
         return;
     }
+    // Fallback: the Windows notification (bottom-right).
     NOTIFYICONDATAW nid = base_data(hwnd_);
     nid.uFlags = NIF_INFO;
     copy_text(nid.szInfoTitle, title);
@@ -138,13 +146,13 @@ void TrayIcon::on_link_change(LinkState before, LinkState now, std::wstring_view
     case LinkState::Linked:
         set_state_word(L"LINKED");
         if (before != LinkState::Linked) {
-            notify(L"Connected to host", endpoint);
+            notify(L"Connected to host", endpoint, Toast::Kind::Connected);
         }
         break;
     case LinkState::Lost:
         set_state_word(L"LOST");
         if (before != LinkState::Lost) {
-            notify(L"Connection lost", reconnects ? L"reconnecting" : L"restart the client");
+            notify(L"Connection lost", reconnects ? L"reconnecting" : L"restart the client", Toast::Kind::Lost);
         }
         break;
     }
@@ -156,6 +164,9 @@ void TrayIcon::show_menu(int x, int y) {
         return;
     }
     AppendMenuW(menu.get(), MF_STRING, kMenuShowViewer, L"Show viewer");
+    if (actions_.displays) {
+        AppendMenuW(menu.get(), MF_STRING, kMenuDisplays, L"Display arrangement...");
+    }
     AppendMenuW(menu.get(), MF_SEPARATOR, 0, nullptr);
     AppendMenuW(menu.get(), MF_STRING, kMenuQuit, L"Quit");
 
@@ -167,6 +178,8 @@ void TrayIcon::show_menu(int x, int y) {
 
     if (cmd == kMenuShowViewer && actions_.open) {
         actions_.open();
+    } else if (cmd == kMenuDisplays && actions_.displays) {
+        actions_.displays();
     } else if (cmd == kMenuQuit && actions_.quit) {
         actions_.quit();
     }
