@@ -331,6 +331,20 @@ int wmain(int argc, wchar_t** argv) {
                 if (link) link->set_on_drag_at_edge(nullptr);
             }
         } drag_reset{kvm_link ? &*kvm_link : nullptr};
+        if (clip_on) {
+            // Files copied with Ctrl+C travel over the file channel and land on the peer's clipboard
+            // (ClipboardSync announces them first); arriving ones go onto ours instead of Explorer.
+            clip.set_on_files_copied([&files](std::vector<std::filesystem::path> p) { files.send(std::move(p)); });
+            files.set_on_received_claim(
+                [&clip](const std::vector<std::filesystem::path>& saved) { return clip.files_received(saved); });
+        }
+        // Unhook before `files` goes away (declared after it, so destroyed first).
+        struct ClipReset {
+            kvm::clip::ClipboardSync* clip;
+            ~ClipReset() {
+                if (clip) clip->set_on_files_copied(nullptr);
+            }
+        } clip_reset{clip_on ? &clip : nullptr};
         std::jthread file_acceptor([&] {
             while (g_running) {
                 if (auto channel = file_server.accept(files.callbacks())) {

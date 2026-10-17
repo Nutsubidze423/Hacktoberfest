@@ -36,7 +36,7 @@ void reveal(const std::vector<std::filesystem::path>& saved) {
 FileLink::FileLink()
     : drag_source_(std::make_unique<files::FileDragSource>()),
       catcher_(std::make_unique<files::FileDropCatcher>(
-          [this](std::vector<std::filesystem::path> paths) { send(std::move(paths)); })) {}
+          [this](std::vector<std::filesystem::path> paths) { on_catcher_drop(std::move(paths)); })) {}
 
 FileLink::~FileLink() {
     catcher_.reset();  // stop drops before the channel goes
@@ -46,11 +46,20 @@ FileLink::~FileLink() {
 files::Callbacks FileLink::callbacks() const {
     return {
         .on_received =
-            [](const std::vector<std::filesystem::path>& saved) {
+            [this](const std::vector<std::filesystem::path>& saved) {
                 for (const auto& p : saved) {
                     log::info("files: received {}", utf8(p));
                 }
-                reveal(saved);
+                ReceivedClaim claim;
+                {
+                    std::lock_guard lock(mutex_);
+                    claim = on_received_claim_;
+                }
+                if (claim && claim(saved)) {
+                    log::info("files: put on the clipboard, paste them with Ctrl+V");
+                } else {
+                    reveal(saved);
+                }
             },
         .on_send_progress =
             [](std::uint64_t sent, std::uint64_t total) {
@@ -107,7 +116,19 @@ bool FileLink::connected() {
 }
 
 void FileLink::send(std::vector<std::filesystem::path> paths) {
-    const bool drag = GetTickCount64() <= drag_until_.exchange(0);
+    send_now(std::move(paths), /*drag=*/false);
+}
+
+void FileLink::set_on_received_claim(ReceivedClaim claim) {
+    std::lock_guard lock(mutex_);
+    on_received_claim_ = std::move(claim);
+}
+
+void FileLink::on_catcher_drop(std::vector<std::filesystem::path> paths) {
+    send_now(std::move(paths), /*drag=*/GetTickCount64() <= drag_until_.exchange(0));
+}
+
+void FileLink::send_now(std::vector<std::filesystem::path> paths, bool drag) {
     std::shared_ptr<files::FileTransfer> channel;
     std::function<void(double)> on_drag_caught;
     {

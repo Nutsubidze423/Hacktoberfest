@@ -54,13 +54,24 @@ public:
     // y_norm, e.g. [&](double y) { kvm.switch_to_peer(y); }.
     void set_on_drag_caught(std::function<void(double y_norm)> callback);
 
-private:
+    // A normal transfer to the peer (not a drag): e.g. files copied with Ctrl+C (ClipboardSync).
     void send(std::vector<std::filesystem::path> paths);
+
+    // Files arrived: if `claim` returns true (ClipboardSync put them on the clipboard), Explorer is
+    // not opened. Call before files arrive; nullptr removes it.
+    using ReceivedClaim = std::function<bool(const std::vector<std::filesystem::path>&)>;
+    void set_on_received_claim(ReceivedClaim claim);
+
+private:
+    // Files dropped on the catcher window: a caught cross-PC drag, or a plain send.
+    void on_catcher_drop(std::vector<std::filesystem::path> paths);
+    void send_now(std::vector<std::filesystem::path> paths, bool drag);
     bool connected();
 
-    std::mutex mutex_;
+    mutable std::mutex mutex_;
     std::shared_ptr<files::FileTransfer> channel_;
     std::function<void(double)> on_drag_caught_;  // guarded by mutex_
+    ReceivedClaim on_received_claim_;               // guarded by mutex_
     std::atomic<unsigned long long> drag_until_{0};  // GetTickCount64() until which a drop is a caught drag
     std::atomic<double> drag_y_{0.5};
     std::unique_ptr<files::FileDragSource> drag_source_;
