@@ -88,7 +88,7 @@ inline constexpr wchar_t kSeparator[] = L" · ";  // " · "
 inline constexpr wchar_t kTimes[] = L"×";        // "×"
 inline constexpr wchar_t kUnknown[] = L"—";      // "—"
 
-// --- 9. App logo (concept C, "Caret"): pixel K + accent block caret on a 16x16 grid.
+// --- 9. App logo (Sarke concept C, "ს caret"): pixel Georgian ს + accent block caret, 16x16 grid.
 namespace logo {
 inline constexpr int grid = 16;
 inline constexpr std::uint32_t background = color::bg0;
@@ -97,12 +97,9 @@ struct Cell {
     std::uint32_t rgb;
 };
 inline constexpr Cell cells[] = {
-    {2, 3, 2, 10, color::text_hi},  // K stem
-    {4, 7, 2, 2, color::text_hi},   // K joint
-    {6, 5, 2, 2, color::text_hi},   // K upper arm
-    {8, 3, 2, 2, color::text_hi},
-    {6, 9, 2, 2, color::text_hi},   // K lower leg
-    {8, 11, 2, 2, color::text_hi},
+    {2, 3, 2, 8, color::text_hi},   // ს tall left stem
+    {3, 11, 6, 2, color::text_hi},  // ს bowl (open corners keep it round)
+    {8, 6, 2, 5, color::text_hi},   // ს short right stem
     {11, 5, 3, 8, color::accent},   // block caret
 };
 }  // namespace logo

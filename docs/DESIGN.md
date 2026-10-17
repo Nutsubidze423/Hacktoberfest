@@ -227,11 +227,12 @@ Do not touch another developer's files; if your surface needs something from the
 
 Future design changes will be made by editing docs/DESIGN.md and tokens.h only.
 
-9. App logo, tray icon and notifications (added 2026-10-17, chosen by Sandro: concept C "Caret")
-App name (Sandro, 2026-10-17): Sarke — Georgian სარკე, "mirror". Written "Sarke" (window title, tray, notifications), "SARKE" in label style (it uppercases), "sarke" as the viewer strip title when nothing streams. One place in code: tokens (kAppName, kAppNameIdle). The K mark below is from the KVM name and is being replaced; see the Sarke concepts.
-Mark: a pixel letter K followed by a block caret, on a 16×16 grid, square tile, no rounding.
-Tile fill bg0. K in textHi: stem (2,3) 2×10; joint (4,7) 2×2; upper arm (6,5) 2×2 and (8,3) 2×2; lower leg (6,9) 2×2 and (8,11) 2×2. Caret in accent: (11,5) 3×8. Coordinates are (x,y) w×h in grid units; the grid lives in tokens.h (logo::cells).
-Rendering: drawn in code at the exact pixel size Windows asks for (SM_CXSMICON / SM_CXICON for the current DPI); grid cell edges are rounded to whole pixels (no antialiasing, no scaling of a bitmap). No .ico/.rc file is needed, so CMake does not change.
+9. App logo, tray icon and notifications (added 2026-10-17; logo chosen by Sandro: Sarke concept C "ს caret", replacing the earlier KVM "K caret")
+App name (Sandro, 2026-10-17): Sarke — Georgian სარკე, "mirror". Written "Sarke" (window title, tray, notifications), "SARKE" in label style (it uppercases), "sarke" as the viewer strip title when nothing streams. One place in code: tokens (kAppName, kAppNameIdle).
+Mark: the Georgian letter ს (first letter of სარკე) in pixels, followed by a block caret, on a 16×16 grid, square tile, no rounding. The caret is the same accent block that blinks on the viewer's state screens.
+Tile fill bg0. ს in textHi: tall left stem (2,3) 2×8; bowl (3,11) 6×2; short right stem (8,6) 2×5 — the open corner cells (2,11), (2,12), (9,11), (9,12) keep the bowl round. Caret in accent: (11,5) 3×8. Coordinates are (x,y) w×h in grid units; the grid lives in tokens.h (logo::cells). Traced from the letter in a real Georgian font (Sylfaen / Segoe UI): the left stem rises above the right one.
+Wordmark (outside the app's UI, e.g. slides, README): სარკე in a bold Georgian sans followed by the accent caret, with "SARKE" in label style next to it. Inside the app the name stays Latin (the UI font has no Georgian glyphs).
+Rendering: drawn in code at the exact pixel size Windows asks for (SM_CXSMICON / SM_CXICON for the current DPI); grid cell edges are rounded to whole pixels (no antialiasing, no scaling of a bitmap). Exact at 100 % (16 px) and 200 % (32 px); at 150 % (24 px) every stroke is 3 px; at 125 % (20 px) strokes are 2–3 px. Check with tools/ui_preview_logo.exe. No .ico/.rc file is needed, so CMake does not change.
 Uses: window icon of the viewer (small and big), tray icon, notification icon.
 Tray icon: in the notification area ("show hidden icons"). Tooltip: {APP} · {STATE WORD}, e.g. Sarke · LINKED. Left click or double click opens the viewer; right click shows a menu: Show viewer, Quit.
 Notifications: Windows draws them (bottom-right); we only provide icon, title and text. Connected: title "Connected to host", text "{ip}:{port}". Lost: title "Connection lost", text "reconnecting" (only if reconnect exists, otherwise "restart the client"). No notification for WAITING/CONNECTING.
