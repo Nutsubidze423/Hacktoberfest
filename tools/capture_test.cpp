@@ -4,13 +4,9 @@
 //   cmake --build --preset x64-release
 //   build\x64-release\tools\capture_test.exe
 
-#include "../host_a/window_picker.h"
-
-// TEMPORARY: tools/*.exe link only kvm_common, not host_a sources. Until there is a host-side
-// library target (CMake is Luka's), compile the picker into this exe directly.
-#include "../host_a/window_picker.cpp"
-
 #include <cstdio>
+
+#include "window_picker.h"
 
 int main() {
     // Physical pixels everywhere (see CLAUDE.md "DPI"). Later this comes from Demetre's dpi.h.

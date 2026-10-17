@@ -133,7 +133,7 @@ Claude წაიკითხავს ამ ფაილს, იპოვის
 ### თემო — ფანჯარა B-ზე და უკან (VDD + ვიდეო A მხარეს)
 დეტალები: `ARTEFACT/თემო — დავალებები (ლუკა → თემო).md`.
 - [x] `window_picker.*`: ფანჯრების სია და არჩევა
-- [ ] T1: `capture_test` — `#include` .cpp-ის ნაცვლად `kvm_host_lib`
+- [x] T1: `capture_test` — `#include` .cpp-ის ნაცვლად `kvm_host_lib`
 - [ ] T2: `virtual_display.*`: პოვნა, რეჟიმი, მხარე, attach/detach + `tools/vdd_test.cpp`
 - [ ] T3: `window_mover.*`: ფანჯარა VDD-ზე (maximize) და უკან
 - [ ] T4: `capture.*`: WGC `CreateForMonitor` → BGRA → `LatestSlot`
