@@ -54,7 +54,9 @@ struct FocusEnter {
     double y_norm = 0.5;
 };
 
-// A -> B: control returns to A.
+// Control returns to A. A -> B when A takes it back (its own decision, Ctrl+Alt+Shift+Q, send
+// failure); B -> A when B's cursor leaves through the edge facing A (only B knows that).
+// y_norm is the height of that edge crossing (0..1).
 struct FocusLeave {
     static constexpr std::string_view kType = "focus_leave";
     double y_norm = 0.5;

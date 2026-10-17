@@ -4,6 +4,8 @@
 
 #include <windows.h>
 
+#include <share.h>
+
 #include <cstdio>
 #include <filesystem>
 #include <format>
@@ -49,7 +51,9 @@ inline bool open_file(const std::filesystem::path& path) {
         std::fclose(s.file);
         s.file = nullptr;
     }
-    return _wfopen_s(&s.file, path.c_str(), L"a") == 0 && s.file;
+    // _SH_DENYWR (not _wfopen_s, which denies all sharing): the log stays readable while the exe runs.
+    s.file = _wfsopen(path.c_str(), L"a", _SH_DENYWR);
+    return s.file != nullptr;
 }
 
 template <class... Args>

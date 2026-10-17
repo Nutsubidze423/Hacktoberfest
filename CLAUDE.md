@@ -100,7 +100,8 @@ tools/
 | type | მიმართულება | ველები |
 |---|---|---|
 | `hello` | B→A | `protocol_version`, `screen_w`, `screen_h`, `dpi_scale`, `hostname` |
-| `focus_enter` / `focus_leave` | A→B | `y_norm` (კურსორის შესვლის წერტილი) |
+| `focus_enter` | A→B | `y_norm` (კურსორის შესვლის წერტილი) |
+| `focus_leave` | ორივე | `y_norm`. A→B: A თავად იბრუნებს კონტროლს; B→A: B-ის კურსორი A-სკენ მიმართული კიდით გამოვიდა |
 | `mouse_move` | A→B | `dx`, `dy` (relative) |
 | `mouse_button` | ორივე | `button` (`left`/`right`/`middle`/`x1`/`x2`), `down` (+ B→A-ზე `x_norm`, `y_norm`) |
 | `mouse_wheel` | ორივე | `delta`, `horizontal` |
