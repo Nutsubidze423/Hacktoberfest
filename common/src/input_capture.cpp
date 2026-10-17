@@ -1,4 +1,4 @@
-#include "input_capture.h"
+#include "kvm/input_capture.h"
 
 #include <windows.h>
 
@@ -22,6 +22,7 @@ constexpr UINT kMsgLocal = WM_APP + 2;     // A takes control back; wparam 1 = t
 constexpr UINT kMsgReturned = WM_APP + 3;  // B's focus_leave
 constexpr UINT kMsgUnhook = WM_APP + 4;    // after the emergency exit
 constexpr UINT kMsgStop = WM_APP + 5;
+constexpr UINT kMsgCooldown = WM_APP + 6;  // suspension ended
 
 // When control comes back, the cursor lands this far inside A's edge so the
 // next small movement does not bounce it straight back to B.
@@ -109,7 +110,7 @@ struct CaptureThread {
 
     // Returns true if control moved to B.
     static bool enter_remote(double y_norm, input::Point at) {
-        if (cap->remote_ || cap->disabled_ || !cap->has_client_) return false;
+        if (cap->remote_ || cap->disabled_ || !cap->has_client_ || cap->suspended_) return false;
         cap->remote_ = true;
         keys_pass_up = keys_down;
         have_abs = false;
@@ -295,6 +296,7 @@ struct CaptureThread {
             case kMsgLocal: leave_remote(wp != 0); return 0;
             case kMsgReturned: returned(unpack(wp)); return 0;
             case kMsgUnhook: unhook(); return 0;
+            case kMsgCooldown: start_cooldown(); return 0;
             case kMsgStop:
                 leave_remote(true);
                 unhook();
@@ -331,7 +333,7 @@ bool InputCapture::start() {
         return false;
     }
     worker_ = std::thread(&InputCapture::worker_main, this);
-    log::info("input capture: hooks installed, B is on the {}{}. Emergency exit: Ctrl+Alt+Shift+Q",
+    log::info("input capture: hooks installed, the other PC is on the {}{}. Emergency exit: Ctrl+Alt+Shift+Q",
               display::to_string(options_.client_side), options_.edge_switching ? "" : " (edge switching off)");
     return true;
 }
@@ -364,8 +366,12 @@ void InputCapture::switch_to_remote(double y_norm) {
     post(kMsgRemote, pack(y_norm));
 }
 
-void InputCapture::switch_to_local() {
-    post(kMsgLocal, 1);
+void InputCapture::switch_to_local(bool tell_peer) {
+    post(kMsgLocal, tell_peer ? 1 : 0);
+}
+
+void InputCapture::set_suspended(bool suspended) {
+    if (suspended_.exchange(suspended) && !suspended) post(kMsgCooldown);
 }
 
 bool InputCapture::post(unsigned msg, unsigned long long wparam) {
@@ -474,14 +480,14 @@ void InputCapture::worker_main() {
             if (const auto* enter = std::get_if<proto::FocusEnter>(&ev.msg)) {
                 send_failed = false;
                 sent = {};
-                log::info("input capture: control -> B (edge at {:.3f})", enter->y_norm);
+                log::info("input capture: control -> other PC (edge at {:.3f})", enter->y_norm);
             } else if (const auto* leave = std::get_if<proto::FocusLeave>(&ev.msg)) {
                 if (ev.emergency) {
-                    log::warn("input capture: Ctrl+Alt+Shift+Q - control back on A, hooks removed (restart to use the KVM)");
+                    log::warn("input capture: Ctrl+Alt+Shift+Q - control back here, hooks removed (restart to use the KVM)");
                 } else {
-                    log::info("input capture: control -> A (edge at {:.3f})", leave->y_norm);
+                    log::info("input capture: control back here (edge at {:.3f})", leave->y_norm);
                 }
-                log::info("input capture: sent to B: {} moves, {} buttons, {} wheel, {} keys", sent.moves, sent.buttons,
+                log::info("input capture: sent to the other PC: {} moves, {} buttons, {} wheel, {} keys", sent.moves, sent.buttons,
                           sent.wheels, sent.keys);
             }
             if (!ev.send) continue;
@@ -497,7 +503,7 @@ void InputCapture::worker_main() {
                 if (std::holds_alternative<proto::Key>(ev.msg)) ++sent.keys;
             } else if (remote_ && !send_failed) {
                 send_failed = true;
-                log::warn("input capture: send to B failed, control back on A");
+                log::warn("input capture: send to the other PC failed, control back here");
                 post(kMsgLocal, 0);
             }
         }

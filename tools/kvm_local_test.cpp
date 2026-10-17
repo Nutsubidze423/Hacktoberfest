@@ -20,7 +20,7 @@
 #include <string_view>
 #include <thread>
 
-#include "input_capture.h"
+#include "kvm/input_capture.h"
 #include "kvm/config.h"
 #include "kvm/dpi.h"
 #include "kvm/log.h"

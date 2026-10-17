@@ -15,7 +15,7 @@
 #include <thread>
 #include <vector>
 
-#include "input_inject.h"
+#include "kvm/input_inject.h"
 #include "kvm/dpi.h"
 #include "kvm/win32_input.h"
 

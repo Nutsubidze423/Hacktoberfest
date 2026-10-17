@@ -1,4 +1,4 @@
-#include "input_inject.h"
+#include "kvm/input_inject.h"
 
 #include <utility>
 #include <variant>
@@ -33,7 +33,7 @@ bool InputInject::handle(const proto::Message& msg) {
             [&](const proto::FocusEnter& m) { enter(m.y_norm); return true; },
             [&](const proto::FocusLeave&) {
                 if (active_) {
-                    log::info("input inject: control -> A (taken back by A)");
+                    log::info("input inject: the other PC took its input back");
                     log_received();
                 }
                 release_all();
@@ -88,18 +88,18 @@ void InputInject::enter(double y_norm) {
     entered_at_ = std::chrono::steady_clock::now();
     check(input::move_cursor_abs(p.x, p.y));
     active_ = true;
-    log::info("input inject: control -> B, cursor at ({}, {})", p.x, p.y);
+    log::info("input inject: the other PC took control, cursor at ({}, {})", p.x, p.y);
 }
 
 void InputInject::leave_to_host(double y_norm) {
     release_all();
     to_host_(proto::FocusLeave{.y_norm = y_norm});
-    log::info("input inject: control -> A (edge at {:.3f})", y_norm);
+    log::info("input inject: control back to the other PC (edge at {:.3f})", y_norm);
     log_received();
 }
 
 void InputInject::log_received() const {
-    log::info("input inject: received from A: {} moves, {} buttons, {} wheel, {} keys", received_.moves,
+    log::info("input inject: received from the other PC: {} moves, {} buttons, {} wheel, {} keys", received_.moves,
               received_.buttons, received_.wheels, received_.keys);
 }
 

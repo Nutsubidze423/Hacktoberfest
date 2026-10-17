@@ -19,7 +19,7 @@
 #include <thread>
 #include <vector>
 
-#include "input_capture.h"
+#include "kvm/input_capture.h"
 #include "kvm/dpi.h"
 #include "kvm/win32_input.h"
 

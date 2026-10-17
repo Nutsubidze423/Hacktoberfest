@@ -1,0 +1,79 @@
+#pragma once
+// KVM, receiving side: replays the input the other PC ("the peer") sends while
+// it controls this PC. Runs on B and, for B -> A control, on A too. Usually
+// driven by kvm::KvmLink (kvm_link.h).
+//
+//   kvm::client::InputInject inject(peer_side,
+//                                   [&](const proto::Message& m) { return conn.send(m); });
+//   for each message from the peer:  inject.handle(msg);
+//   on disconnect:                   inject.release_all();
+//
+// focus_enter puts the cursor on this PC's edge facing the peer at y_norm.
+// mouse_move is injected relative, so this PC's pointer speed / acceleration
+// apply. When the cursor already sits on that edge and keeps moving towards the
+// peer, focus_leave{y_norm} goes back and injection stops. Every key and button
+// pressed here is released when control leaves (either way) or the connection
+// drops, so nothing stays stuck.
+
+#include <chrono>
+#include <functional>
+#include <set>
+#include <tuple>
+#include <vector>
+
+#include "kvm/dpi.h"
+#include "kvm/protocol.h"
+
+namespace kvm::client {
+
+class InputInject {
+public:
+    // Sends one message to the peer; false = the connection is gone.
+    using Sink = std::function<bool(const proto::Message&)>;
+
+    // host_side: where the peer stands relative to this PC (on B that is
+    // opposite(config client_side), on A client_side itself).
+    // leave_cooldown: after focus_enter, the edge facing the peer can't hand
+    // control back for this long, so a jittery hand doesn't bounce straight back.
+    InputInject(display::Side host_side, Sink to_host,
+                std::chrono::milliseconds leave_cooldown = std::chrono::milliseconds(250));
+    ~InputInject();  // release_all()
+
+    InputInject(const InputInject&) = delete;
+    InputInject& operator=(const InputInject&) = delete;
+
+    // Handles focus_enter / focus_leave / mouse_move / mouse_button / mouse_wheel
+    // / key. Returns false for any other message type (not ours).
+    bool handle(const proto::Message& msg);
+
+    // B has control right now.
+    bool active() const { return active_; }
+
+    // Releases held keys/buttons and stops. For disconnects.
+    void release_all();
+
+private:
+    void enter(double y_norm);
+    void leave_to_host(double y_norm);
+    bool towards_host(int dx, int dy) const;
+    void move(int dx, int dy);
+    void button(proto::MouseButton b, bool down);
+    void key(const proto::Key& k);
+    void check(bool ok);  // warns once when Windows rejects injected input
+    void log_received() const;
+
+    display::Side host_side_;
+    Sink to_host_;
+    std::chrono::milliseconds leave_cooldown_;
+    std::chrono::steady_clock::time_point entered_at_{};
+    display::OuterEdge edge_;
+    bool active_ = false;
+    bool warned_blocked_ = false;
+    struct {
+        int moves = 0, buttons = 0, wheels = 0, keys = 0;
+    } received_;  // per stay on B, for the log
+    std::set<proto::MouseButton> buttons_down_;
+    std::set<std::tuple<std::uint16_t, std::uint16_t, bool>> keys_down_;  // vk, scan, extended
+};
+
+}  // namespace kvm::client
