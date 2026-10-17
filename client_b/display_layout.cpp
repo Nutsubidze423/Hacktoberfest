@@ -277,7 +277,7 @@ ConfigState read_config(const std::optional<std::filesystem::path>& path) {
     return st;
 }
 
-std::string save_client_side(const std::filesystem::path& path, Side client_side) {
+std::string save_config_key(const std::filesystem::path& path, std::string_view key, const ConfigValue& value) {
     nlohmann::ordered_json j = nlohmann::ordered_json::object();
     std::error_code ec;
     if (std::filesystem::is_regular_file(path, ec)) {
@@ -287,7 +287,23 @@ std::string save_client_side(const std::filesystem::path& path, Side client_side
         // Never overwrite a file we can't read: the user's other settings are in it.
         if (j.is_discarded() || !j.is_object()) return narrow(path.filename().wstring()) + " is not valid JSON - fix or delete it";
     }
-    j["client_side"] = std::string(display::to_string(client_side));
+    std::visit([&](const auto& v) { j[std::string(key)] = v; }, value);
+    return write_atomically(path, j.dump(2) + "\n");
+}
+
+std::string save_client_side(const std::filesystem::path& path, Side client_side) {
+    return save_config_key(path, "client_side", std::string(display::to_string(client_side)));
+}
+
+std::string ensure_config(const std::filesystem::path& path) {
+    std::error_code ec;
+    if (std::filesystem::exists(path, ec)) return {};
+    const Config d;  // the apps' defaults (common/include/kvm/config.h)
+    const nlohmann::ordered_json j = {
+        {"host_ip", d.host_ip},           {"control_port", d.control_port}, {"video_port", d.video_port},
+        {"file_port", d.file_port},       {"client_side", d.client_side},   {"jpeg_quality", d.jpeg_quality},
+        {"max_fps", d.max_fps},           {"desk", d.desk},
+    };
     return write_atomically(path, j.dump(2) + "\n");
 }
 

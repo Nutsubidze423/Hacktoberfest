@@ -40,6 +40,7 @@ public:
     struct Options {
         std::optional<std::filesystem::path> config_path;  // default: the one kvm_host / kvm_client use
         std::optional<layout::Role> role;                  // default: guessed from host_ip, switchable
+        bool app_restarts = false;                         // the caller restarts Sarke after Apply (launcher)
     };
 
     DisplaySettings();  // out of line: IdentifyPopup is only complete in the .cpp
@@ -59,6 +60,9 @@ public:
 
     // Runs on the UI thread after the window is gone (closed by the user or destroyed).
     void set_close_handler(std::function<void()> on_close) { on_close_ = std::move(on_close); }
+
+    // Runs on the UI thread after Apply wrote config.json (e.g. the launcher restarts the app).
+    void set_applied_handler(std::function<void()> on_applied) { on_applied_ = std::move(on_applied); }
 
     enum class Hit {
         None, Minimize, Close, Peer,
@@ -130,6 +134,7 @@ private:
     ui::TextStyles text_;
     ui::unique_icon small_icon_, big_icon_;
     std::function<void()> on_close_;
+    std::function<void()> on_applied_;
 
     Options options_;
     layout::Role role_ = layout::Role::Host;

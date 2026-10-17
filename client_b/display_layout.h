@@ -13,6 +13,8 @@
 #include <filesystem>
 #include <optional>
 #include <string>
+#include <string_view>
+#include <variant>
 #include <vector>
 
 #include "kvm/dpi.h"
@@ -102,6 +104,14 @@ ConfigState read_config(const std::optional<std::filesystem::path>& path = std::
 // file if needed. Written to a temp file first and swapped in, so a crash never leaves half a file.
 // Returns "" on success, else the reason.
 std::string save_client_side(const std::filesystem::path& path, Side client_side);
+
+// The same for any key (jpeg_quality, max_fps, desk, ...).
+using ConfigValue = std::variant<int, bool, std::string>;
+std::string save_config_key(const std::filesystem::path& path, std::string_view key, const ConfigValue& value);
+
+// Creates `path` with every key at the apps' defaults (kvm::Config) if it doesn't exist, so users
+// can see and edit them. "" on success or if it already exists, else the reason.
+std::string ensure_config(const std::filesystem::path& path);
 
 // From config.json's host_ip: Host if it is this PC (an address of one of its adapters, loopback or
 // this PC's name), or "auto" / empty (the default since discovery: both PCs may share one config, so

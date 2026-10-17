@@ -625,6 +625,7 @@ void DisplaySettings::apply() {
         status_ = Status::Clean;
         reload_config();
         status_ = Status::Saved;
+        if (auto on_applied = on_applied_) on_applied();
     }
     if (hwnd_) InvalidateRect(hwnd_, nullptr, FALSE);
 }
@@ -1117,13 +1118,17 @@ void DisplaySettings::draw_footer(ui::Painter& p, const Layout& l) {
         break;
     case Status::Saved:
         rgb = c.ok;
-        text = std::format(L"Saved. Restart Sarke on this PC \u2014 and on {}, this PC must be on the {}.", other, this_side);
+        text = options_.app_restarts
+                   ? std::format(L"Saved \u2014 Sarke restarted with it. On {}, this PC must be on the {}.", other, this_side)
+                   : std::format(L"Saved. Restart Sarke on this PC \u2014 and on {}, this PC must be on the {}.", other, this_side);
         break;
     default:
         if (dirty()) {
             rgb = c.warn;
-            text = std::format(L"Not saved yet. Apply writes client_side \"{}\" to config.json, then restart Sarke.",
-                               side_word(layout::client_side_for(role_, pending_side_)));
+            const std::wstring cs = side_word(layout::client_side_for(role_, pending_side_));
+            text = options_.app_restarts
+                       ? std::format(L"Not saved yet. Apply writes client_side \"{}\" to config.json and restarts Sarke.", cs)
+                       : std::format(L"Not saved yet. Apply writes client_side \"{}\" to config.json, then restart Sarke.", cs);
         } else if (!cfg_.exists) {
             text = L"No config.json yet \u2014 Sarke uses \"right\". Apply creates it next to the app.";
         } else {

@@ -158,9 +158,54 @@ void TrayIcon::on_link_change(LinkState before, LinkState now, std::wstring_view
     }
 }
 
+void TrayIcon::set_menu(std::function<std::vector<MenuItem>()> build, std::function<void(UINT)> on_command) {
+    build_menu_ = std::move(build);
+    on_menu_command_ = std::move(on_command);
+}
+
+namespace {
+
+// Appends `items` to `menu`; submenus are owned by their parent menu once appended.
+void fill_menu(HMENU menu, const std::vector<TrayIcon::MenuItem>& items) {
+    for (const auto& item : items) {
+        if (item.separator) {
+            AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+            continue;
+        }
+        const UINT state = (item.enabled ? MF_ENABLED : MF_GRAYED) | (item.checked ? MF_CHECKED : MF_UNCHECKED);
+        if (!item.submenu.empty()) {
+            HMENU sub = CreatePopupMenu();
+            if (!sub) continue;
+            fill_menu(sub, item.submenu);
+            AppendMenuW(menu, MF_POPUP | state, reinterpret_cast<UINT_PTR>(sub), item.text.c_str());
+            continue;
+        }
+        AppendMenuW(menu, MF_STRING | state, item.id, item.text.c_str());
+        if (item.radio || item.bold) {
+            MENUITEMINFOW info{};
+            info.cbSize = sizeof(info);
+            info.fMask = MIIM_FTYPE | MIIM_STATE;
+            info.fType = item.radio ? MFT_RADIOCHECK : 0;
+            info.fState = state | (item.bold ? MFS_DEFAULT : 0);
+            SetMenuItemInfoW(menu, item.id, FALSE, &info);
+        }
+    }
+}
+
+}  // namespace
+
 void TrayIcon::show_menu(int x, int y) {
     unique_menu menu(CreatePopupMenu());
     if (!menu) {
+        return;
+    }
+    if (build_menu_) {
+        fill_menu(menu.get(), build_menu_());
+        SetForegroundWindow(hwnd_);  // required so the menu closes when the user clicks elsewhere
+        const UINT cmd = static_cast<UINT>(
+            TrackPopupMenuEx(menu.get(), TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_NONOTIFY, x, y, hwnd_, nullptr));
+        PostMessageW(hwnd_, WM_NULL, 0, 0);
+        if (cmd != 0 && on_menu_command_) on_menu_command_(cmd);
         return;
     }
     AppendMenuW(menu.get(), MF_STRING, kMenuShowViewer, L"Show viewer");

@@ -14,6 +14,7 @@
 #include <functional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "app_logo.h"
 #include "toast.h"
@@ -29,6 +30,18 @@ public:
         std::function<void()> quit;      // "Quit"
     };
 
+    // A custom right-click menu (replaces Show viewer / Display arrangement / Quit). Ids must be > 0.
+    struct MenuItem {
+        UINT id = 0;
+        std::wstring text;
+        bool checked = false;
+        bool radio = false;      // drawn as a dot instead of a check mark
+        bool enabled = true;
+        bool separator = false;
+        bool bold = false;       // the default item
+        std::vector<MenuItem> submenu;
+    };
+
     TrayIcon() = default;
     ~TrayIcon();
 
@@ -37,8 +50,11 @@ public:
 
     bool create(std::wstring app_name, Actions actions);
 
-    // Tooltip "{app} · {state word}", e.g. "Sarke · LINKED".
+    // Tooltip "{app} · {state word}", e.g. "Sarke · Linked".
     void set_state_word(std::wstring_view word);
+
+    // Builds the menu each time it opens (so it shows the current state); on_command gets the id.
+    void set_menu(std::function<std::vector<MenuItem>()> build, std::function<void(UINT)> on_command);
 
     // Shows Sarke's notification card (top-right); clicking it runs Actions::open.
     void notify(std::wstring_view title, std::wstring_view text, Toast::Kind kind = Toast::Kind::Info);
@@ -58,6 +74,8 @@ private:
     std::wstring app_name_;
     std::wstring tooltip_;
     Actions actions_;
+    std::function<std::vector<MenuItem>()> build_menu_;
+    std::function<void(UINT)> on_menu_command_;
     ui::unique_icon small_icon_;
     ui::unique_icon large_icon_;
     Toast toast_;
