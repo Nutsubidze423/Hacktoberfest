@@ -32,8 +32,8 @@ void round_trip(const M& msg) {
 }  // namespace
 
 int main() {
-    round_trip(proto::Hello{.screen_w = 1920, .screen_h = 1080, .dpi_scale = 1.25, .hostname = "laptop-b"});
-    round_trip(proto::FocusEnter{.y_norm = 0.3});
+    round_trip(proto::Hello{.screen_w = 1920, .screen_h = 1080, .dpi_scale = 1.25, .hostname = "laptop-b", .desk = true});
+    round_trip(proto::FocusEnter{.y_norm = 0.3, .desk = true});
     round_trip(proto::FocusLeave{.y_norm = 0.7});
     round_trip(proto::MouseMove{.dx = -5, .dy = 12});
     round_trip(proto::MouseButtonEvent{.button = proto::MouseButton::Right, .down = true, .x_norm = 0.5, .y_norm = 0.25});
@@ -43,6 +43,8 @@ int main() {
     round_trip(proto::StreamStop{.hwnd = 0x1234ABCDull});
     round_trip(proto::RemoteMouseMove{.x_norm = 0.1, .y_norm = 0.9});
     round_trip(proto::Clipboard{.seq = 3, .kind = "text", .total = 5, .offset = 0, .data = "aGVsbG8="});
+    round_trip(proto::DeskMove{.x = -40, .y = 1300});
+    round_trip(proto::DeskCursor{.shape = "ibeam"});
     round_trip(proto::Ping{.t = 123456789});
     round_trip(proto::Pong{.t = 123456789, .t_peer = 987654321});
 
@@ -55,6 +57,13 @@ int main() {
 
     const auto header = proto::encode(proto::FrameHeader{.seq = 7, .t_capture_us = 42, .width = 800, .height = 600});
     check(header.at("type") == "frame" && header.get<proto::FrameHeader>().seq == 7, "frame header");
+
+    const proto::FrameHeader desk_in{.seq = 9, .width = 400, .height = 300, .layer = "desk", .x = 100, .y = 50,
+                                      .desk_w = 1920, .desk_h = 1080, .rects = {{100, 50, 400, 300}, {120, 60, 10, 10}}};
+    const auto desk_out = proto::encode(desk_in).get<proto::FrameHeader>();
+    check(desk_out.layer == "desk" && desk_out.desk_w == 1920 && desk_out.rects.size() == 2 && desk_out.rects[1].w == 10,
+          "desk frame header with rects");
+    check(proto::encode(proto::FrameHeader{}).get<proto::FrameHeader>().layer.empty(), "frame header: layer defaults to window stream");
 
     std::printf("\n%s\n", g_failures == 0 ? "all passed" : "FAILED");
     return g_failures == 0 ? 0 : 1;
