@@ -1,0 +1,221 @@
+// file_drag_test: both halves of the cross-PC file drag with real OLE drag and drop (T10).
+// FileDragSource continues a drag with two temp files ("arrived from the other PC") from the cursor,
+// SendInput moves the mouse onto a FileDropCatcher in this process and lets go: the catcher must get
+// both paths and the source must report a drop. The mouse moves around the screen center for about
+// a second and goes back afterwards. Stops itself with Esc if anything hangs.
+//
+//   file_drag_test.exe
+
+#include <ole2.h>
+#include <winsock2.h>
+
+#include <chrono>
+#include <filesystem>
+#include <format>
+#include <fstream>
+#include <future>
+#include <mutex>
+#include <string_view>
+#include <thread>
+#include <vector>
+
+#include "kvm/dpi.h"
+#include "kvm/file_drag.h"
+#include "kvm/file_drop.h"
+#include "kvm/file_transfer.h"
+#include "kvm/log.h"
+#include "kvm/net.h"
+#include "kvm/win32_input.h"
+
+namespace {
+
+namespace fs = std::filesystem;
+using namespace std::chrono_literals;
+
+struct Checks {
+    int failed = 0;
+    void operator()(bool ok, std::string_view what) {
+        kvm::log::info("{} {}", ok ? "[ok]  " : "[FAIL]", what);
+        if (!ok) ++failed;
+    }
+};
+
+void press_escape() {
+    kvm::input::send_key(VK_ESCAPE, 0, true, false);
+    kvm::input::send_key(VK_ESCAPE, 0, false, false);
+}
+
+// Listens on 127.0.0.1 only (a free port), so Windows Firewall doesn't ask anything.
+SOCKET listen_loopback(std::uint16_t& port) {
+    kvm::net::ensure_winsock();
+    const SOCKET s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    int len = sizeof(addr);
+    if (s == INVALID_SOCKET || bind(s, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) != 0 || listen(s, 1) != 0 ||
+        getsockname(s, reinterpret_cast<sockaddr*>(&addr), &len) != 0) {
+        if (s != INVALID_SOCKET) closesocket(s);
+        return INVALID_SOCKET;
+    }
+    port = ntohs(addr.sin_port);
+    return s;
+}
+
+std::string read_file(const fs::path& p) {
+    std::ifstream in(p, std::ios::binary);
+    return std::string(std::istreambuf_iterator<char>(in), {});
+}
+
+void move_in_steps(POINT from, POINT to) {
+    for (int i = 1; i <= 10; ++i) {
+        kvm::input::move_cursor_abs(from.x + (to.x - from.x) * i / 10, from.y + (to.y - from.y) * i / 10);
+        std::this_thread::sleep_for(30ms);
+    }
+}
+
+}  // namespace
+
+int main() {
+    kvm::display::enable_dpi_awareness();
+    Checks check;
+
+    const fs::path dir = fs::temp_directory_path() / L"kvm_drag_test";
+    fs::create_directories(dir);
+    const std::vector<fs::path> files{dir / L"a.txt", dir / L"b.txt"};
+    for (const auto& f : files) std::ofstream(f) << "from the other PC";
+
+    std::mutex mutex;
+    std::vector<fs::path> dropped;
+    kvm::files::FileDropCatcher catcher(
+        [&](std::vector<fs::path> paths) {
+            std::lock_guard lock(mutex);
+            dropped = std::move(paths);
+        },
+        L"Drop here (test)");
+    kvm::files::FileDragSource drag;
+
+    const auto primary = kvm::display::primary_monitor().rect;
+    const POINT center{(primary.left + primary.right) / 2, (primary.top + primary.bottom) / 2};
+    const POINT target{center.x + 300, center.y};
+    catcher.show_at(target, 10s);
+
+    kvm::input::Point cursor_before;
+    kvm::input::get_cursor_pos(cursor_before);
+    kvm::input::move_cursor_abs(center.x, center.y);
+    std::this_thread::sleep_for(200ms);
+
+    std::promise<DWORD> done;
+    auto result = done.get_future();
+    check(drag.start(files, [&](DWORD effect) { done.set_value(effect); }), "drag started");
+    std::this_thread::sleep_for(300ms);
+    check(drag.dragging(), "the drag is running from the cursor");
+
+    for (int i = 1; i <= 10; ++i) {
+        kvm::input::move_cursor_abs(center.x + 30 * i, center.y);
+        std::this_thread::sleep_for(30ms);
+    }
+    std::this_thread::sleep_for(300ms);
+    kvm::input::send_mouse_button(kvm::input::MouseButton::Left, false);  // the user lets go
+
+    if (result.wait_for(3s) != std::future_status::ready) {
+        press_escape();  // never leave a drag (and a pressed button) behind
+        kvm::input::send_mouse_button(kvm::input::MouseButton::Left, false);
+    }
+    const DWORD effect = result.wait_for(2s) == std::future_status::ready ? result.get() : DROPEFFECT_NONE;
+    kvm::input::move_cursor_abs(cursor_before.x, cursor_before.y);
+
+    check(effect == DROPEFFECT_COPY || effect == DROPEFFECT_MOVE, std::format("dropped (effect {})", effect));
+    std::this_thread::sleep_for(200ms);
+    {
+        // Same files, though Windows may spell the temp folder long (localadmin) or short (LOCALA~1).
+        std::lock_guard lock(mutex);
+        std::error_code ec;
+        const bool same = dropped.size() == files.size() && fs::equivalent(dropped[0], files[0], ec) &&
+                          fs::equivalent(dropped[1], files[1], ec);
+        check(same, std::format("the catcher got both paths ({} item(s))", dropped.size()));
+    }
+    check(!drag.dragging(), "the drag is over");
+
+    kvm::log::info("2) the whole cross-PC drag on one PC (A and B over 127.0.0.1, no KVM)");
+    {
+        std::uint16_t port = 0;
+        const SOCKET listener = listen_loopback(port);
+        std::unique_ptr<kvm::files::FileTransfer> a;
+        std::thread acceptor([&] {
+            const SOCKET s = accept(listener, nullptr, nullptr);
+            if (s != INVALID_SOCKET) a = std::make_unique<kvm::files::FileTransfer>(s, "A", kvm::files::Callbacks{}, dir / L"a_in");
+        });
+        kvm::files::FileDragSource drag_on_b;
+        std::promise<DWORD> b_done;
+        auto b_result = b_done.get_future();
+        kvm::files::Callbacks b_callbacks;
+        b_callbacks.on_drag_received = [&](const std::vector<fs::path>& saved) {
+            drag_on_b.start(saved, [&](DWORD effect) { b_done.set_value(effect); });  // B: the drag goes on here
+        };
+        auto b = kvm::files::connect_files("127.0.0.1", port, b_callbacks, dir / L"b_in");
+        acceptor.join();
+        closesocket(listener);
+
+        // A: an invisible catcher hands the dragged files to the drag transfer.
+        kvm::files::FileDropCatcher catcher_a([&](std::vector<fs::path> paths) { a->send(std::move(paths), true); });
+        // B: stands for any folder on B where the user lets go.
+        std::vector<fs::path> landed;
+        std::mutex landed_mutex;
+        kvm::files::FileDropCatcher folder_on_b(
+            [&](std::vector<fs::path> paths) {
+                std::lock_guard lock(landed_mutex);
+                landed = std::move(paths);
+            },
+            L"a folder on B (test)");
+        kvm::files::FileDragSource drag_on_a;  // stands for Explorer's drag on A
+
+        if (!a || !b) {
+            check(false, "connected A and B");
+        } else {
+            const POINT start{center.x - 300, center.y};
+            const POINT edge{center.x, center.y};
+            const POINT folder{center.x + 300, center.y};
+            kvm::input::move_cursor_abs(start.x, start.y);
+            std::this_thread::sleep_for(150ms);
+            std::promise<DWORD> a_done;
+            auto a_result = a_done.get_future();
+            drag_on_a.start(files, [&](DWORD effect) { a_done.set_value(effect); });
+            std::this_thread::sleep_for(300ms);
+            move_in_steps(start, edge);  // the user drags to the edge towards B...
+            catcher_a.catch_now(edge);   // ...and the drag drops onto the invisible catcher on A
+            check(a_result.wait_for(3s) == std::future_status::ready && a_result.get() != DROPEFFECT_NONE,
+                  "A: the running drag dropped onto catch_now()");
+
+            for (int i = 0; i < 30 && !drag_on_b.dragging(); ++i) std::this_thread::sleep_for(100ms);
+            check(drag_on_b.dragging(), "B: the files arrived and the drag goes on at the cursor");
+            folder_on_b.show_at(folder, 10s);
+            std::this_thread::sleep_for(200ms);
+            move_in_steps(edge, folder);  // the user keeps moving on B...
+            std::this_thread::sleep_for(300ms);
+            kvm::input::send_mouse_button(kvm::input::MouseButton::Left, false);  // ...and lets go over a folder
+            if (b_result.wait_for(3s) != std::future_status::ready) {
+                press_escape();
+                kvm::input::send_mouse_button(kvm::input::MouseButton::Left, false);
+            }
+            check(b_result.wait_for(1s) == std::future_status::ready && b_result.get() != DROPEFFECT_NONE,
+                  "B: dropped onto the folder");
+            std::this_thread::sleep_for(200ms);
+            std::lock_guard lock(landed_mutex);
+            const bool same = landed.size() == 2 && read_file(landed[0]) == read_file(files[0]) &&
+                              read_file(landed[1]) == read_file(files[1]);
+            check(same, std::format("the folder on B got both files with the same content ({} item(s))", landed.size()));
+            if (!landed.empty()) kvm::log::info("   B's temp copy: {}", landed[0].parent_path().string());
+        }
+        kvm::input::move_cursor_abs(cursor_before.x, cursor_before.y);
+    }
+
+    std::error_code ec;
+    fs::remove_all(dir, ec);
+    if (check.failed) {
+        kvm::log::error("{} check(s) failed", check.failed);
+        return 1;
+    }
+    kvm::log::info("all passed");
+    return 0;
+}

@@ -159,14 +159,20 @@ void FileTransfer::close() {
     outgoing_.close();
 }
 
-bool FileTransfer::send(std::vector<fs::path> items) {
-    return open_ && outgoing_.push(std::move(items));
+bool FileTransfer::send(std::vector<fs::path> items, bool drag) {
+    return open_ && outgoing_.push(Outgoing{std::move(items), drag});
 }
 
 void FileTransfer::send_loop() {
     std::vector<char> buffer(kChunkBytes);
     std::uint64_t next_id = 1;
-    while (auto items = outgoing_.pop()) {
+    while (auto outgoing = outgoing_.pop()) {
+        auto* items = &outgoing->items;
+        if (outgoing->drag && !send_message(sock_, {{"type", "transfer_begin"}, {"drag", true}})) {
+            if (open_) log::warn("files: sending to {} failed: {}", peer_, last_error_text());
+            close();
+            return;
+        }
         struct Entry {
             fs::path file;
             std::string wire;  // relative path with '/', as the receiver sees it
@@ -239,6 +245,9 @@ void FileTransfer::receive_loop() {
     std::vector<fs::path> saved;           // this transfer's top-level entries as saved
     std::size_t received = 0;
     std::uint64_t received_bytes = 0;
+    bool drag = false;          // this transfer continues a drag here
+    fs::path target = target_;  // where this transfer goes: target_, or a fresh temp folder for a drag
+    std::uint32_t drags = 0;
 
     const auto discard = [](Incoming& f) {
         if (!f.out.is_open()) return;
@@ -259,7 +268,16 @@ void FileTransfer::receive_loop() {
         }
         try {
             const std::string type = m.header.value("type", "");
-            if (type == "file_begin") {
+            if (type == "transfer_begin") {
+                drag = m.header.value("drag", false);
+                if (drag) {
+                    // A fresh folder per drag: the drop on this PC copies from it, names never clash.
+                    target = fs::temp_directory_path() / L"Sarke" / L"drag" /
+                             std::format(L"{}-{}", GetCurrentProcessId(), ++drags);
+                    std::error_code ec;
+                    fs::remove_all(target, ec);
+                }
+            } else if (type == "file_begin") {
                 const auto id = m.header.at("id").get<std::uint64_t>();
                 const auto rel = m.header.at("path").get<std::string>();
                 Incoming f;
@@ -271,16 +289,16 @@ void FileTransfer::receive_loop() {
                 auto mapped = tops.find(top);
                 if (mapped == tops.end()) {
                     std::error_code ec;
-                    fs::create_directories(target_, ec);
-                    const auto checked = safe_destination(target_, top);
-                    const fs::path name = checked ? free_name(target_, checked->filename(), rest.empty()) : fs::path();
-                    if (!name.empty()) saved.push_back(target_ / name);
+                    fs::create_directories(target, ec);
+                    const auto checked = safe_destination(target, top);
+                    const fs::path name = checked ? free_name(target, checked->filename(), rest.empty()) : fs::path();
+                    if (!name.empty()) saved.push_back(target / name);
                     mapped = tops.emplace(top, name).first;  // empty name = unsafe, skip everything below it
                 }
                 std::optional<fs::path> dest;
                 if (!mapped->second.empty()) {
-                    dest = rest.empty() ? std::optional(target_ / mapped->second)
-                                        : safe_destination(target_ / mapped->second, rest);
+                    dest = rest.empty() ? std::optional(target / mapped->second)
+                                        : safe_destination(target / mapped->second, rest);
                 }
                 if (!dest) {
                     log::warn("files: unsafe path \"{}\" from {}, skipped", rel.substr(0, 200), peer_);
@@ -330,13 +348,21 @@ void FileTransfer::receive_loop() {
             } else if (type == "transfer_end") {
                 for (auto& [id, f] : files) discard(f);
                 files.clear();
-                log::info("files: received {} file(s), {} from {} into {}", received, megabytes(received_bytes), peer_,
-                          utf8(target_));
-                if (!saved.empty() && callbacks_.on_received) callbacks_.on_received(saved);
+                log::info("files: received {} file(s), {} from {} into {}{}", received, megabytes(received_bytes),
+                          peer_, utf8(target), drag ? " (drag)" : "");
+                if (!saved.empty()) {
+                    if (drag && callbacks_.on_drag_received) {
+                        callbacks_.on_drag_received(saved);
+                    } else if (callbacks_.on_received) {
+                        callbacks_.on_received(saved);
+                    }
+                }
                 tops.clear();
                 saved.clear();
                 received = 0;
                 received_bytes = 0;
+                drag = false;
+                target = target_;
             } else {
                 log::warn("files: unknown message \"{}\" from {}, ignored", type.substr(0, 50), peer_);
             }

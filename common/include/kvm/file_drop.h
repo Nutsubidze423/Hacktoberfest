@@ -45,6 +45,11 @@ public:
     void show_at(POINT screen_point, std::chrono::milliseconds timeout = std::chrono::milliseconds(1500));
     void hide();
 
+    // Cross-PC drag (T10), A side: an invisible catcher goes under `screen_point` (the cursor) and
+    // the left button is released there, so the drag that is running drops onto it (on_drop gets the
+    // files) while the user's hand stays on the button and KVM carries the drag to the other PC.
+    void catch_now(POINT screen_point);
+
     bool visible() const { return visible_; }
 
 private:

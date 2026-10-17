@@ -10,6 +10,7 @@
 #include <optional>
 
 #include "kvm/log.h"
+#include "kvm/win32_input.h"
 
 namespace kvm::files {
 
@@ -20,7 +21,12 @@ namespace {
 constexpr wchar_t kClassName[] = L"KvmFileDropCatcher";
 constexpr UINT kShowMessage = WM_APP + 1;  // wParam = timeout in ms, lParam = MAKELPARAM(x, y)
 constexpr UINT kHideMessage = WM_APP + 2;
+constexpr UINT kCatchMessage = WM_APP + 3;  // lParam = MAKELPARAM(x, y)
 constexpr UINT_PTR kHideTimer = 1;
+constexpr UINT_PTR kReleaseTimer = 2;
+constexpr int kCatchSizePx = 32;
+constexpr UINT kCatchTimeoutMs = 1500;
+constexpr UINT kReleaseAfterMs = 60;  // time for the drag to enter the catcher before the button goes up
 constexpr int kWidthDp = 240;
 constexpr int kHeightDp = 64;
 constexpr UINT kAfterLeaveMs = 700;  // a drag that left may come back
@@ -136,6 +142,7 @@ void show_window(HWND hwnd, WindowState& state, POINT pt, UINT timeout_ms) {
                                  DEFAULT_PITCH, L"Segoe UI");
         state.font_dpi = dpi_x;
     }
+    SetLayeredWindowAttributes(hwnd, 0, 235, LWA_ALPHA);  // catch_now() may have made it invisible
     const int w = MulDiv(kWidthDp, static_cast<int>(dpi_x), 96);
     const int h = MulDiv(kHeightDp, static_cast<int>(dpi_x), 96);
     // Centered on the point but kept on its monitor, so a point on the very edge is still covered.
@@ -146,6 +153,29 @@ void show_window(HWND hwnd, WindowState& state, POINT pt, UINT timeout_ms) {
     InvalidateRect(hwnd, nullptr, TRUE);
     *state.visible = true;
     SetTimer(hwnd, kHideTimer, timeout_ms, nullptr);
+}
+
+// An invisible catcher right under the cursor, then the left button goes up there: the running drag
+// drops onto it. alpha 1 keeps it invisible but still hit-testable for the drop.
+void catch_window(HWND hwnd, WindowState& state, POINT pt) {
+    const HMONITOR monitor = MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST);
+    MONITORINFO info{};
+    info.cbSize = sizeof(info);
+    GetMonitorInfoW(monitor, &info);
+    const RECT& m = info.rcMonitor;
+    const int x = std::clamp(static_cast<int>(pt.x) - kCatchSizePx / 2, static_cast<int>(m.left),
+                             static_cast<int>(m.right) - kCatchSizePx);
+    const int y = std::clamp(static_cast<int>(pt.y) - kCatchSizePx / 2, static_cast<int>(m.top),
+                             static_cast<int>(m.bottom) - kCatchSizePx);
+    SetLayeredWindowAttributes(hwnd, 0, 1, LWA_ALPHA);
+    SetWindowPos(hwnd, HWND_TOPMOST, x, y, kCatchSizePx, kCatchSizePx, SWP_NOACTIVATE | SWP_SHOWWINDOW);
+    *state.visible = true;
+    SetTimer(hwnd, kHideTimer, kCatchTimeoutMs, nullptr);
+    // A drag only picks a new drop target when the mouse moves: nudge it so the catcher becomes the
+    // target, then let go a moment later (kReleaseTimer).
+    input::move_cursor_abs(pt.x + 1, pt.y);
+    input::move_cursor_abs(pt.x, pt.y);
+    SetTimer(hwnd, kReleaseTimer, kReleaseAfterMs, nullptr);
 }
 
 void paint(HWND hwnd, WindowState& state) {
@@ -180,7 +210,15 @@ LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         case kHideMessage:
             if (state) hide_window(hwnd, *state);
             return 0;
+        case kCatchMessage:
+            if (state) catch_window(hwnd, *state, POINT{GET_X_LPARAM(lp), GET_Y_LPARAM(lp)});
+            return 0;
         case WM_TIMER:
+            if (wp == kReleaseTimer) {
+                KillTimer(hwnd, kReleaseTimer);
+                input::send_mouse_button(input::MouseButton::Left, false);  // the drag drops onto us
+                return 0;
+            }
             if (state && wp == kHideTimer) {
                 if (state->target && state->target->dragging()) {
                     SetTimer(hwnd, kHideTimer, 500, nullptr);  // a drag is over us: stay
@@ -282,6 +320,10 @@ void FileDropCatcher::show_at(POINT screen_point, std::chrono::milliseconds time
 
 void FileDropCatcher::hide() {
     if (const HWND h = hwnd_) PostMessageW(h, kHideMessage, 0, 0);
+}
+
+void FileDropCatcher::catch_now(POINT screen_point) {
+    if (const HWND h = hwnd_) PostMessageW(h, kCatchMessage, 0, MAKELPARAM(screen_point.x, screen_point.y));
 }
 
 }  // namespace kvm::files

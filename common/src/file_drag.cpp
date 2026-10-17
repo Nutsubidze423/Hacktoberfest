@@ -1,0 +1,228 @@
+#include "kvm/file_drag.h"
+
+#include <ole2.h>
+#include <shlobj.h>
+
+#include <future>
+#include <optional>
+
+#include "kvm/log.h"
+#include "kvm/win32_input.h"
+
+namespace kvm::files {
+
+namespace fs = std::filesystem;
+
+namespace {
+
+constexpr wchar_t kClassName[] = L"KvmFileDragSource";
+constexpr UINT kStartMessage = WM_APP + 1;
+constexpr UINT_PTR kArmTimer = 1;
+constexpr UINT kArmTimeoutMs = 700;  // our button press must reach the window by then
+constexpr int kSize = 8;             // px; the window only has to be under the cursor
+
+// Drop when the left button goes up, cancel on Esc. Hides the helper window once the drag runs so
+// it can't be the drop target itself.
+class DropSource final : public IDropSource {
+public:
+    explicit DropSource(HWND helper) : helper_(helper) {}
+    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void** out) override {
+        if (riid == IID_IUnknown || riid == IID_IDropSource) {
+            *out = static_cast<IDropSource*>(this);
+            return S_OK;
+        }
+        *out = nullptr;
+        return E_NOINTERFACE;
+    }
+    ULONG STDMETHODCALLTYPE AddRef() override { return 1; }  // lives on the stack of the drag
+    ULONG STDMETHODCALLTYPE Release() override { return 1; }
+    HRESULT STDMETHODCALLTYPE QueryContinueDrag(BOOL escape, DWORD keys) override {
+        if (escape) return DRAGDROP_S_CANCEL;
+        return (keys & MK_LBUTTON) ? S_OK : DRAGDROP_S_DROP;
+    }
+    HRESULT STDMETHODCALLTYPE GiveFeedback(DWORD) override {
+        if (helper_) {
+            ShowWindow(helper_, SW_HIDE);
+            helper_ = nullptr;
+        }
+        return DRAGDROP_S_USEDEFAULTCURSORS;
+    }
+
+private:
+    HWND helper_;
+};
+
+// The same data object Explorer builds for these files: CF_HDROP and the shell formats, so any
+// folder, the desktop or an app can take the drop. All files must be in one folder.
+IDataObject* shell_data_object(const std::vector<fs::path>& files) {
+    PIDLIST_ABSOLUTE folder = nullptr;
+    if (FAILED(SHParseDisplayName(files.front().parent_path().c_str(), nullptr, &folder, 0, nullptr))) return nullptr;
+    std::vector<PIDLIST_ABSOLUTE> items;
+    std::vector<PCUITEMID_CHILD> children;
+    for (const auto& f : files) {
+        PIDLIST_ABSOLUTE item = nullptr;
+        if (SUCCEEDED(SHParseDisplayName(f.c_str(), nullptr, &item, 0, nullptr))) {
+            items.push_back(item);
+            children.push_back(ILFindLastID(item));
+        }
+    }
+    IDataObject* data = nullptr;
+    if (!children.empty()) {
+        SHCreateDataObject(folder, static_cast<UINT>(children.size()), children.data(), nullptr, IID_PPV_ARGS(&data));
+    }
+    for (auto* item : items) ILFree(item);
+    ILFree(folder);
+    return data;
+}
+
+}  // namespace
+
+FileDragSource::FileDragSource() {
+    std::promise<void> ready;
+    auto started = ready.get_future();
+    thread_ = std::thread([this, &ready] {
+        struct Signal {
+            std::promise<void>& p;
+            ~Signal() { p.set_value(); }
+        };
+        std::optional<Signal> signal(std::in_place, ready);
+        SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+        if (FAILED(OleInitialize(nullptr))) {
+            log::error("file_drag: OleInitialize failed");
+            return;
+        }
+        WNDCLASSEXW wc{};
+        wc.cbSize = sizeof(wc);
+        wc.lpfnWndProc = wnd_proc;
+        wc.hInstance = GetModuleHandleW(nullptr);
+        wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+        wc.lpszClassName = kClassName;
+        RegisterClassExW(&wc);  // fails harmlessly if registered already
+        const HWND hwnd = CreateWindowExW(WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_LAYERED,
+                                          kClassName, L"", WS_POPUP, 0, 0, kSize, kSize, nullptr, nullptr,
+                                          GetModuleHandleW(nullptr), this);
+        if (!hwnd) {
+            log::error("file_drag: CreateWindowEx failed ({})", GetLastError());
+            OleUninitialize();
+            return;
+        }
+        SetLayeredWindowAttributes(hwnd, 0, 1, LWA_ALPHA);  // invisible, but still under the mouse
+        hwnd_ = hwnd;
+        signal.reset();
+
+        MSG msg;
+        while (GetMessageW(&msg, nullptr, 0, 0) > 0) {
+            TranslateMessage(&msg);
+            DispatchMessageW(&msg);
+        }
+        hwnd_ = nullptr;
+        OleUninitialize();
+    });
+    started.wait();
+}
+
+FileDragSource::~FileDragSource() {
+    if (const HWND h = hwnd_) PostMessageW(h, WM_CLOSE, 0, 0);
+    if (thread_.joinable()) thread_.join();
+}
+
+bool FileDragSource::start(std::vector<fs::path> files, OnDone on_done) {
+    const HWND h = hwnd_;
+    if (!h || files.empty()) return false;
+    {
+        std::lock_guard lock(mutex_);
+        if (dragging_) return false;
+        pending_ = std::move(files);
+        on_done_ = std::move(on_done);
+        dragging_ = true;
+    }
+    PostMessageW(h, kStartMessage, 0, 0);
+    return true;
+}
+
+void FileDragSource::on_start(HWND hwnd) {
+    POINT cursor{};
+    GetCursorPos(&cursor);
+    SetWindowPos(hwnd, HWND_TOPMOST, cursor.x - kSize / 2, cursor.y - kSize / 2, kSize, kSize,
+                 SWP_NOACTIVATE | SWP_SHOWWINDOW);
+    armed_ = true;
+    SetTimer(hwnd, kArmTimer, kArmTimeoutMs, nullptr);
+    // The press must be ours: only then may this thread capture the mouse for DoDragDrop.
+    input::send_mouse_button(input::MouseButton::Left, true);
+}
+
+void FileDragSource::on_button_down(HWND hwnd) {
+    armed_ = false;
+    KillTimer(hwnd, kArmTimer);
+    std::vector<fs::path> files;
+    {
+        std::lock_guard lock(mutex_);
+        files.swap(pending_);
+    }
+    IDataObject* data = files.empty() ? nullptr : shell_data_object(files);
+    if (!data) {
+        log::warn("file_drag: no data object for the files");
+        ShowWindow(hwnd, SW_HIDE);
+        input::send_mouse_button(input::MouseButton::Left, false);
+        finish(DROPEFFECT_NONE);
+        return;
+    }
+    DropSource source(hwnd);
+    DWORD effect = DROPEFFECT_NONE;
+    const HRESULT hr = DoDragDrop(data, &source, DROPEFFECT_COPY | DROPEFFECT_MOVE, &effect);
+    data->Release();
+    ShowWindow(hwnd, SW_HIDE);
+    if (hr != DRAGDROP_S_DROP) effect = DROPEFFECT_NONE;
+    log::info("file_drag: {} item(s) {}", files.size(), effect != DROPEFFECT_NONE ? "dropped" : "not dropped");
+    finish(effect);
+}
+
+void FileDragSource::finish(DWORD effect) {
+    OnDone done;
+    {
+        std::lock_guard lock(mutex_);
+        done = std::move(on_done_);
+        dragging_ = false;
+    }
+    if (done) done(effect);
+}
+
+LRESULT CALLBACK FileDragSource::wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
+    auto* self = reinterpret_cast<FileDragSource*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
+    switch (msg) {
+        case WM_NCCREATE:
+            SetWindowLongPtrW(hwnd, GWLP_USERDATA,
+                              reinterpret_cast<LONG_PTR>(reinterpret_cast<CREATESTRUCTW*>(lp)->lpCreateParams));
+            break;
+        case kStartMessage:
+            if (self) self->on_start(hwnd);
+            return 0;
+        case WM_LBUTTONDOWN:
+            if (self && self->armed_) self->on_button_down(hwnd);
+            return 0;
+        case WM_TIMER:
+            if (self && wp == kArmTimer && self->armed_) {
+                // Our press never reached the window (something else was under the cursor).
+                self->armed_ = false;
+                KillTimer(hwnd, kArmTimer);
+                ShowWindow(hwnd, SW_HIDE);
+                input::send_mouse_button(input::MouseButton::Left, false);
+                log::warn("file_drag: the drag could not start here");
+                self->finish(DROPEFFECT_NONE);
+            }
+            return 0;
+        case WM_MOUSEACTIVATE:
+            return MA_NOACTIVATE;
+        case WM_CLOSE:
+            DestroyWindow(hwnd);
+            return 0;
+        case WM_DESTROY:
+            PostQuitMessage(0);
+            return 0;
+        default:
+            break;
+    }
+    return DefWindowProcW(hwnd, msg, wp, lp);
+}
+
+}  // namespace kvm::files

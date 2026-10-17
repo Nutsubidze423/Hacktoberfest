@@ -12,6 +12,7 @@
 //   {"type":"file_chunk","id":1,"offset":0}  + up to 1 MB of file data
 //   {"type":"file_end","id":1}
 //   {"type":"transfer_end","count":3}
+// A drag transfer starts with {"type":"transfer_begin","drag":true}; its files go to a temp folder.
 // Paths from the peer are checked (no "..", absolute paths, drive letters, "\\?\", ":" or device
 // names like CON) and everything is written below the target folder. An existing name gets " (2)".
 #pragma once
@@ -42,6 +43,9 @@ struct Callbacks {
     std::function<void(const std::vector<std::filesystem::path>& saved)> on_received;
     // Progress of the transfer being sent (send thread). The last call has sent == total.
     std::function<void(std::uint64_t sent_bytes, std::uint64_t total_bytes)> on_send_progress;
+    // A drag transfer (send(..., true)) arrived into a temp folder: continue the drag here with
+    // FileDragSource. Without this callback drag transfers go to on_received like any other.
+    std::function<void(const std::vector<std::filesystem::path>& saved)> on_drag_received;
 };
 
 // %USERPROFILE%\Downloads\KVM (the user's Downloads folder, wherever it was moved to).
@@ -60,8 +64,9 @@ public:
     FileTransfer& operator=(const FileTransfer&) = delete;
 
     // Queues files and folders (folders recursively); they are sent one transfer after another.
-    // False if the channel is closed.
-    bool send(std::vector<std::filesystem::path> items);
+    // drag = the user is dragging them across: the peer saves them to a temp folder and continues
+    // the drag there (on_drag_received). False if the channel is closed.
+    bool send(std::vector<std::filesystem::path> items, bool drag = false);
 
     bool is_open() const { return open_; }
     const std::string& peer() const { return peer_; }
@@ -79,7 +84,11 @@ private:
     Callbacks callbacks_;
     std::filesystem::path target_;
     std::atomic<bool> open_{true};
-    BlockingQueue<std::vector<std::filesystem::path>> outgoing_;
+    struct Outgoing {
+        std::vector<std::filesystem::path> items;
+        bool drag = false;
+    };
+    BlockingQueue<Outgoing> outgoing_;
     std::thread receiver_;
     std::thread sender_;
 };
