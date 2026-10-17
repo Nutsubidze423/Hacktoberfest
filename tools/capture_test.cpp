@@ -1,12 +1,15 @@
 // capture_test: the A side of "send a window to B", without the network:
-//   pick a window -> VDD on (1920x1080, right) -> window onto the VDD -> capture frames of the VDD
-//   -> captures/frame_NN.bmp -> window back -> VDD off.
+//   pick a window -> VDD on (B's size, on the config.json client_side) -> window onto the VDD
+//   -> capture frames of the VDD -> captures/frame_NN.jpg -> window back -> VDD off.
 // The window always goes back and the VDD is always detached, also when a step fails.
 //
-//   capture_test.exe [--title <part of the title>] [--frames 10] [--seconds 10] [--wiggle]
+//   capture_test.exe [--title <part of the title>] [--frames 10] [--seconds 10] [--size 1920x1080]
+//                    [--wiggle] [--menu] [--bmp]
 //
 // WGC only delivers a frame when something on the VDD changes. --wiggle moves the mouse in a small
-// circle on the VDD so frames keep coming (the cursor is part of the capture).
+// circle on the VDD so frames keep coming (the cursor is part of the capture). --menu opens the
+// window's system menu (Alt+Space) while capturing, to show that popups reach B too. --bmp also
+// saves the raw frames as .bmp (input for jpeg_test).
 
 #include <algorithm>
 #include <atomic>
@@ -16,6 +19,7 @@
 #include <filesystem>
 #include <format>
 #include <fstream>
+#include <numeric>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -23,6 +27,8 @@
 #include <vector>
 
 #include "capture.h"
+#include "jpeg_encoder.h"
+#include "kvm/config.h"
 #include "kvm/dpi.h"
 #include "kvm/log.h"
 #include "kvm/net.h"
@@ -47,7 +53,11 @@ std::optional<kvm::WindowInfo> window_with_title(std::wstring_view part) {
     return std::nullopt;
 }
 
-bool save_bmp(const std::filesystem::path& path, const kvm::CapturedFrame& f) {
+void write_file(const std::filesystem::path& path, const void* data, size_t size) {
+    std::ofstream(path, std::ios::binary).write(static_cast<const char*>(data), static_cast<std::streamsize>(size));
+}
+
+void save_bmp(const std::filesystem::path& path, const kvm::CapturedFrame& f) {
     BITMAPINFOHEADER info{};
     info.biSize = sizeof(info);
     info.biWidth = f.width;
@@ -63,7 +73,6 @@ bool save_bmp(const std::filesystem::path& path, const kvm::CapturedFrame& f) {
     out.write(reinterpret_cast<const char*>(&file), sizeof(file));
     out.write(reinterpret_cast<const char*>(&info), sizeof(info));
     out.write(reinterpret_cast<const char*>(f.bgra.data()), static_cast<std::streamsize>(f.bgra.size()));
-    return static_cast<bool>(out);
 }
 
 // Average of R, G and B over a sample of pixels, 0..255. Near 0 means a black frame.
@@ -76,23 +85,43 @@ double mean_brightness(const kvm::CapturedFrame& f) {
     return n ? static_cast<double>(sum) / static_cast<double>(n) : 0.0;
 }
 
+void press_escape() {
+    INPUT keys[2]{};
+    keys[0].type = keys[1].type = INPUT_KEYBOARD;
+    keys[0].ki.wVk = keys[1].ki.wVk = VK_ESCAPE;
+    keys[1].ki.dwFlags = KEYEVENTF_KEYUP;
+    SendInput(2, keys, sizeof(INPUT));
+}
+
 }  // namespace
 
 int wmain(int argc, wchar_t** argv) {
     kvm::display::enable_dpi_awareness();
 
+    kvm::Config config;
+    try {
+        config = kvm::load_config();
+    } catch (const std::exception& e) {
+        kvm::log::warn("config.json: {}; using defaults", e.what());
+    }
+
     std::wstring title;
     size_t frames_wanted = 10;
     int seconds = 10;
-    bool wiggle = false;
+    int width = 1920, height = 1080;
+    bool wiggle = false, menu = false, bmp = false;
     for (int i = 1; i < argc; ++i) {
         const std::wstring_view arg = argv[i];
         const bool has_value = i + 1 < argc;
         if (arg == L"--title" && has_value) title = argv[++i];
         else if (arg == L"--frames" && has_value) frames_wanted = static_cast<size_t>(std::wcstol(argv[++i], nullptr, 10));
         else if (arg == L"--seconds" && has_value) seconds = static_cast<int>(std::wcstol(argv[++i], nullptr, 10));
+        else if (arg == L"--size" && has_value) swscanf_s(argv[++i], L"%dx%d", &width, &height);
         else if (arg == L"--wiggle") wiggle = true;
+        else if (arg == L"--menu") menu = true;
+        else if (arg == L"--bmp") bmp = true;
     }
+    const auto side = kvm::display::parse_side(config.client_side).value_or(kvm::display::Side::Right);
 
     if (!kvm::ScreenCapture::is_supported()) {
         kvm::log::error("Windows.Graphics.Capture is not supported on this Windows version");
@@ -103,6 +132,7 @@ int wmain(int argc, wchar_t** argv) {
         if (!title.empty()) kvm::log::error("no window with \"{}\" in its title", kvm::to_utf8(title));
         return title.empty() ? 0 : 1;
     }
+    const HWND hwnd = window->hwnd;
     kvm::log::info("window: \"{}\" ({})", kvm::to_utf8(window->title), kvm::to_utf8(window->process_name));
 
     auto vdd = kvm::VirtualDisplay::find();
@@ -110,6 +140,9 @@ int wmain(int argc, wchar_t** argv) {
         kvm::log::error("Virtual Display Driver not found");
         return 1;
     }
+    RECT rect_before{};
+    GetWindowRect(hwnd, &rect_before);
+
     kvm::WindowMover mover;
     struct Cleanup {
         kvm::WindowMover& mover;
@@ -119,13 +152,14 @@ int wmain(int argc, wchar_t** argv) {
             if (mover.sent_window()) mover.restore(hwnd);
             vdd.detach();
         }
-    } cleanup{mover, *vdd, window->hwnd};
+    } cleanup{mover, *vdd, hwnd};
 
     Checks check;
-    check(vdd->attach(1920, 1080, 60, kvm::display::Side::Right), "VDD attached, 1920x1080 on the right");
+    check(vdd->attach(width, height, 60, side),
+          std::format("VDD attached, {}x{} on the {}", width, height, kvm::display::to_string(side)));
     const auto where = vdd->rect();
     if (!where) return 1;
-    check(mover.send(window->hwnd, where->rect) == kvm::WindowMover::Result::Ok, "window sent to the VDD");
+    check(mover.send(hwnd, where->rect) == kvm::WindowMover::Result::Ok, "window sent to the VDD");
     std::this_thread::sleep_for(std::chrono::milliseconds(300));  // let it repaint at the new size
 
     kvm::LatestSlot<kvm::CapturedFrame> slot;
@@ -136,6 +170,11 @@ int wmain(int argc, wchar_t** argv) {
     } catch (const std::exception& e) {
         kvm::log::error("{}", e.what());
         return 1;
+    }
+    if (menu) {
+        // The window menu is a separate popup window, exactly what a window capture would miss.
+        SetForegroundWindow(hwnd);
+        PostMessageW(hwnd, WM_SYSCOMMAND, SC_KEYMENU, VK_SPACE);
     }
 
     POINT cursor_before{};
@@ -149,45 +188,49 @@ int wmain(int argc, wchar_t** argv) {
         }
     });
 
+    kvm::JpegEncoder jpeg(config.jpeg_quality);
+    std::vector<std::uint8_t> encoded;
+    std::vector<double> encode_ms;
     std::vector<kvm::CapturedFrame> frames;
-    std::vector<std::int64_t> waits_us;
+    std::filesystem::create_directories("captures");
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(seconds);
     while (frames.size() < frames_wanted) {
         const auto left = deadline - std::chrono::steady_clock::now();
         if (left <= std::chrono::steady_clock::duration::zero()) break;
         auto frame = slot.take_for(left);
         if (!frame) break;
-        waits_us.push_back(kvm::steady_now_us() - frame->t_capture_us);
+        if (jpeg.encode(*frame, encoded)) {
+            encode_ms.push_back(jpeg.last_encode_ms());
+            write_file(std::format("captures/frame_{:02}.jpg", frames.size()), encoded.data(), encoded.size());
+        }
+        if (bmp) save_bmp(std::format("captures/frame_{:02}.bmp", frames.size()), *frame);
         frames.push_back(std::move(*frame));
     }
     wiggling = false;
     wiggler.join();
     if (wiggle) SetCursorPos(cursor_before.x, cursor_before.y);
+    if (menu) press_escape();  // close the window menu
     capture->stop();
-
-    std::filesystem::create_directories("captures");
-    for (size_t i = 0; i < frames.size(); ++i) save_bmp(std::format("captures/frame_{:02}.bmp", i), frames[i]);
 
     const int vdd_w = where->rect.right - where->rect.left, vdd_h = where->rect.bottom - where->rect.top;
     check(!frames.empty(), std::format("{} of {} frames in {} s", frames.size(), frames_wanted, seconds));
     check(std::all_of(frames.begin(), frames.end(),
                       [&](const auto& f) { return f.width == vdd_w && f.height == vdd_h; }),
           std::format("every frame is {}x{} like the VDD", vdd_w, vdd_h));
-    check(std::all_of(frames.begin(), frames.end(),
-                      [](const auto& f) {
-                          return f.stride == f.width * 4 && f.bgra.size() == static_cast<size_t>(f.stride) * f.height;
-                      }),
-          "stride == width * 4, buffer == stride * height");
+    check(encode_ms.size() == frames.size(), std::format("{} JPEG(s) written to captures/", encode_ms.size()));
     if (!frames.empty()) {
-        const double brightness = mean_brightness(frames.back());
-        check(brightness > 5.0, std::format("last frame is not black (mean brightness {:.0f})", brightness));
-        const double span_s = static_cast<double>(frames.back().t_capture_us - frames.front().t_capture_us) / 1e6;
-        const auto max_wait = *std::max_element(waits_us.begin(), waits_us.end());
-        kvm::log::info("{:.1f} frames/s, WGC -> consumer at most {:.2f} ms, {} frame(s) replaced unread",
-                       span_s > 0 ? static_cast<double>(frames.size() - 1) / span_s : 0.0,
-                       static_cast<double>(max_wait) / 1000.0, slot.overwritten());
-        kvm::log::info("saved captures/frame_00.bmp .. frame_{:02}.bmp", frames.size() - 1);
+        check(mean_brightness(frames.back()) > 5.0, "last frame is not black");
+        const double avg = std::accumulate(encode_ms.begin(), encode_ms.end(), 0.0) /
+                           static_cast<double>(std::max<size_t>(1, encode_ms.size()));
+        kvm::log::info("JPEG quality {}: {:.2f} ms per frame on average", jpeg.quality(), avg);
     }
+
+    // Back to how A looked before the test.
+    check(mover.restore(hwnd), "window restored");
+    RECT rect_after{};
+    GetWindowRect(hwnd, &rect_after);
+    check(EqualRect(&rect_before, &rect_after) != FALSE, "window is exactly where it was");
+    check(vdd->detach() && !vdd->attached(), "VDD detached");
 
     if (check.failed) {
         kvm::log::error("{} check(s) failed", check.failed);

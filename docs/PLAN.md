@@ -138,7 +138,7 @@ Claude წაიკითხავს ამ ფაილს, იპოვის
 - [x] T3: `window_mover.*`: ფანჯარა VDD-ზე (maximize) და უკან (+ `tools/window_mover_test.cpp`)
 - [x] T4: `capture.*`: WGC `CreateForMonitor` → BGRA → `LatestSlot` (64 fps, WGC → consumer ≤ 8 ms თემოს ლეპტოპზე)
 - [x] T5: `jpeg_encoder.*`: TurboJPEG + დროის გაზომვა (`tools/jpeg_test.exe`; თემოს ლეპტოპზე 1920×1080: 4.2 ms, 69 KB რეალურ ეკრანზე)
-- [ ] T6: `capture_test`: ფანჯარა VDD-ზე → 10 ფრეიმი `captures/*.jpg` → უკან
+- [x] T6: `capture_test`: ფანჯარა VDD-ზე → 10 ფრეიმი `captures/*.jpg` → უკან (`--menu`-ით მენიუც ჩანს)
 - [ ] T7: `video_sender.*`: `LatestSlot` → `FrameChannel::send_frame` (ლუკას `video.h`)
 - [ ] M1: რეალური ფანჯრის სტრიმი B-ზე (ლუკასთან და სანდროსთან ერთად)
 - [ ] ფაზა 2: (სურვ.) H.264 Media Foundation
