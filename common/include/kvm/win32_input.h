@@ -11,9 +11,11 @@
 
 #include <cstdint>
 
+#include "kvm/protocol.h"
+
 namespace kvm::input {
 
-enum class MouseButton : std::uint8_t { Left, Right, Middle, X1, X2 };
+using MouseButton = kvm::proto::MouseButton;
 
 struct Point {
     int x = 0;
