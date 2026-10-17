@@ -20,6 +20,14 @@ double ms_since(Clock::time_point start) {
 
 }  // namespace
 
+VideoSender::VideoSender(LatestSlot<CapturedFrame>& frames, net::FrameChannel& channel, Options options)
+    : VideoSender(
+          frames,
+          [&channel](const proto::FrameHeader& header, std::span<const std::uint8_t> payload) {
+              return channel.send_frame(header, payload);
+          },
+          options) {}
+
 VideoSender::VideoSender(LatestSlot<CapturedFrame>& frames, SendFn send, Options options)
     : frames_(frames),
       send_(std::move(send)),
@@ -59,7 +67,10 @@ void VideoSender::run(std::stop_token stop) {
                 std::this_thread::sleep_until(next_send);
                 if (auto newer = frames_.try_take()) frame = std::move(newer);
             }
-            next_send = Clock::now() + min_interval;
+            // Next turn counts from this turn, not from now: Windows sleeps overshoot by up to ~15 ms,
+            // and losing that on every frame turns 30 fps into ~22. When we're late (slow channel),
+            // don't save up turns for a burst.
+            next_send = std::max(next_send + min_interval, Clock::now());
 
             if (jpeg.encode(*frame, encoded)) {
                 const proto::FrameHeader header{

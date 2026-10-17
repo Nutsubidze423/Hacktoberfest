@@ -1,7 +1,7 @@
 // The A-side video thread: newest captured frame -> JPEG -> video channel (port 50501).
 //
 //   kvm::LatestSlot<kvm::CapturedFrame> frames;              // capture->start(frames)
-//   kvm::VideoSender sender(frames, send, {.jpeg_quality = cfg.jpeg_quality, .max_fps = cfg.max_fps});
+//   kvm::VideoSender sender(frames, *channel, {.jpeg_quality = cfg.jpeg_quality, .max_fps = cfg.max_fps});
 //   ...
 //   sender.stop();                                            // also done by the destructor
 //
@@ -20,13 +20,13 @@
 #include "capture.h"
 #include "kvm/protocol.h"
 #include "kvm/queue.h"
+#include "kvm/video.h"
 
 namespace kvm {
 
 class VideoSender {
 public:
     // Sends one encoded frame. false = the channel is closed; the sender then stops.
-    // (With kvm/video.h: [&ch](auto& h, auto p) { return ch.send_frame(h, p); })
     using SendFn = std::function<bool(const proto::FrameHeader&, std::span<const std::uint8_t>)>;
 
     struct Options {
@@ -34,7 +34,11 @@ public:
         int max_fps = 30;       // config.json max_fps; 0 = no limit
     };
 
-    // Starts the sender thread. `frames` must outlive the sender.
+    // Starts the sender thread, sending through the video channel (port 50501).
+    // `frames` and `channel` must outlive the sender.
+    VideoSender(LatestSlot<CapturedFrame>& frames, net::FrameChannel& channel, Options options);
+
+    // Same with any send function (tests, other transports).
     VideoSender(LatestSlot<CapturedFrame>& frames, SendFn send, Options options);
     ~VideoSender();
     VideoSender(const VideoSender&) = delete;

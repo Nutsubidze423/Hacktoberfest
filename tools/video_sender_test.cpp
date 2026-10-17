@@ -2,8 +2,9 @@
 // LatestSlot, like WGC does; a fake channel spends a fixed time per frame, like Wi-Fi does.
 //
 // Scenarios: a normal channel (frame rate must be capped at max_fps), a slow channel (old frames
-// must be skipped, not queued, so latency stays flat), and a channel that closes (the sender must
-// stop by itself). Every payload must be a valid JPEG with gap-free seq numbers.
+// must be skipped, not queued, so latency stays flat), a channel that closes (the sender must stop
+// by itself), and Luka's real FrameChannel over TCP on 127.0.0.1 (B receives with recv_frame).
+// Every payload must be a valid JPEG with gap-free seq numbers.
 //
 //   video_sender_test.exe
 
@@ -21,6 +22,7 @@
 
 #include "kvm/log.h"
 #include "kvm/net.h"
+#include "kvm/video.h"
 #include "video_sender.h"
 
 namespace {
@@ -111,6 +113,77 @@ Result run(std::chrono::milliseconds send_time, int max_fps, std::chrono::millis
     return r;
 }
 
+// Listens on 127.0.0.1 only (a free port), so Windows Firewall doesn't ask anything.
+SOCKET listen_loopback(std::uint16_t& port) {
+    kvm::net::ensure_winsock();
+    const SOCKET s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    int len = sizeof(addr);
+    if (s == INVALID_SOCKET || bind(s, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) != 0 || listen(s, 1) != 0 ||
+        getsockname(s, reinterpret_cast<sockaddr*>(&addr), &len) != 0) {
+        if (s != INVALID_SOCKET) closesocket(s);
+        return INVALID_SOCKET;
+    }
+    port = ntohs(addr.sin_port);
+    return s;
+}
+
+// A: VideoSender -> FrameChannel::send_frame. B: connect_video -> recv_frame, like kvm_client.
+Result run_over_tcp(std::chrono::milliseconds duration) {
+    static const auto pattern = moving_block_frames();
+    Result r;
+    std::uint16_t port = 0;
+    const SOCKET listener = listen_loopback(port);
+    if (listener == INVALID_SOCKET) return r;
+    std::unique_ptr<kvm::net::FrameChannel> a_side;
+    std::thread acceptor([&] {
+        const SOCKET s = accept(listener, nullptr, nullptr);
+        if (s != INVALID_SOCKET) a_side = std::make_unique<kvm::net::FrameChannel>(s, "test B");
+    });
+    auto b_side = kvm::net::connect_video("127.0.0.1", port);
+    acceptor.join();
+    closesocket(listener);
+    if (!a_side || !b_side) return r;
+
+    std::thread receiver([&] {
+        tjhandle decoder = tj3Init(TJINIT_DECOMPRESS);
+        while (auto frame = b_side->recv_frame()) {
+            const bool valid = tj3DecompressHeader(decoder, frame->payload.data(), frame->payload.size()) == 0 &&
+                               tj3Get(decoder, TJPARAM_JPEGWIDTH) == frame->header.width &&
+                               tj3Get(decoder, TJPARAM_JPEGHEIGHT) == frame->header.height;
+            r.all_valid_jpeg = r.all_valid_jpeg && valid;
+            r.latency_us.push_back(kvm::steady_now_us() - frame->header.t_capture_us);
+            r.headers.push_back(frame->header);
+        }
+        tj3Destroy(decoder);
+    });
+
+    kvm::LatestSlot<kvm::CapturedFrame> slot;
+    std::atomic<bool> producing = true;
+    std::thread producer([&] {
+        for (size_t i = 0; producing; ++i) {
+            auto f = pattern[i % pattern.size()];
+            f.t_capture_us = kvm::steady_now_us();
+            slot.put(std::move(f));
+            std::this_thread::sleep_for(16ms);
+        }
+    });
+    const auto start = std::chrono::steady_clock::now();
+    {
+        kvm::VideoSender sender(slot, *a_side, {.jpeg_quality = 75, .max_fps = 30});
+        std::this_thread::sleep_for(duration);
+    }
+    r.seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+    a_side->close();  // B's recv_frame() returns nullopt
+    receiver.join();
+    b_side->close();
+    producing = false;
+    producer.join();
+    return r;
+}
+
 bool seq_without_gaps(const Result& r) {
     for (size_t i = 0; i < r.headers.size(); ++i) {
         if (r.headers[i].seq != i || r.headers[i].codec != "jpeg") return false;
@@ -156,6 +229,18 @@ int main() {
         const auto r = run(5ms, 30, 1s, 5);
         check(r.stopped_by_itself, "sender stopped by itself");
         check(r.headers.size() == 5, std::format("{} frames sent before the close", r.headers.size()));
+    }
+
+    kvm::log::info("4) Luka's FrameChannel over TCP on 127.0.0.1, max_fps 30");
+    {
+        const auto r = run_over_tcp(2s);
+        const double fps = static_cast<double>(r.headers.size()) / r.seconds;
+        check(r.headers.size() >= 20 && seq_without_gaps(r),
+              std::format("B received {} frames, seq 0..n-1, codec jpeg", r.headers.size()));
+        check(r.all_valid_jpeg, "every received payload is a 1920x1080 JPEG");
+        check(fps <= 31.0, std::format("{:.1f} frames/s (cap 30)", fps));
+        kvm::log::info("   capture -> received on B: {:.1f} ms on average",
+                       average_ms(r.latency_us, 0, r.latency_us.size()));
     }
 
     if (check.failed) {
