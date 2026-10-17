@@ -23,7 +23,8 @@ namespace kvm::proto {
 inline constexpr std::uint16_t kControlPort = 50500;
 inline constexpr std::uint16_t kVideoPort = 50501;
 // Bump when a message changes incompatibly; A rejects a hello with a different version.
-inline constexpr int kProtocolVersion = 1;
+// v2: everything is symmetric — KVM, window streams and remote input work A -> B and B -> A.
+inline constexpr int kProtocolVersion = 2;
 // Upper bound for one framed message, guards against garbage lengths.
 inline constexpr std::uint32_t kMaxControlMessageBytes = 64 * 1024;
 inline constexpr std::uint32_t kMaxFramePayloadBytes = 32 * 1024 * 1024;
@@ -38,7 +39,9 @@ NLOHMANN_JSON_SERIALIZE_ENUM(MouseButton, {
     {MouseButton::X2, "x2"},
 })
 
-// B -> A, first message after connecting.
+// Both directions, first message on a new connection: B (always the TCP client) sends it, A checks
+// protocol_version and answers with its own. screen_* = the sender's primary monitor, so a window
+// owner can size its virtual display to the viewer's screen.
 struct Hello {
     static constexpr std::string_view kType = "hello";
     int protocol_version = kProtocolVersion;
@@ -48,28 +51,30 @@ struct Hello {
     std::string hostname;
 };
 
-// A -> B: control moves to B. y_norm is where the cursor crossed the edge (0..1).
+// Both directions (KVM). Sent by the side whose physical mouse/keyboard crossed its edge (the
+// "owner"): from now on the owner's input drives the receiver. y_norm = edge crossing height (0..1).
 struct FocusEnter {
     static constexpr std::string_view kType = "focus_enter";
     double y_norm = 0.5;
 };
 
-// Control returns to A. A -> B when A takes it back (its own decision, Ctrl+Alt+Shift+Q, send
-// failure); B -> A when B's cursor leaves through the edge facing A (only B knows that).
-// y_norm is the height of that edge crossing (0..1).
+// Both directions (KVM). Ends the control started by focus_enter. The owner sends it when it takes
+// control back (its own decision, Ctrl+Alt+Shift+Q, send failure); the controlled side sends it when
+// the cursor leaves through its edge facing the owner (only that side knows). y_norm = edge height.
 struct FocusLeave {
     static constexpr std::string_view kType = "focus_leave";
     double y_norm = 0.5;
 };
 
-// A -> B: relative mouse movement in physical pixels.
+// KVM owner -> controlled side: relative mouse movement in physical pixels.
 struct MouseMove {
     static constexpr std::string_view kType = "mouse_move";
     int dx = 0;
     int dy = 0;
 };
 
-// Both directions. x_norm/y_norm are used only B -> A (position inside the streamed window).
+// Both directions. KVM: owner -> controlled side (x_norm/y_norm unused). Remote input: viewer ->
+// window owner, x_norm/y_norm = position inside the streamed picture (0..1).
 struct MouseButtonEvent {
     static constexpr std::string_view kType = "mouse_button";
     MouseButton button = MouseButton::Left;
@@ -94,7 +99,8 @@ struct Key {
     bool extended = false;
 };
 
-// A -> B: a window stream starts. Size is the captured client area in physical pixels.
+// Window owner -> viewer (either direction): a window stream starts on the video channel.
+// width/height = size of the streamed picture (the owner's virtual display) in physical pixels.
 struct StreamStart {
     static constexpr std::string_view kType = "stream_start";
     std::uint64_t hwnd = 0;
@@ -103,13 +109,14 @@ struct StreamStart {
     int height = 0;
 };
 
-// A -> B: the window stream stopped.
+// Window owner -> viewer: the stream stopped (window went back). Viewer -> window owner: "give the
+// window back" (viewer closed or its return button); the owner restores it and answers with stream_stop.
 struct StreamStop {
     static constexpr std::string_view kType = "stream_stop";
     std::uint64_t hwnd = 0;
 };
 
-// B -> A: pointer position inside the streamed window, normalized 0..1.
+// Viewer -> window owner: pointer position inside the streamed picture, normalized 0..1.
 struct RemoteMouseMove {
     static constexpr std::string_view kType = "remote_mouse_move";
     double x_norm = 0.0;

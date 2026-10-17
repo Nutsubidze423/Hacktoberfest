@@ -118,6 +118,29 @@ void send_test_video(std::stop_token stop, const VideoSlot& slot, const Options&
     }
 }
 
+std::string narrow(std::wstring_view s) {
+    const int len = WideCharToMultiByte(CP_UTF8, 0, s.data(), static_cast<int>(s.size()), nullptr, 0, nullptr, nullptr);
+    std::string out(len, '\0');
+    WideCharToMultiByte(CP_UTF8, 0, s.data(), static_cast<int>(s.size()), out.data(), len, nullptr, nullptr);
+    return out;
+}
+
+// A's answer to the client's hello: A's primary monitor, so B can size its virtual display to it.
+proto::Hello make_hello() {
+    wchar_t name[256];
+    DWORD name_len = static_cast<DWORD>(std::size(name));
+    if (!GetComputerNameExW(ComputerNameDnsHostname, name, &name_len)) {
+        name_len = 0;
+    }
+    const auto primary = kvm::display::primary_monitor();
+    return proto::Hello{
+        .screen_w = primary.rect.width(),
+        .screen_h = primary.rect.height(),
+        .dpi_scale = primary.scale,
+        .hostname = narrow(std::wstring_view(name, name_len)),
+    };
+}
+
 // Waits for the client's hello and checks the protocol version. nullopt = reject the client.
 std::optional<proto::Hello> handshake(kvm::net::Connection& conn) {
     const auto first = conn.incoming().pop_for(kHelloTimeout);
@@ -146,6 +169,7 @@ void run_session(kvm::net::Connection& conn, kvm::host::InputCapture* capture, V
     }
     kvm::log::info("client '{}' connected from {}: screen {}x{}, dpi scale {:.2f}", hello->hostname, conn.peer(),
                    hello->screen_w, hello->screen_h, hello->dpi_scale);
+    conn.send(make_hello());
 
     // KVM: input goes to this client while the session lasts. Detaching blocks until the
     // capture stops using conn, so it must happen before conn goes away (struct dtor).

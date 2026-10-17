@@ -40,11 +40,11 @@ if ($Firewall) {
     if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
         throw 'Firewall rules need an elevated PowerShell (Run as administrator).'
     }
-    if (-not (Get-NetFirewallRule -DisplayName 'KVM demo (TCP 50500-50501)' -ErrorAction SilentlyContinue)) {
-        New-NetFirewallRule -DisplayName 'KVM demo (TCP 50500-50501)' -Direction Inbound -Protocol TCP `
-            -LocalPort 50500-50501 -RemoteAddress LocalSubnet -Profile Any -Action Allow | Out-Null
+    if (-not (Get-NetFirewallRule -DisplayName 'KVM demo (TCP 50500-50502)' -ErrorAction SilentlyContinue)) {
+        New-NetFirewallRule -DisplayName 'KVM demo (TCP 50500-50502)' -Direction Inbound -Protocol TCP `
+            -LocalPort 50500-50502 -RemoteAddress LocalSubnet -Profile Any -Action Allow | Out-Null
     }
-    Write-Host 'Firewall: TCP 50500-50501 open for the local network (any profile).'
+    Write-Host 'Firewall: TCP 50500-50502 open for the local network (any profile).'
 }
 
 Write-Host ''

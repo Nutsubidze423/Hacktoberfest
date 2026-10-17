@@ -42,12 +42,15 @@
 საბოლოო მიზანი: A-ს მაუსი/კლავიატურა გადადის B-ს ეკრანზე (როგორც Deskflow / Mouse Without Borders), და A-ს ცალკეული ფანჯარა (მაგ. Photoshop) ტრანსლირდება B-ზე ისე, თითქოს B იყოს A-ს მესამე მონიტორი. ფანჯრის პროცესი ყოველთვის A-ზე მუშაობს; B მხოლოდ აჩვენებს სურათს და აბრუნებს ინფუთს.
 
 ## დემოს ფარგლები (≈10 საათი, 4 ადამიანი)
-**შედის:**
-1. მაუსი/კლავიატურა A → B ეკრანის კიდიდან გადასვლით (B-ს კონტროლი).
-2. A-ზე არჩეული ერთი ფანჯრის სტრიმი B-ზე ცალკე ფანჯარაში.
-3. სტრიმულ ფანჯარაზე კლიკები/სქროლი/კლავიატურა → A-ს ორიგინალ ფანჯარას.
+**შედის — ყველაფერი ორივე მიმართულებით (A ⇄ B), protocol v2:**
+1. **KVM:** მაუსი/კლავიატურა ეკრანის კიდიდან გადასვლით — A-სი B-ზე და B-სი A-ზე.
+2. **ფანჯარა:** ერთი კონკრეტული ფანჯარა (hotkey `Ctrl+Alt+Shift+W` — წინა პლანის ფანჯარა) გადადის მეორე კომპიუტერზე: owner-ზე ის VDD-ზე (ვირტუალური მონიტორი, მზა ხელმოწერილი დრაივერი) „იმალება“, მეორე მხარეს viewer-ში ჩანს. viewer-ის დახურვა/ღილაკი → ბრუნდება.
+3. **viewer-ის ინფუთი:** კლიკები/სქროლი/კლავიატურა viewer-ში → owner-ის ორიგინალ ფანჯარას.
+4. **ფაილები:** გადათრევით კიდეზე, A → B და B → A, პორტი 50502, სამიზნე `Downloads\KVM\`.
 
-**არ შედის (მერე):** ვირტუალური მონიტორის დრაივერი (IddCx), ფანჯრის drag-ით გადატანა, დაშიფვრა/დაწყვილება, clipboard, ფაილები, ინსტალერი, პენის წნევა.
+დეტალები და ვინ რას აკეთებს: `ARTEFACT/გადაწყვეტილებები 2 (ლუკა → თემო, სანდრო, დემეტრე).md`.
+
+**არ შედის (მერე):** საკუთარი IddCx დრაივერის დაწერა, ფანჯრის მაუსით drag-ით გადატანა (hotkey-ის ნაცვლად), ფაილის ჩაგდება კონკრეტულ ადგილას (v2), დაშიფვრა/დაწყვილება, clipboard, ინსტალერი, პენის წნევა.
 
 ## ტექნოლოგიები
 - **C++20**, MSVC (Visual Studio 2022), **CMake ≥ 3.25 + Ninja**, **vcpkg** (manifest mode). მხოლოდ Windows 10/11 x64.
@@ -94,23 +97,24 @@ tools/
 - A არის სერვერი, B უკავშირდება.
 - პორტი **50500** — control + input: `[u32 len][JSON]`, big-endian.
 - პორტი **50501** — ვიდეო: `[u32 header_len][u32 payload_len][header JSON][payload]`, big-endian.
+- პორტი **50502** — ფაილები (თემო, `common/.../file_transfer.*`): იგივე framing, header-ები `file_begin` / `file_chunk` / `file_end` / `transfer_end`.
 - `TCP_NODELAY` ორივე სოკეტზე.
 
 შეტყობინებები (`type` ველით):
 | type | მიმართულება | ველები |
 |---|---|---|
-| `hello` | B→A | `protocol_version`, `screen_w`, `screen_h`, `dpi_scale`, `hostname` |
-| `focus_enter` | A→B | `y_norm` (კურსორის შესვლის წერტილი) |
-| `focus_leave` | ორივე | `y_norm`. A→B: A თავად იბრუნებს კონტროლს; B→A: B-ის კურსორი A-სკენ მიმართული კიდით გამოვიდა |
-| `mouse_move` | A→B | `dx`, `dy` (relative) |
-| `mouse_button` | ორივე | `button` (`left`/`right`/`middle`/`x1`/`x2`), `down` (+ B→A-ზე `x_norm`, `y_norm`) |
+| `hello` | B→A, მერე A→B (პასუხი) | `protocol_version`, `screen_w`, `screen_h`, `dpi_scale`, `hostname` |
+| `focus_enter` | ორივე (KVM owner → controlled) | `y_norm` (კურსორის შესვლის წერტილი) |
+| `focus_leave` | ორივე | `y_norm`. owner იბრუნებს კონტროლს, ან controlled მხარის კურსორი owner-ისკენ მიმართული კიდით გამოვიდა |
+| `mouse_move` | ორივე (KVM owner → controlled) | `dx`, `dy` (relative) |
+| `mouse_button` | ორივე | `button` (`left`/`right`/`middle`/`x1`/`x2`), `down` (+ viewer → window owner-ზე `x_norm`, `y_norm`) |
 | `mouse_wheel` | ორივე | `delta`, `horizontal` |
 | `key` | ორივე | `vk`, `scan`, `down`, `extended` |
-| `stream_start` | A→B | `hwnd`, `title`, `width`, `height` |
-| `stream_stop` | A→B | `hwnd` |
-| `remote_mouse_move` | B→A | `x_norm`, `y_norm` (სტრიმულ ფანჯარაში, 0..1) |
+| `stream_start` | window owner → viewer (ორივე) | `hwnd`, `title`, `width`, `height` |
+| `stream_stop` | ორივე | `hwnd`. owner → viewer: შეჩერდა; viewer → owner: „დამიბრუნე“ |
+| `remote_mouse_move` | viewer → window owner (ორივე) | `x_norm`, `y_norm` (სტრიმულ ფანჯარაში, 0..1) |
 | `ping` / `pong` | ორივე | `t` (+ `pong`-ში `t_peer` — clock offset-ისთვის) |
-| `frame` (50501 header) | A→B | `seq`, `t_capture_us`, `width`, `height`, `codec` |
+| `frame` (50501 header) | window owner → viewer (ორივე, ერთი TCP არხი) | `seq`, `t_capture_us`, `width`, `height`, `codec` |
 
 ## მნიშვნელოვანი წესები
 - **DPI:** ორივე პროცესი იწყება `SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2)`-ით (ან manifest-ით). ყოველთვის ფიზიკურ პიქსელებში იმუშავე.
@@ -148,4 +152,4 @@ Windows Firewall-ში დაუშვი `kvm_host.exe` პორტებზ�
 - [ ] M2. ტესტი Photoshop-ით; latency/ხარისხის მორგება; დემოს სცენარი
 
 ## შემდეგი ეტაპები (დემოს მერე)
-H.264 (Media Foundation / NVENC) → D3D11 zero-copy pipeline → IddCx ვირტუალური მონიტორი A-ზე B-ს ზომით → ფანჯრის drag-ით გადატანა → B-ზე ფანჯრების overlay იმავე პოზიციაზე → TLS + PIN დაწყვილება → clipboard.
+H.264 (Media Foundation / NVENC) → D3D11 zero-copy pipeline → ფანჯრის მაუსით drag-ით გადატანა → ფაილის ჩაგდება კონკრეტულ ადგილას → TLS + PIN დაწყვილება → clipboard → საკუთარი IddCx დრაივერი.
