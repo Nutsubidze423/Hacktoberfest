@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "kvm/log.h"
+#include "socket_util.h"
 
 namespace kvm {
 
@@ -25,9 +26,35 @@ std::int64_t steady_now_us() {
 
 namespace kvm::net {
 
+using namespace detail;
+
 namespace {
 
 constexpr std::size_t kHeaderBytes = 4;
+
+// recv() fails with WSAETIMEDOUT when nothing arrives for this long. Pings every kPingInterval
+// guarantee traffic on a healthy link.
+void set_receive_timeout(SOCKET s) {
+    const DWORD ms = static_cast<DWORD>(std::chrono::duration_cast<std::chrono::milliseconds>(kDeadAfter).count());
+    setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&ms), sizeof(ms));
+}
+
+std::string peer_name(const sockaddr* addr, int len) {
+    std::array<char, NI_MAXHOST> host{};
+    std::array<char, NI_MAXSERV> port{};
+    if (getnameinfo(addr, len, host.data(), static_cast<DWORD>(host.size()), port.data(),
+                    static_cast<DWORD>(port.size()), NI_NUMERICHOST | NI_NUMERICSERV) != 0) {
+        return "?";
+    }
+    return std::string(host.data()) + ":" + port.data();
+}
+
+}  // namespace
+
+// ---------------------------------------------------------------------------------------------
+// Socket helpers (socket_util.h)
+
+namespace detail {
 
 std::string socket_error_text(int code) {
     wchar_t* buf = nullptr;
@@ -57,16 +84,9 @@ void set_nodelay(SOCKET s) {
     setsockopt(s, IPPROTO_TCP, TCP_NODELAY, reinterpret_cast<const char*>(&on), sizeof(on));
 }
 
-// recv() fails with WSAETIMEDOUT when nothing arrives for this long. Pings every kPingInterval
-// guarantee traffic on a healthy link.
-void set_receive_timeout(SOCKET s) {
-    const DWORD ms = static_cast<DWORD>(std::chrono::duration_cast<std::chrono::milliseconds>(kDeadAfter).count());
-    setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&ms), sizeof(ms));
-}
-
 bool send_all(SOCKET s, const char* data, std::size_t size) {
     while (size > 0) {
-        const int sent = ::send(s, data, static_cast<int>(size), 0);
+        const int sent = ::send(s, data, static_cast<int>(std::min<std::size_t>(size, INT32_MAX)), 0);
         if (sent == SOCKET_ERROR) {
             return false;
         }
@@ -76,10 +96,9 @@ bool send_all(SOCKET s, const char* data, std::size_t size) {
     return true;
 }
 
-// Returns 0 on success, otherwise the WSA error code (or WSAECONNRESET for an orderly close).
 int recv_exact(SOCKET s, char* data, std::size_t size) {
     while (size > 0) {
-        const int got = ::recv(s, data, static_cast<int>(size), 0);
+        const int got = ::recv(s, data, static_cast<int>(std::min<std::size_t>(size, INT32_MAX)), 0);
         if (got == 0) {
             return WSAECONNRESET;
         }
@@ -92,17 +111,116 @@ int recv_exact(SOCKET s, char* data, std::size_t size) {
     return 0;
 }
 
-std::string peer_name(const sockaddr* addr, int len) {
-    std::array<char, NI_MAXHOST> host{};
-    std::array<char, NI_MAXSERV> port{};
-    if (getnameinfo(addr, len, host.data(), static_cast<DWORD>(host.size()), port.data(),
-                    static_cast<DWORD>(port.size()), NI_NUMERICHOST | NI_NUMERICSERV) != 0) {
-        return "?";
+SOCKET listen_on(std::uint16_t port) {
+    ensure_winsock();
+    const SOCKET s = ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (s == INVALID_SOCKET) {
+        throw std::runtime_error("socket() failed: " + last_error_text());
     }
-    return std::string(host.data()) + ":" + port.data();
+    // Refuse to share the port with another process (e.g. a second kvm_host left running).
+    BOOL exclusive = TRUE;
+    setsockopt(s, SOL_SOCKET, SO_EXCLUSIVEADDRUSE, reinterpret_cast<const char*>(&exclusive), sizeof(exclusive));
+
+    sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = htonl(INADDR_ANY);
+    addr.sin_port = htons(port);
+    if (::bind(s, reinterpret_cast<const sockaddr*>(&addr), sizeof(addr)) == SOCKET_ERROR ||
+        ::listen(s, SOMAXCONN) == SOCKET_ERROR) {
+        const std::string err = last_error_text();
+        closesocket(s);
+        throw std::runtime_error("cannot listen on port " + std::to_string(port) + ": " + err);
+    }
+    return s;
 }
 
-}  // namespace
+SOCKET accept_on(const std::atomic<SOCKET>& listen_sock, std::string& peer) {
+    const SOCKET listening = listen_sock;
+    if (listening == INVALID_SOCKET) {
+        return INVALID_SOCKET;
+    }
+    sockaddr_storage addr{};
+    int len = sizeof(addr);
+    const SOCKET s = ::accept(listening, reinterpret_cast<sockaddr*>(&addr), &len);
+    if (s == INVALID_SOCKET) {
+        if (listen_sock != INVALID_SOCKET) {
+            log::warn("net: accept failed: {}", last_error_text());
+        }
+        return INVALID_SOCKET;
+    }
+    set_nodelay(s);
+    peer = peer_name(reinterpret_cast<sockaddr*>(&addr), len);
+    return s;
+}
+
+void close_listener(std::atomic<SOCKET>& listen_sock) {
+    const SOCKET s = listen_sock.exchange(INVALID_SOCKET);
+    if (s != INVALID_SOCKET) {
+        closesocket(s);  // makes a blocked accept() return INVALID_SOCKET
+    }
+}
+
+SOCKET connect_to(const std::string& host, std::uint16_t port, std::chrono::milliseconds timeout) {
+    ensure_winsock();
+
+    addrinfo hints{};
+    hints.ai_family = AF_INET;
+    hints.ai_socktype = SOCK_STREAM;
+    hints.ai_protocol = IPPROTO_TCP;
+    addrinfo* found = nullptr;
+    if (const int rc = getaddrinfo(host.c_str(), std::to_string(port).c_str(), &hints, &found); rc != 0) {
+        log::warn("net: cannot resolve {}: {}", host, socket_error_text(rc));
+        return INVALID_SOCKET;
+    }
+    std::unique_ptr<addrinfo, decltype(&freeaddrinfo)> guard(found, &freeaddrinfo);
+
+    const SOCKET s = ::socket(found->ai_family, found->ai_socktype, found->ai_protocol);
+    if (s == INVALID_SOCKET) {
+        log::warn("net: socket() failed: {}", last_error_text());
+        return INVALID_SOCKET;
+    }
+
+    // Non-blocking connect + select() so an unreachable host fails after `timeout`,
+    // not after Windows' ~21 s default.
+    u_long non_blocking = 1;
+    ioctlsocket(s, FIONBIO, &non_blocking);
+    int err = 0;
+    if (::connect(s, found->ai_addr, static_cast<int>(found->ai_addrlen)) == SOCKET_ERROR) {
+        err = WSAGetLastError();
+        if (err == WSAEWOULDBLOCK) {
+            fd_set writable;
+            fd_set failed;
+            FD_ZERO(&writable);
+            FD_ZERO(&failed);
+            FD_SET(s, &writable);
+            FD_SET(s, &failed);
+            const auto us = std::chrono::duration_cast<std::chrono::microseconds>(timeout).count();
+            timeval tv{.tv_sec = static_cast<long>(us / 1'000'000), .tv_usec = static_cast<long>(us % 1'000'000)};
+            const int ready = select(0, nullptr, &writable, &failed, &tv);
+            if (ready == 0) {
+                err = WSAETIMEDOUT;
+            } else if (ready == SOCKET_ERROR) {
+                err = WSAGetLastError();
+            } else {
+                int so_error = 0;
+                int so_len = sizeof(so_error);
+                getsockopt(s, SOL_SOCKET, SO_ERROR, reinterpret_cast<char*>(&so_error), &so_len);
+                err = so_error;
+            }
+        }
+    }
+    if (err != 0) {
+        log::warn("net: connect to {}:{} failed: {}", host, port, socket_error_text(err));
+        closesocket(s);
+        return INVALID_SOCKET;
+    }
+    non_blocking = 0;
+    ioctlsocket(s, FIONBIO, &non_blocking);
+    set_nodelay(s);
+    return s;
+}
+
+}  // namespace detail
 
 void ensure_winsock() {
     static std::once_flag once;
@@ -251,120 +369,27 @@ void Connection::handle_pong(const proto::Pong& pong) {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Server
+// Server / connect
 
-Server::Server(std::uint16_t port) {
-    ensure_winsock();
-    const SOCKET s = ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-    if (s == INVALID_SOCKET) {
-        throw std::runtime_error("socket() failed: " + last_error_text());
-    }
-    // Refuse to share the port with another process (e.g. a second kvm_host left running).
-    BOOL exclusive = TRUE;
-    setsockopt(s, SOL_SOCKET, SO_EXCLUSIVEADDRUSE, reinterpret_cast<const char*>(&exclusive), sizeof(exclusive));
-
-    sockaddr_in addr{};
-    addr.sin_family = AF_INET;
-    addr.sin_addr.s_addr = htonl(INADDR_ANY);
-    addr.sin_port = htons(port);
-    if (::bind(s, reinterpret_cast<const sockaddr*>(&addr), sizeof(addr)) == SOCKET_ERROR ||
-        ::listen(s, SOMAXCONN) == SOCKET_ERROR) {
-        const std::string err = last_error_text();
-        closesocket(s);
-        throw std::runtime_error("cannot listen on port " + std::to_string(port) + ": " + err);
-    }
-    listen_sock_ = s;
-}
+Server::Server(std::uint16_t port) : listen_sock_(listen_on(port)) {}
 
 Server::~Server() {
     stop();
 }
 
 std::unique_ptr<Connection> Server::accept() {
-    const SOCKET listening = listen_sock_;
-    if (listening == INVALID_SOCKET) {
-        return nullptr;
-    }
-    sockaddr_storage addr{};
-    int len = sizeof(addr);
-    const SOCKET s = ::accept(listening, reinterpret_cast<sockaddr*>(&addr), &len);
-    if (s == INVALID_SOCKET) {
-        if (listen_sock_ != INVALID_SOCKET) {
-            log::warn("net: accept failed: {}", last_error_text());
-        }
-        return nullptr;
-    }
-    return std::make_unique<Connection>(s, peer_name(reinterpret_cast<sockaddr*>(&addr), len));
+    std::string peer;
+    const SOCKET s = accept_on(listen_sock_, peer);
+    return s == INVALID_SOCKET ? nullptr : std::make_unique<Connection>(s, std::move(peer));
 }
 
 void Server::stop() {
-    const SOCKET s = listen_sock_.exchange(INVALID_SOCKET);
-    if (s != INVALID_SOCKET) {
-        closesocket(s);  // makes a blocked accept() return INVALID_SOCKET
-    }
+    close_listener(listen_sock_);
 }
 
-// ---------------------------------------------------------------------------------------------
-// Client
-
 std::unique_ptr<Connection> connect(const std::string& host, std::uint16_t port, std::chrono::milliseconds timeout) {
-    ensure_winsock();
-
-    addrinfo hints{};
-    hints.ai_family = AF_INET;
-    hints.ai_socktype = SOCK_STREAM;
-    hints.ai_protocol = IPPROTO_TCP;
-    addrinfo* found = nullptr;
-    if (const int rc = getaddrinfo(host.c_str(), std::to_string(port).c_str(), &hints, &found); rc != 0) {
-        log::warn("net: cannot resolve {}: {}", host, socket_error_text(rc));
-        return nullptr;
-    }
-    std::unique_ptr<addrinfo, decltype(&freeaddrinfo)> guard(found, &freeaddrinfo);
-
-    const SOCKET s = ::socket(found->ai_family, found->ai_socktype, found->ai_protocol);
-    if (s == INVALID_SOCKET) {
-        log::warn("net: socket() failed: {}", last_error_text());
-        return nullptr;
-    }
-
-    // Non-blocking connect + select() so an unreachable host fails after `timeout`,
-    // not after Windows' ~21 s default.
-    u_long non_blocking = 1;
-    ioctlsocket(s, FIONBIO, &non_blocking);
-    int err = 0;
-    if (::connect(s, found->ai_addr, static_cast<int>(found->ai_addrlen)) == SOCKET_ERROR) {
-        err = WSAGetLastError();
-        if (err == WSAEWOULDBLOCK) {
-            fd_set writable;
-            fd_set failed;
-            FD_ZERO(&writable);
-            FD_ZERO(&failed);
-            FD_SET(s, &writable);
-            FD_SET(s, &failed);
-            const auto us = std::chrono::duration_cast<std::chrono::microseconds>(timeout).count();
-            timeval tv{.tv_sec = static_cast<long>(us / 1'000'000), .tv_usec = static_cast<long>(us % 1'000'000)};
-            const int ready = select(0, nullptr, &writable, &failed, &tv);
-            if (ready == 0) {
-                err = WSAETIMEDOUT;
-            } else if (ready == SOCKET_ERROR) {
-                err = WSAGetLastError();
-            } else {
-                int so_error = 0;
-                int so_len = sizeof(so_error);
-                getsockopt(s, SOL_SOCKET, SO_ERROR, reinterpret_cast<char*>(&so_error), &so_len);
-                err = so_error;
-            }
-        }
-    }
-    if (err != 0) {
-        log::warn("net: connect to {}:{} failed: {}", host, port, socket_error_text(err));
-        closesocket(s);
-        return nullptr;
-    }
-    non_blocking = 0;
-    ioctlsocket(s, FIONBIO, &non_blocking);
-
-    return std::make_unique<Connection>(s, host + ":" + std::to_string(port));
+    const SOCKET s = connect_to(host, port, timeout);
+    return s == INVALID_SOCKET ? nullptr : std::make_unique<Connection>(s, host + ":" + std::to_string(port));
 }
 
 }  // namespace kvm::net

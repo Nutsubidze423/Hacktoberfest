@@ -1,13 +1,23 @@
 // kvm_host.exe — runs on A (owns the physical mouse/keyboard, streams a window).
 // Usage: kvm_host.exe [--config <path>] [--log <file>] [--no-kvm]
-//   --no-kvm  don't install the input hooks (e.g. when only testing the video stream)
+//                     [--test-video [--test-video-kb N] [--test-video-fps N]]
+//   --no-kvm      don't install the input hooks (e.g. when only testing the video stream)
+//   --test-video  send synthetic frames (codec "test", random bytes, default 250 KB at 30 fps) so
+//                 network throughput and video latency can be measured before capture/viewer exist
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <exception>
 #include <filesystem>
+#include <memory>
+#include <mutex>
 #include <optional>
+#include <random>
+#include <string>
 #include <string_view>
+#include <thread>
+#include <vector>
 
 #include <windows.h>
 
@@ -17,6 +27,7 @@
 #include "kvm/log.h"
 #include "kvm/net.h"
 #include "kvm/protocol.h"
+#include "kvm/video.h"
 
 namespace {
 
@@ -26,15 +37,85 @@ namespace proto = kvm::proto;
 constexpr auto kHelloTimeout = 3s;
 constexpr auto kStatsInterval = 5s;
 
+struct Options {
+    std::optional<std::filesystem::path> config_path;
+    bool kvm_enabled = true;
+    bool test_video = false;
+    int test_video_kb = 250;
+    int test_video_fps = 30;
+};
+
 std::atomic<bool> g_running{true};
 std::atomic<kvm::net::Server*> g_server{nullptr};
+std::atomic<kvm::net::VideoServer*> g_video_server{nullptr};
 
 BOOL WINAPI on_console_ctrl(DWORD) {
     g_running = false;
     if (auto* server = g_server.load()) {
         server->stop();
     }
+    if (auto* video = g_video_server.load()) {
+        video->stop();
+    }
     return TRUE;
+}
+
+// The client's current video connection (port 50501). Replaced whenever the client reconnects.
+class VideoSlot {
+public:
+    void set(std::shared_ptr<kvm::net::FrameChannel> channel) {
+        std::lock_guard lock(mutex_);
+        if (channel_) {
+            channel_->close();
+        }
+        channel_ = std::move(channel);
+    }
+    std::shared_ptr<kvm::net::FrameChannel> get() const {
+        std::lock_guard lock(mutex_);
+        return channel_;
+    }
+
+private:
+    mutable std::mutex mutex_;
+    std::shared_ptr<kvm::net::FrameChannel> channel_;
+};
+
+void accept_video_loop(kvm::net::VideoServer& server, VideoSlot& slot) {
+    while (g_running) {
+        auto channel = server.accept();
+        if (!channel) {
+            continue;  // stop() or a transient accept error
+        }
+        kvm::log::info("video channel from {}", channel->peer());
+        slot.set(std::move(channel));
+    }
+}
+
+// Synthetic stream for --test-video. Stops when `stop` is requested.
+void send_test_video(std::stop_token stop, const VideoSlot& slot, const Options& opt) {
+    std::vector<std::uint8_t> payload(static_cast<std::size_t>(opt.test_video_kb) * 1024);
+    std::mt19937 rng(42);  // random bytes: incompressible, like real JPEG data
+    for (auto& b : payload) {
+        b = static_cast<std::uint8_t>(rng());
+    }
+    const auto period = std::chrono::microseconds(1'000'000 / std::max(1, opt.test_video_fps));
+    kvm::log::info("test video: {} KB frames at {} fps", opt.test_video_kb, opt.test_video_fps);
+
+    std::uint32_t seq = 0;
+    auto next = std::chrono::steady_clock::now();
+    while (!stop.stop_requested()) {
+        if (const auto channel = slot.get(); channel && channel->is_open()) {
+            channel->send_frame({.seq = seq++, .t_capture_us = kvm::steady_now_us(), .width = 1920, .height = 1080,
+                                 .codec = "test"},
+                                payload);
+        }
+        next += period;
+        const auto now = std::chrono::steady_clock::now();
+        if (next < now) {
+            next = now;  // network is slower than the frame rate: send as fast as it allows, no backlog
+        }
+        std::this_thread::sleep_until(next);
+    }
 }
 
 // Waits for the client's hello and checks the protocol version. nullopt = reject the client.
@@ -57,7 +138,8 @@ std::optional<proto::Hello> handshake(kvm::net::Connection& conn) {
     return *hello;
 }
 
-void run_session(kvm::net::Connection& conn, kvm::host::InputCapture* capture) {
+void run_session(kvm::net::Connection& conn, kvm::host::InputCapture* capture, VideoSlot& video,
+                 const Options& opt) {
     const auto hello = handshake(conn);
     if (!hello) {
         return;
@@ -77,6 +159,11 @@ void run_session(kvm::net::Connection& conn, kvm::host::InputCapture* capture) {
         capture->set_client([&conn](const proto::Message& m) { return conn.send_json(proto::encode(m)); });
     }
 
+    std::jthread test_video;
+    if (opt.test_video) {
+        test_video = std::jthread([&](std::stop_token stop) { send_test_video(stop, video, opt); });
+    }
+
     auto next_stats = std::chrono::steady_clock::now() + kStatsInterval;
     while (g_running && conn.is_open()) {
         if (const auto msg = conn.incoming().pop_for(500ms)) {
@@ -94,7 +181,31 @@ void run_session(kvm::net::Connection& conn, kvm::host::InputCapture* capture) {
             next_stats += kStatsInterval;
         }
     }
+    // The video channel is left alone: a reconnecting client may already have opened its new one
+    // (accepted on another thread), and closing here would kill that. A newer channel replaces it.
     kvm::log::info("client '{}' session ended", hello->hostname);
+}
+
+Options parse_args(int argc, wchar_t** argv) {
+    Options opt;
+    for (int i = 1; i < argc; ++i) {
+        const std::wstring_view arg = argv[i];
+        const bool has_value = i + 1 < argc;
+        if (arg == L"--config" && has_value) {
+            opt.config_path = argv[++i];
+        } else if (arg == L"--log" && has_value) {
+            kvm::log::open_file(argv[++i]);
+        } else if (arg == L"--no-kvm") {
+            opt.kvm_enabled = false;
+        } else if (arg == L"--test-video") {
+            opt.test_video = true;
+        } else if (arg == L"--test-video-kb" && has_value) {
+            opt.test_video_kb = std::max(1, _wtoi(argv[++i]));
+        } else if (arg == L"--test-video-fps" && has_value) {
+            opt.test_video_fps = std::max(1, _wtoi(argv[++i]));
+        }
+    }
+    return opt;
 }
 
 }  // namespace
@@ -102,31 +213,19 @@ void run_session(kvm::net::Connection& conn, kvm::host::InputCapture* capture) {
 int wmain(int argc, wchar_t** argv) {
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     SetConsoleCtrlHandler(on_console_ctrl, TRUE);
-
-    std::optional<std::filesystem::path> config_path;
-    bool kvm_enabled = true;
-    for (int i = 1; i < argc; ++i) {
-        const std::wstring_view arg = argv[i];
-        if (arg == L"--config" && i + 1 < argc) {
-            config_path = argv[++i];
-        } else if (arg == L"--log" && i + 1 < argc) {
-            kvm::log::open_file(argv[++i]);
-        } else if (arg == L"--no-kvm") {
-            kvm_enabled = false;
-        }
-    }
+    Options opt = parse_args(argc, argv);
 
     try {
-        const kvm::Config cfg = kvm::load_config(config_path);
+        const kvm::Config cfg = kvm::load_config(opt.config_path);
 
         // KVM: hooks run for the whole process; sessions attach/detach the client.
         const auto side = kvm::display::parse_side(cfg.client_side);
-        if (kvm_enabled && (!side || (*side != kvm::display::Side::Left && *side != kvm::display::Side::Right))) {
+        if (opt.kvm_enabled && (!side || (*side != kvm::display::Side::Left && *side != kvm::display::Side::Right))) {
             kvm::log::error("config: client_side must be \"left\" or \"right\", got \"{}\" - KVM disabled", cfg.client_side);
-            kvm_enabled = false;
+            opt.kvm_enabled = false;
         }
         std::optional<kvm::host::InputCapture> capture;
-        if (kvm_enabled) {
+        if (opt.kvm_enabled) {
             capture.emplace(kvm::host::CaptureOptions{.client_side = *side});
             if (!capture->start()) {
                 kvm::log::error("KVM disabled: could not install the input hooks");
@@ -135,18 +234,26 @@ int wmain(int argc, wchar_t** argv) {
         }
 
         kvm::net::Server server(cfg.control_port);
+        kvm::net::VideoServer video_server(cfg.video_port);
         g_server = &server;
-        kvm::log::info("kvm_host: protocol v{}, listening on port {} (client on the {}). Ctrl+C to quit.",
-                       proto::kProtocolVersion, cfg.control_port, cfg.client_side);
+        g_video_server = &video_server;
+        kvm::log::info("kvm_host: protocol v{}, listening on ports {} + {} (client on the {}). Ctrl+C to quit.",
+                       proto::kProtocolVersion, cfg.control_port, cfg.video_port, cfg.client_side);
+
+        VideoSlot video;
+        std::jthread video_acceptor([&] { accept_video_loop(video_server, video); });
 
         while (g_running) {
             auto conn = server.accept();
             if (!conn) {
                 continue;  // stop() or a transient accept error
             }
-            run_session(*conn, capture ? &*capture : nullptr);
+            run_session(*conn, capture ? &*capture : nullptr, video, opt);
         }
+        video_server.stop();
+        video_acceptor.join();
         g_server = nullptr;
+        g_video_server = nullptr;
         kvm::log::info("kvm_host: bye");
         return 0;
     } catch (const std::exception& e) {

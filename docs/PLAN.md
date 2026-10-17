@@ -116,7 +116,7 @@ Claude წაიკითხავს ამ ფაილს, იპოვის
 - [x] `net.*`: `Connection`, `Server`, `connect()` + ხელახალი დაკავშირება (B: ყოველ 1 წმ-ში), dead-link 5 წმ
 - [x] `hello` (+ ვერსიის შემოწმება), `ping`/`pong` + clock offset (min-RTT, NTP-ს მსგავსად)
 - [x] ping ტესტი — `kvm_host`/`kvm_client` ყოველ 5 წმ-ში წერენ rtt-ს; Python ფაილები წაშლილია
-- [ ] ვიდეოს framing 50501 პორტზე (`send_frame` / `recv_frame`)
+- [x] ვიდეოს არხი 50501: `video.h` (`FrameChannel`, `VideoServer`, `connect_video`) + `tools/video_test.cpp`; `kvm_host --test-video` (სატესტო სტრიმი, B ლოგავს fps/Mbit/latency)
 - [ ] M1: KVM ინტეგრაცია დემეტრესთან; ვიდეოს ინტეგრაცია თემოსთან და სანდროსთან
 - [ ] ფაზა 2: end-to-end latency, კავშირის გაწყვეტის სცენარები
 - [ ] M2: დემოს სცენარი, README

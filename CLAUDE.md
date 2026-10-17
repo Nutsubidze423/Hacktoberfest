@@ -72,7 +72,7 @@ docs/PLAN.md               # როლები, ვადები, ჩეკ�
 common/                    # static lib kvm_common
   include/kvm/
     protocol.h             # შეტყობინებები (ლუკა) — გაყინული კონტრაქტი
-    net.h  config.h  log.h  queue.h            # (ლუკა)
+    net.h  video.h  config.h  log.h  queue.h   # (ლუკა)
     win32_input.h  dpi.h                       # (დემეტრე)
   src/*.cpp
 host_a/                    # kvm_host.exe
@@ -85,7 +85,7 @@ client_b/                  # kvm_client.exe
   input_inject.*           # A-დან მოსული ინფუთის ემულაცია (დემეტრე)
   viewer_window.*  jpeg_decoder.*  video_receiver.*            # (სანდრო)
 tools/
-  protocol_test.cpp  queue_test.cpp            # ტესტები (ლუკა)
+  protocol_test.cpp  queue_test.cpp  video_test.cpp   # ტესტები (ლუკა)
   capture_test.cpp         # ფანჯარა → .jpg (თემო)
   fake_streamer.cpp        # .jpg-ები → viewer (სანდრო)
 ```

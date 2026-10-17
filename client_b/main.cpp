@@ -3,8 +3,10 @@
 
 #include <atomic>
 #include <chrono>
+#include <cstdint>
 #include <exception>
 #include <filesystem>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -18,6 +20,7 @@
 #include "kvm/log.h"
 #include "kvm/net.h"
 #include "kvm/protocol.h"
+#include "kvm/video.h"
 
 namespace {
 
@@ -57,7 +60,49 @@ proto::Hello make_hello() {
     };
 }
 
-void run_session(kvm::net::Connection& conn, kvm::display::Side host_side) {
+// Counters filled by the video receiver thread, read and reset by the stats log.
+struct VideoStats {
+    std::atomic<std::int64_t> frames{0};
+    std::atomic<std::int64_t> bytes{0};
+    std::atomic<std::int64_t> latency_sum_us{0};
+    std::atomic<std::int64_t> latency_max_us{0};
+    std::atomic<std::int64_t> latency_samples{0};
+};
+
+// Receives frames until the channel closes.
+// TODO(luka): hand frames to the viewer (sandro) instead of only counting them.
+void receive_video(kvm::net::FrameChannel& channel, const kvm::net::Connection& conn, VideoStats& stats) {
+    while (const auto frame = channel.recv_frame()) {
+        ++stats.frames;
+        stats.bytes += static_cast<std::int64_t>(frame->payload.size());
+        // Latency needs the clock offset, which exists after the first ping round trip.
+        if (conn.stats().rtt_us >= 0) {
+            const std::int64_t latency = kvm::steady_now_us() - conn.peer_to_local_us(frame->header.t_capture_us);
+            stats.latency_sum_us += latency;
+            ++stats.latency_samples;
+            std::int64_t prev = stats.latency_max_us;
+            while (latency > prev && !stats.latency_max_us.compare_exchange_weak(prev, latency)) {
+            }
+        }
+    }
+}
+
+void log_video_stats(VideoStats& stats, std::chrono::seconds interval) {
+    const auto frames = stats.frames.exchange(0);
+    if (frames == 0) {
+        return;
+    }
+    const auto bytes = stats.bytes.exchange(0);
+    const auto samples = stats.latency_samples.exchange(0);
+    const auto latency_sum = stats.latency_sum_us.exchange(0);
+    const auto latency_max = stats.latency_max_us.exchange(0);
+    const double secs = static_cast<double>(interval.count());
+    kvm::log::info("video: {:.1f} fps, {:.2f} MB/s ({:.0f} Mbit/s), latency avg {:.1f} ms, max {:.1f} ms",
+                   frames / secs, bytes / secs / 1e6, bytes * 8 / secs / 1e6,
+                   samples ? latency_sum / 1000.0 / samples : 0.0, latency_max / 1000.0);
+}
+
+void run_session(kvm::net::Connection& conn, const kvm::Config& cfg, kvm::display::Side host_side) {
     if (!conn.send(make_hello())) {
         return;
     }
@@ -65,6 +110,16 @@ void run_session(kvm::net::Connection& conn, kvm::display::Side host_side) {
 
     // KVM: replays A's input while B has control; releases everything held when the session ends.
     kvm::client::InputInject inject(host_side, [&conn](const proto::Message& m) { return conn.send_json(proto::encode(m)); });
+
+    VideoStats video_stats;
+    std::unique_ptr<kvm::net::FrameChannel> video = kvm::net::connect_video(cfg.host_ip, cfg.video_port);
+    std::jthread video_receiver;
+    if (video) {
+        kvm::log::info("video channel connected ({}:{})", cfg.host_ip, cfg.video_port);
+        video_receiver = std::jthread([&] { receive_video(*video, conn, video_stats); });
+    } else {
+        kvm::log::warn("no video channel — is port {} open on the host?", cfg.video_port);
+    }
 
     auto next_stats = std::chrono::steady_clock::now() + kStatsInterval;
     while (g_running && conn.is_open()) {
@@ -78,7 +133,14 @@ void run_session(kvm::net::Connection& conn, kvm::display::Side host_side) {
             const auto stats = conn.stats();
             kvm::log::info("link: rtt {:.2f} ms, clock offset {:.1f} ms", stats.rtt_us / 1000.0,
                            stats.clock_offset_us / 1000.0);
+            log_video_stats(video_stats, std::chrono::duration_cast<std::chrono::seconds>(kStatsInterval));
             next_stats += kStatsInterval;
+        }
+    }
+    if (video) {
+        video->close();  // unblocks recv_frame; join before `video` is destroyed
+        if (video_receiver.joinable()) {
+            video_receiver.join();
         }
     }
 }
@@ -120,7 +182,7 @@ int wmain(int argc, wchar_t** argv) {
 
         while (g_running) {
             if (auto conn = kvm::net::connect(cfg.host_ip, cfg.control_port)) {
-                run_session(*conn, host_side);
+                run_session(*conn, cfg, host_side);
             }
             if (g_running) {
                 kvm::log::info("reconnecting in {} s...", kReconnectDelay.count());
