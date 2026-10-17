@@ -18,6 +18,11 @@ std::string last_error_text();
 
 void set_nodelay(SOCKET s);
 
+// Makes every blocked send()/recv() on `s` return at once, even if the peer is dead or silent:
+// shutdown() plus CancelIoEx (shutdown alone may leave a blocking call waiting for the peer).
+// The handle stays valid; closesocket() it after the other threads are done.
+void abort_socket(SOCKET s);
+
 // Blocking send of the whole buffer. False on error.
 bool send_all(SOCKET s, const char* data, std::size_t size);
 

@@ -172,6 +172,12 @@ void run_session(kvm::net::Connection& conn, const kvm::Config& cfg, kvm::KvmLin
             next_stats += kStatsInterval;
         }
     }
+    // Control connection is gone (or we are quitting). Hand KVM and clipboard back first, so they
+    // never keep using a dead link while the side channels shut down; then drop those channels
+    // without waiting for the peer (abort_socket wakes their blocked calls at once).
+    if (clip) clip->detach();
+    if (kvm) kvm->detach();
+    detach = {nullptr, nullptr};
     files.set(nullptr);
     if (video) {
         video->close();  // unblocks recv_frame; join before `video` is destroyed

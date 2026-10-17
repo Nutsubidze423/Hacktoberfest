@@ -30,7 +30,7 @@ FrameChannel::~FrameChannel() {
 
 void FrameChannel::close() {
     if (open_.exchange(false)) {
-        shutdown(sock_, SD_BOTH);  // wakes blocked send/recv; the destructor closes the handle
+        abort_socket(sock_);  // wakes blocked send/recv at once; the destructor closes the handle
     }
 }
 

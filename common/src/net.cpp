@@ -84,6 +84,11 @@ void set_nodelay(SOCKET s) {
     setsockopt(s, IPPROTO_TCP, TCP_NODELAY, reinterpret_cast<const char*>(&on), sizeof(on));
 }
 
+void abort_socket(SOCKET s) {
+    shutdown(s, SD_BOTH);
+    CancelIoEx(reinterpret_cast<HANDLE>(s), nullptr);
+}
+
 bool send_all(SOCKET s, const char* data, std::size_t size) {
     while (size > 0) {
         const int sent = ::send(s, data, static_cast<int>(std::min<std::size_t>(size, INT32_MAX)), 0);
@@ -285,9 +290,9 @@ LinkStats Connection::stats() const {
 
 void Connection::close() {
     if (open_.exchange(false)) {
-        // shutdown() (not closesocket) wakes a blocked recv() without invalidating the handle
+        // abort (not closesocket) wakes a blocked recv()/send() without invalidating the handle
         // that other threads may still be using; the destructor closes it after joining.
-        shutdown(sock_, SD_BOTH);
+        abort_socket(sock_);
         stop_.request_stop();
     }
 }
