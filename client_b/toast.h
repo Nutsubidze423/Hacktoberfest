@@ -1,8 +1,8 @@
-// Sarke's own notification (owner: Sandro, docs/DESIGN.md 9.3): a small dark card that slides in at
-// the top-right of the main screen, like NVIDIA's overlay notifications, instead of the Windows toast
-// at the bottom-right. Orange brand bar, logo, "SARKE · <tag>", title, detail and a thin line that
-// runs out until it hides. Hover holds it; a click runs on_click (e.g. show the viewer); × closes it.
-// Never takes focus. With animations off in Windows it fades in and out without sliding.
+// Sarke's own notification (owner: Sandro, docs/DESIGN.md 9.3): a rounded card that slides in at
+// the top-right of the main screen, like NVIDIA's overlay notifications, in the website's style
+// (tile, logo, "Sarke · <tag>", title, detail and a thin line that runs out until it hides) instead
+// of the Windows toast at the bottom-right. Hover holds it; a click runs on_click (e.g. show the
+// viewer); × closes it. Never takes focus. With animations off in Windows it only fades.
 //
 //   kvm::Toast toast;
 //   toast.show({.kind = kvm::Toast::Kind::Connected, .tag = L"Link",
@@ -61,7 +61,8 @@ private:
     struct Geometry {
         RECT work{};    // the main screen's work area
         UINT dpi = 96;
-        int w = 0, h = 0;
+        int w = 0, h = 0;        // the window: card + shadow margin on every side
+        int margin = 0;          // shadow margin
         int x_shown = 0, x_hidden = 0, y = 0;
     };
 
@@ -73,13 +74,15 @@ private:
     void place(double slide, double alpha);  // slide 0 = shown, 1 = off to the right
     void tick();
     void render();
+    D2D1_RECT_F card_rect() const;
     D2D1_RECT_F close_rect() const;
 
     HWND hwnd_ = nullptr;
     Geometry geo_;
-    ui::ComPtr<ID2D1HwndRenderTarget> rt_;
-    ui::ComPtr<ID2D1SolidColorBrush> brush_;
+    ui::LayeredSurface canvas_;
     ui::TextStyles text_;
+    int x_ = 0;
+    BYTE alpha_ = 0;
 
     Content content_;
     std::function<void()> on_click_;

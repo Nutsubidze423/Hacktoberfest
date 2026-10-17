@@ -21,9 +21,9 @@ namespace kvm {
 
 namespace {
 
-namespace color = ui::color;
 using display::Side;
 using layout::Role;
+using ui::pal;
 using ui::px;
 using ui::TextStyle;
 
@@ -36,30 +36,30 @@ constexpr UINT_PTR kIdentifyTimer = 2;
 constexpr UINT kRefreshMs = 2000;
 constexpr UINT kIdentifyMs = 2500;
 
-// Window (dp).
-constexpr float kInitialW = 960;
-constexpr float kInitialH = 680;
-constexpr float kMinW = 800;
-constexpr float kMinH = 620;
-constexpr float kStripH = 32;
+// Window (dp), docs/DESIGN.md 10.
+constexpr float kInitialW = 980;
+constexpr float kInitialH = 700;
+constexpr float kMinW = 820;
+constexpr float kMinH = 640;
+constexpr float kStripH = 44;
 constexpr float kCaptionButtonW = 46;
 constexpr float kCaptionGlyph = 10;
 constexpr float kResizeBorder = 6;
-constexpr float kLogo = 16;
-constexpr float kPanelW = 288;
+constexpr float kLogo = 20;
+constexpr float kPad = 40;            // page padding left / right
+constexpr float kTilePad = 20;        // inside the map and panel tiles
+constexpr float kPanelW = 300;
 constexpr float kSegmentH = 32;
-constexpr float kApplyH = 40;
-constexpr float kRowH = 28;
-constexpr float kMapMargin = 40;      // around the drawn desktop, room for the LIVE line and glow
-constexpr float kGrid = 32;
+constexpr float kSegmentInset = 2;
+constexpr float kButtonH = 36;
+constexpr float kRowH = 30;
+constexpr float kMapMargin = 44;      // around the drawn desktop, room for the Live line
 constexpr float kEdgeBar = 3;         // the crossing edge
-constexpr float kPeerFrame = 2;
-constexpr float kStatusSquare = 8;
-constexpr float kIdentifySize = 176;  // the popup on each monitor
+constexpr float kPeerStroke = 2;
+constexpr float kDot = 7;
+constexpr float kIdentifySize = 200;  // the popup on each monitor
 constexpr float kIdentifyInset = 48;
-constexpr float kIdentifyFrame = 4;
 constexpr float kIdentifyNumber = 96;
-constexpr float kGlow[] = {0.32f, 0.18f, 0.09f, 0.04f};  // edge glow steps, inwards
 
 constexpr Side kSides[4] = {Side::Left, Side::Right, Side::Top, Side::Bottom};
 constexpr DisplaySettings::Hit kSideHits[4] = {DisplaySettings::Hit::SideLeft, DisplaySettings::Hit::SideRight,
@@ -75,8 +75,9 @@ std::wstring widen(std::string_view s) {
 
 std::wstring side_word(Side s) { return widen(display::to_string(s)); }
 
-std::wstring upper(std::wstring s) {
-    if (!s.empty()) CharUpperBuffW(s.data(), static_cast<DWORD>(s.size()));
+// "right" -> "Right" (sentence case, like the website).
+std::wstring capitalized(std::wstring s) {
+    if (!s.empty()) CharUpperBuffW(s.data(), 1);
     return s;
 }
 
@@ -92,14 +93,6 @@ int monitor_number(const display::Monitor& m, std::size_t index) {
 float width(const D2D1_RECT_F& r) { return r.right - r.left; }
 float height(const D2D1_RECT_F& r) { return r.bottom - r.top; }
 bool contains(const D2D1_RECT_F& r, float x, float y) { return x >= r.left && x < r.right && y >= r.top && y < r.bottom; }
-
-// One line of text centred in r.
-void text_center(ui::Painter& p, TextStyle style, std::wstring_view s, const D2D1_RECT_F& r, std::uint32_t rgb) {
-    const float w = std::round(p.styles().measure(style, s));
-    const float line = p.styles().metrics(style).line_px;
-    p.text(style, s, std::round((r.left + r.right - w) / 2), std::round((r.top + r.bottom - line) / 2),
-           w + ui::text_style_spec(style).size_dp, rgb);
-}
 
 bool register_class(const wchar_t* name, WNDPROC proc) {
     WNDCLASSEXW wc{};
@@ -122,21 +115,25 @@ bool same_monitors(const std::vector<display::Monitor>& a, const std::vector<dis
 }  // namespace
 
 // ---- Identify: the monitor's number, big, in its bottom-left corner (like Windows' Identify) ----
+// A rounded tile with real transparency (UpdateLayeredWindow), drawn once.
 
 class IdentifyPopup {
 public:
-    IdentifyPopup(const display::Monitor& m, int number) : dpi_(m.dpi ? m.dpi : 96) {
-        number_ = std::to_wstring(number);
-        detail_ = std::format(L"{}{}{}", size_text(m.rect.width(), m.rect.height()), ui::kSeparator, percent(m.scale));
+    IdentifyPopup(const display::Monitor& m, int number) {
+        const UINT dpi = m.dpi ? m.dpi : 96;
         if (!register_class(kIdentifyClassName, &IdentifyPopup::wnd_proc)) return;
-        const int size = px(kIdentifySize, dpi_);
-        const int inset = px(kIdentifyInset, dpi_);
-        hwnd_ = CreateWindowExW(WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, kIdentifyClassName, L"", WS_POPUP,
-                                m.work.left + inset, m.work.bottom - inset - size, size, size, nullptr, nullptr,
-                                GetModuleHandleW(nullptr), this);
+        const int size = px(kIdentifySize, dpi);
+        const int inset = px(kIdentifyInset, dpi);
+        hwnd_ = CreateWindowExW(WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_LAYERED, kIdentifyClassName,
+                                L"", WS_POPUP, 0, 0, size, size, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
         if (!hwnd_) return;
-        const DWM_WINDOW_CORNER_PREFERENCE corners = DWMWCP_DONOTROUND;
-        DwmSetWindowAttribute(hwnd_, DWMWA_WINDOW_CORNER_PREFERENCE, &corners, sizeof(corners));
+        try {
+            draw(m, number, dpi, size);
+        } catch (const std::exception& e) {
+            log::error("displays: identify: {}", e.what());
+            return;
+        }
+        canvas_.present(hwnd_, m.work.left + inset, m.work.bottom - inset - size, 255);
         ShowWindow(hwnd_, SW_SHOWNOACTIVATE);
     }
     ~IdentifyPopup() {
@@ -147,79 +144,51 @@ public:
 
 private:
     static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
-        if (msg == WM_NCCREATE) {
-            SetWindowLongPtrW(hwnd, GWLP_USERDATA,
-                              reinterpret_cast<LONG_PTR>(reinterpret_cast<CREATESTRUCTW*>(lp)->lpCreateParams));
-        }
-        auto* self = reinterpret_cast<IdentifyPopup*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
         switch (msg) {
-        case WM_PAINT:
-            if (self) self->paint(hwnd);
-            ValidateRect(hwnd, nullptr);
-            return 0;
-        case WM_ERASEBKGND:
-            return 1;
         case WM_MOUSEACTIVATE:
             return MA_NOACTIVATE;
         case WM_LBUTTONDOWN:
             ShowWindow(hwnd, SW_HIDE);  // click it away
             return 0;
-        case WM_NCDESTROY:
-            SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
-            if (self) self->hwnd_ = nullptr;
-            break;
         default:
-            break;
+            return DefWindowProcW(hwnd, msg, wp, lp);
         }
-        return DefWindowProcW(hwnd, msg, wp, lp);
     }
 
-    void paint(HWND hwnd) {
-        try {
-            if (!rt_) {
-                RECT rc;
-                GetClientRect(hwnd, &rc);
-                const auto props = D2D1::RenderTargetProperties(D2D1_RENDER_TARGET_TYPE_DEFAULT, D2D1::PixelFormat(), 96.0f, 96.0f);
-                if (FAILED(ui::Graphics::get().d2d()->CreateHwndRenderTarget(
-                        props, D2D1::HwndRenderTargetProperties(hwnd, D2D1::SizeU(rc.right, rc.bottom)), &rt_))) {
-                    return;
-                }
-                rt_->CreateSolidColorBrush(ui::to_color(color::text_hi), &brush_);
-                text_.create(dpi_);
-                auto& g = ui::Graphics::get();
-                g.dwrite()->CreateTextFormat(g.family(), g.fonts(), DWRITE_FONT_WEIGHT_BOLD, DWRITE_FONT_STYLE_NORMAL,
-                                             DWRITE_FONT_STRETCH_NORMAL, static_cast<float>(px(kIdentifyNumber, dpi_)),
-                                             L"en-us", &big_);
-            }
-            const auto size = rt_->GetSize();
-            const D2D1_RECT_F all{0, 0, size.width, size.height};
-            rt_->BeginDraw();
-            rt_->Clear(ui::to_color(color::bg0));
-            ui::Painter p(rt_.Get(), brush_.Get(), text_);
-            p.frame(all, static_cast<float>(px(kIdentifyFrame, dpi_)), color::accent);
-            const float pad = static_cast<float>(px(ui::space::s16, dpi_));
-            if (big_) {
-                brush_->SetColor(ui::to_color(color::text_hi));
-                const D2D1_RECT_F box{pad, pad / 2, size.width - pad, size.height - pad};
-                rt_->DrawTextW(number_.c_str(), static_cast<UINT32>(number_.size()), big_.Get(), box, brush_.Get());
-            }
-            const float line = text_.metrics(TextStyle::Label).line_px;
-            p.text(TextStyle::Label, detail_, pad, size.height - pad - line, size.width - 2 * pad, color::text_mid);
-            p.text(TextStyle::Label, ui::kAppName, pad, size.height - pad - 2 * line - static_cast<float>(px(4, dpi_)),
-                   size.width - 2 * pad, color::accent);
-            if (rt_->EndDraw() == D2DERR_RECREATE_TARGET) rt_.Reset();
-        } catch (const std::exception& e) {
-            log::error("displays: identify: {}", e.what());
+    void draw(const display::Monitor& m, int number, UINT dpi, int size) {
+        ID2D1RenderTarget* rt = canvas_.begin(size, size);
+        if (!rt) return;
+        ui::TextStyles text;
+        text.create(dpi);
+        ui::Painter p(rt, canvas_.brush(), text);
+        const ui::Palette& c = pal();
+        const auto s = static_cast<float>(size);
+        const auto P = [dpi](float dp) { return static_cast<float>(px(dp, dpi)); };
+        p.round({0, 0, s, s}, P(ui::radius::lg), c.tile, 0.97f);
+        const float pad = P(ui::space::s24);
+        // The number, in the display face at Identify size.
+        auto& g = ui::Graphics::get();
+        ui::ComPtr<IDWriteTextFormat> big;
+        const std::wstring n = std::to_wstring(number);
+        if (SUCCEEDED(g.dwrite()->CreateTextFormat(g.family(ui::FontRole::Sans), g.fonts(ui::FontRole::Sans),
+                                                   DWRITE_FONT_WEIGHT_BOLD, DWRITE_FONT_STYLE_NORMAL,
+                                                   DWRITE_FONT_STRETCH_NORMAL, P(kIdentifyNumber), L"en-us", &big))) {
+            canvas_.brush()->SetColor(ui::to_color(c.ink));
+            rt->DrawTextW(n.c_str(), static_cast<UINT32>(n.size()), big.Get(), {pad, pad / 2, s - pad, s - pad},
+                          canvas_.brush());
         }
+        const float line = text.metrics(TextStyle::Caption).line_px;
+        const float logo = P(18);
+        p.logo({pad, s - pad - 2 * line - P(6) - logo + line, pad + logo, s - pad - 2 * line - P(6) + line});
+        p.text(TextStyle::BodyStrong, ui::kAppName, pad + logo + P(6), s - pad - 2 * line - P(4), s - 2 * pad, c.ink);
+        p.text(TextStyle::Caption, std::format(L"{}{}{}", size_text(m.rect.width(), m.rect.height()), ui::kSeparator,
+                                               percent(m.scale)),
+               pad, s - pad - line, s - 2 * pad, c.ink2);
+        canvas_.end();
     }
 
     HWND hwnd_ = nullptr;
-    UINT dpi_;
-    std::wstring number_, detail_;
-    ui::ComPtr<ID2D1HwndRenderTarget> rt_;
-    ui::ComPtr<ID2D1SolidColorBrush> brush_;
-    ui::ComPtr<IDWriteTextFormat> big_;
-    ui::TextStyles text_;
+    ui::LayeredSurface canvas_;
 };
 
 // ---- window ------------------------------------------------------------------------------------
@@ -262,8 +231,7 @@ bool DisplaySettings::show(Options options) {
                                       px(kInitialW, system_dpi), px(kInitialH, system_dpi), nullptr, nullptr,
                                       GetModuleHandleW(nullptr), this);
     if (!hwnd) return false;
-    const DWM_WINDOW_CORNER_PREFERENCE corners = DWMWCP_DONOTROUND;
-    DwmSetWindowAttribute(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, &corners, sizeof(corners));
+    ui::style_window(hwnd);  // rounded corners, no system border, theme-matched shadow
 
     // Centre on the monitor with the cursor, at that monitor's DPI, inside its work area.
     POINT cursor{};
@@ -366,6 +334,11 @@ LRESULT DisplaySettings::handle_message(UINT msg, WPARAM wp, LPARAM lp) {
     }
     case WM_DISPLAYCHANGE:
     case WM_SETTINGCHANGE:
+        if (ui::is_theme_change(msg, lp)) {  // Windows switched between dark and light apps
+            ui::refresh_theme();
+            ui::style_window(hwnd);
+            InvalidateRect(hwnd, nullptr, FALSE);
+        }
         refresh_monitors();
         break;
     case WM_TIMER:
@@ -711,64 +684,66 @@ DisplaySettings::Layout DisplaySettings::compute_layout() const {
     const auto w = static_cast<float>(rc.right);
     const auto h = static_cast<float>(rc.bottom);
     const auto P = [this](float dp) { return static_cast<float>(px(dp, dpi_)); };
-    const auto label_h = text_.metrics(TextStyle::Label).line_px;
+    const auto caption_h = text_.metrics(TextStyle::Caption).line_px;
     const auto body_h = text_.metrics(TextStyle::Body).line_px;
 
     Layout l;
     l.strip = {0, 0, w, P(kStripH)};
     l.close = {w - P(kCaptionButtonW), 0, w, l.strip.bottom};
     l.minimize = {l.close.left - P(kCaptionButtonW), 0, l.close.left, l.strip.bottom};
-    l.x0 = P(ui::space::s32);
-    l.x1 = w - P(ui::space::s32);
+    l.x0 = P(kPad);
+    l.x1 = w - P(kPad);
 
-    float y = l.strip.bottom + P(ui::space::s24);
+    float y = l.strip.bottom + P(ui::space::s16);
     l.label_top = y;
-    y += label_h + P(ui::space::s8);
+    y += caption_h + P(ui::space::s4);
     l.title_top = y;
-    y += text_.metrics(TextStyle::Display).line_px + P(ui::space::s8);
+    y += text_.metrics(TextStyle::Headline).line_px + P(ui::space::s8);
     l.body_top = y;
     y += 2 * body_h + P(ui::space::s24);
     const float main_top = y;
 
     const float footer_bottom = h - P(ui::space::s24);
-    l.footer = {l.x0, footer_bottom - P(kSegmentH), l.x1, footer_bottom};
+    l.footer = {l.x0, footer_bottom - P(kButtonH), l.x1, footer_bottom};
     l.status_top = l.footer.top - P(ui::space::s16) - body_h;
     const float main_bottom = std::max(main_top + P(ui::space::s48 * 3), l.status_top - P(ui::space::s16));
     l.panel = {l.x1 - P(kPanelW), main_top, l.x1, main_bottom};
-    l.map = {l.x0, main_top, l.panel.left - P(ui::space::s24), main_bottom};
+    l.map = {l.x0, main_top, l.panel.left - P(ui::space::s16), main_bottom};
 
-    const float pl = l.panel.left + P(ui::space::s16);
-    const float pr = l.panel.right - P(ui::space::s16);
-    const float gap = P(ui::space::s4);
-    float py = l.panel.top + P(ui::space::s16);
+    const float pl = l.panel.left + P(kTilePad);
+    const float pr = l.panel.right - P(kTilePad);
+    float py = l.panel.top + P(kTilePad);
     l.side_label_top = py;
-    py += label_h + P(ui::space::s8);
-    const float seg_w = std::floor((pr - pl - 3 * gap) / 4);
+    py += caption_h + P(ui::space::s8);
+    // Segmented control: a pill track with four equal segments inside it.
+    const float inset = P(kSegmentInset);
+    const float seg_w = std::floor((pr - pl - 2 * inset) / 4);
     for (int i = 0; i < 4; ++i) {
-        const float left = pl + static_cast<float>(i) * (seg_w + gap);
-        l.sides[i] = {left, py, i == 3 ? pr : left + seg_w, py + P(kSegmentH)};
+        const float left = pl + inset + static_cast<float>(i) * seg_w;
+        l.sides[i] = {left, py + inset, i == 3 ? pr - inset : left + seg_w, py + P(kSegmentH) - inset};
     }
     py += P(kSegmentH) + P(ui::space::s8);
     l.side_note_top = py;
-    py += label_h + P(ui::space::s16);
+    py += caption_h + P(ui::space::s16);
     l.role_label_top = py;
-    py += label_h + P(ui::space::s8);
-    const float half = std::floor((pr - pl - gap) / 2);
-    l.roles[0] = {pl, py, pl + half, py + P(kSegmentH)};
-    l.roles[1] = {pl + half + gap, py, pr, py + P(kSegmentH)};
+    py += caption_h + P(ui::space::s8);
+    const float half = std::floor((pr - pl - 2 * inset) / 2);
+    l.roles[0] = {pl + inset, py + inset, pl + inset + half, py + P(kSegmentH) - inset};
+    l.roles[1] = {pl + inset + half, py + inset, pr - inset, py + P(kSegmentH) - inset};
     py += P(kSegmentH) + P(ui::space::s16);
     l.rows_top = py;
-    const float bt = l.panel.bottom - P(ui::space::s16) - P(kApplyH);
+    const float bt = l.panel.bottom - P(kTilePad) - P(kButtonH);
     const float bhalf = std::floor((pr - pl - P(ui::space::s8)) / 2);
-    l.apply = {pl, bt, pl + bhalf, bt + P(kApplyH)};
-    l.revert = {pl + bhalf + P(ui::space::s8), bt, pr, bt + P(kApplyH)};
+    l.apply = {pl, bt, pl + bhalf, bt + P(kButtonH)};
+    l.revert = {pl + bhalf + P(ui::space::s8), bt, pr, bt + P(kButtonH)};
 
+    // Footer: "Windows display settings ›" is a link (accent text), Identify a grey pill.
     const float pad2 = 2 * P(ui::space::s16);
-    const float ws_w = std::round(text_.measure(TextStyle::Label, L"Windows display settings")) + pad2;
+    const float ws_w = std::round(text_.measure(TextStyle::BodyStrong, L"Windows display settings \u203A")) + P(ui::space::s8);
     l.windows_settings = {l.x1 - ws_w, l.footer.top, l.x1, l.footer.bottom};
-    const float id_w = std::round(text_.measure(TextStyle::Label, L"Identify")) + pad2;
-    l.identify = {l.windows_settings.left - P(ui::space::s8) - id_w, l.footer.top,
-                  l.windows_settings.left - P(ui::space::s8), l.footer.bottom};
+    const float id_w = std::round(text_.measure(TextStyle::BodyStrong, L"Identify")) + pad2;
+    l.identify = {l.windows_settings.left - P(ui::space::s16) - id_w, l.footer.top,
+                  l.windows_settings.left - P(ui::space::s16), l.footer.bottom};
     return l;
 }
 
@@ -848,7 +823,7 @@ bool DisplaySettings::ensure_render_target() {
         return false;
     }
     rt_->SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_CLEARTYPE);
-    rt_->CreateSolidColorBrush(ui::to_color(color::text_hi), &brush_);
+    rt_->CreateSolidColorBrush(ui::to_color(pal().ink), &brush_);
     return true;
 }
 
@@ -856,8 +831,9 @@ void DisplaySettings::render() {
     if (!ensure_render_target()) return;
     const Layout l = compute_layout();
     rt_->BeginDraw();
-    rt_->Clear(ui::to_color(color::bg0));
+    rt_->Clear(ui::to_color(pal().bg));
     ui::Painter p(rt_.Get(), brush_.Get(), text_);
+    p.halo({0, 0, l.strip.right, static_cast<float>(rt_->GetPixelSize().height)});
     draw_strip(p, l);
     draw_header(p, l);
     draw_map(p, l);
@@ -871,70 +847,62 @@ void DisplaySettings::render() {
 }
 
 void DisplaySettings::draw_strip(ui::Painter& p, const Layout& l) {
+    const ui::Palette& c = pal();
     const auto P = [this](float dp) { return static_cast<float>(px(dp, dpi_)); };
-    // Logo: the same cells as the icon (docs/DESIGN.md section 9).
     const float logo = P(kLogo);
-    const float lx = P(ui::space::s12);
+    const float lx = P(14);
     const float ly = std::round((height(l.strip) - logo) / 2);
-    const float unit = logo / ui::logo::grid;
-    for (const auto& c : ui::logo::cells) {
-        p.fill({std::round(lx + c.x * unit), std::round(ly + c.y * unit), std::round(lx + (c.x + c.w) * unit),
-                std::round(ly + (c.y + c.h) * unit)},
-               c.rgb);
-    }
-    const float label_h = text_.metrics(TextStyle::Label).line_px;
-    const float ty = std::round((height(l.strip) - label_h) / 2);
+    p.logo({lx, ly, lx + logo, ly + logo});
+    const float ty = std::round((height(l.strip) - text_.metrics(TextStyle::BodyStrong).line_px) / 2);
     float x = lx + logo + P(ui::space::s8);
-    x += p.text(TextStyle::Label, ui::kAppName, x, ty, l.minimize.left - x, color::text_hi);
-    p.text(TextStyle::Label, std::wstring(ui::kSeparator) + L"Displays", x, ty, l.minimize.left - x, color::text_lo);
+    x += std::round(p.text(TextStyle::BodyStrong, ui::kAppName, x, ty, l.minimize.left - x, c.ink)) + P(ui::space::s8);
+    p.text(TextStyle::Body, std::wstring(ui::kChevron) + L"  Displays", x, ty, l.minimize.left - x, c.ink2);
 
     const float glyph = P(kCaptionGlyph);
     const float line = static_cast<float>(ui::hairline(dpi_));
     const bool min_hot = hover_ == Hit::Minimize || pressed_ == Hit::Minimize;
     const bool close_hot = hover_ == Hit::Close || pressed_ == Hit::Close;
-    if (min_hot) p.fill(l.minimize, color::bg2);
-    if (close_hot) p.fill(l.close, color::err);
+    if (min_hot) p.fill(l.minimize, c.tile);
+    if (close_hot) p.fill(l.close, ui::kCloseHover);
     const float mcx = std::round((l.minimize.left + l.minimize.right - glyph) / 2);
     const float mcy = std::round((l.minimize.top + l.minimize.bottom) / 2);
-    p.fill({mcx, mcy, mcx + glyph, mcy + line}, min_hot ? color::text_hi : color::text_mid);
+    p.fill({mcx, mcy, mcx + glyph, mcy + line}, min_hot ? c.ink : c.ink2);
     const float cx = std::round((l.close.left + l.close.right - glyph) / 2);
     const float cy = std::round((l.close.top + l.close.bottom - glyph) / 2);
-    const auto close_rgb = close_hot ? color::text_hi : color::text_mid;
+    const auto close_rgb = close_hot ? ui::kCloseGlyph : c.ink2;
     p.diagonal({cx, cy}, {cx + glyph, cy + glyph}, line, close_rgb);
     p.diagonal({cx + glyph, cy}, {cx, cy + glyph}, line, close_rgb);
 }
 
 void DisplaySettings::draw_header(ui::Painter& p, const Layout& l) {
+    const ui::Palette& c = pal();
     const float w = l.x1 - l.x0;
-    p.text(TextStyle::Label, L"Settings · Displays", l.x0, l.label_top, w, color::text_lo);
-    p.text(TextStyle::Display, L"Where is the other PC?", l.x0, l.title_top, w, color::text_hi);
+    p.text(TextStyle::Caption, L"Settings \u00B7 Displays", l.x0, l.label_top, w, c.ink3);
+    p.text(TextStyle::Headline, L"Where is the other PC?", l.x0, l.title_top, w, c.ink);
     const float body_h = text_.metrics(TextStyle::Body).line_px;
     p.text(TextStyle::Body, L"Drag the other PC to the side of your screens where it really stands.", l.x0, l.body_top,
-           w, color::text_mid);
-    p.text(TextStyle::Body, L"The orange edge is where your mouse crosses over. Arrow keys work too.", l.x0,
-           l.body_top + body_h, w, color::text_mid);
+           w, c.ink2);
+    p.text(TextStyle::Body, L"The blue edge is where your mouse crosses over. Arrow keys work too.", l.x0,
+           l.body_top + body_h, w, c.ink2);
 }
 
 void DisplaySettings::draw_map(ui::Painter& p, const Layout& l) {
+    const ui::Palette& c = pal();
     const auto P = [this](float dp) { return static_cast<float>(px(dp, dpi_)); };
     const D2D1_RECT_F& map = l.map;
-    p.fill(map, color::bg1);
-    // Grid.
-    const float grid = P(kGrid);
-    const float line = static_cast<float>(ui::hairline(dpi_));
-    for (float x = map.left + grid; x < map.right; x += grid) p.fill({x, map.top, x + line, map.bottom}, color::line, 0.55f);
-    for (float y = map.top + grid; y < map.bottom; y += grid) p.fill({map.left, y, map.right, y + line}, color::line, 0.55f);
+    p.round(map, P(ui::radius::lg), c.tile);
 
-    const float label_h = text_.metrics(TextStyle::Label).line_px;
-    const float pad = P(ui::space::s12);
+    const float caption_h = text_.metrics(TextStyle::Caption).line_px;
+    const float pad = P(kTilePad);
     if (mons_.empty()) {
-        text_center(p, TextStyle::Label, L"No monitors found", map, color::text_lo);
+        p.text_center(TextStyle::Body, L"No monitors found", map, c.ink3);
         return;
     }
     rt_->PushAxisAlignedClip(map, D2D1_ANTIALIAS_MODE_ALIASED);
     const MapTransform t = map_transform(l);
     const bool dragging = dragging_ && drag_moved_;
     const Side side = dragging ? drag_side_ : pending_side_;
+    const float stroke = std::max(1.0f, P(1.5f));
 
     // Where the other PC can go, while dragging.
     if (dragging) {
@@ -942,195 +910,194 @@ void DisplaySettings::draw_map(ui::Painter& p, const Layout& l) {
             if (!layout::side_accepted(s)) continue;
             const auto zone = t.to_client(layout::peer_rect(mons_, s, peer_w(), peer_h()));
             if (s == drag_side_) {
-                p.fill(zone, color::accent, 0.10f);
-                p.frame(zone, line, color::accent, 0.7f);
+                p.round(zone, P(ui::radius::xs), c.accent, 0.16f);
+                p.round_stroke(zone, P(ui::radius::xs), stroke, c.accent_ink);
             } else {
-                p.frame(zone, line, color::line_strong);
+                p.round_stroke(zone, P(ui::radius::xs), stroke, c.ink, ui::alpha::line_strong);
             }
         }
     }
 
-    // This PC's monitors.
-    const float gap = std::max(1.0f, std::floor(P(2) / 2));
+    // This PC's monitors: rounded fills, number + size + scale.
+    const float gap = std::max(1.0f, P(2));
     for (std::size_t i = 0; i < mons_.size(); ++i) {
         const auto& m = mons_[i];
         auto r = t.to_client(m.rect);
         r = {r.left + gap, r.top + gap, r.right - gap, r.bottom - gap};
-        p.fill(r, color::bg2);
-        p.frame(r, line, color::line_strong);
-        const float tx = r.left + pad;
-        const float tw = width(r) - 2 * pad;
+        const float k = std::min(P(ui::radius::xs) * 1.5f, std::min(width(r), height(r)) / 6);
+        p.round(r, k, c.fill);
+        const float tx = r.left + P(ui::space::s12);
+        const float tw = width(r) - 2 * P(ui::space::s12);
         float ty = r.top + P(ui::space::s8);
-        const float display_h = text_.metrics(TextStyle::Display).line_px;
-        if (ty + display_h <= r.bottom - P(ui::space::s4)) {
-            p.text(TextStyle::Display, std::to_wstring(monitor_number(m, i)), tx, ty, tw, color::text_hi);
-            ty += display_h + P(ui::space::s4);
+        const float title_h = text_.metrics(TextStyle::Title).line_px;
+        const auto fits = [&](float h) { return ty + h <= r.bottom - P(ui::space::s4); };
+        if (fits(title_h)) {
+            p.text(TextStyle::Title, std::to_wstring(monitor_number(m, i)), tx, ty, tw, c.ink);
+            ty += title_h + P(2);
         }
-        if (ty + label_h <= r.bottom - P(ui::space::s4)) {
-            p.text(TextStyle::Label, size_text(m.rect.width(), m.rect.height()), tx, ty, tw, color::text_mid);
-            ty += label_h;
+        if (fits(caption_h)) {
+            p.text(TextStyle::Caption, size_text(m.rect.width(), m.rect.height()), tx, ty, tw, c.ink2);
+            ty += caption_h;
         }
-        if (ty + label_h <= r.bottom - P(ui::space::s4)) {
-            p.text(TextStyle::Label, m.primary ? percent(m.scale) + ui::kSeparator + L"main" : percent(m.scale), tx, ty,
-                   tw, color::text_lo);
+        if (fits(caption_h)) {
+            p.text(TextStyle::Caption, m.primary ? percent(m.scale) + ui::kSeparator + L"Main" : percent(m.scale), tx, ty,
+                   tw, c.ink3);
         }
     }
 
-    // The crossing edge: a bar on the edge and a glow into this PC's screens.
+    // The crossing edge: a rounded blue bar on this PC's side of each piece.
     const float bar = P(kEdgeBar);
     for (const auto& piece : layout::outer_edge_pieces(mons_, side)) {
         const auto e = t.to_client(piece);
-        for (int step = -1; step < static_cast<int>(std::size(kGlow)); ++step) {
-            const float a = static_cast<float>(step + 1) * bar;  // distance from the edge, inwards
-            const float b = a + bar;
-            D2D1_RECT_F r{};
-            switch (side) {
-            case Side::Left: r = {e.left + a, e.top, e.left + b, e.bottom}; break;
-            case Side::Right: r = {e.right - b, e.top, e.right - a, e.bottom}; break;
-            case Side::Top: r = {e.left, e.top + a, e.right, e.top + b}; break;
-            case Side::Bottom: r = {e.left, e.bottom - b, e.right, e.bottom - a}; break;
-            }
-            p.fill(r, color::accent, step < 0 ? 1.0f : kGlow[step]);
+        D2D1_RECT_F r{};
+        switch (side) {
+        case Side::Left: r = {e.left + gap, e.top + gap, e.left + gap + bar, e.bottom - gap}; break;
+        case Side::Right: r = {e.right - gap - bar, e.top + gap, e.right - gap, e.bottom - gap}; break;
+        case Side::Top: r = {e.left + gap, e.top + gap, e.right - gap, e.top + gap + bar}; break;
+        case Side::Bottom: r = {e.left + gap, e.bottom - gap - bar, e.right - gap, e.bottom - gap}; break;
         }
+        if (width(r) > 0 && height(r) > 0) p.pill(r, c.accent_ink);
     }
 
     // The other PC.
-    const auto box = peer_box(l, t);
+    auto box = peer_box(l, t);
+    box = {box.left + gap, box.top + gap, box.right - gap, box.bottom - gap};
     const bool hot = dragging_ || hover_ == Hit::Peer;
-    p.fill(box, color::bg2, dragging ? 0.92f : 1.0f);
-    p.frame(box, P(kPeerFrame), color::accent, hot ? 1.0f : 0.85f);
+    const float k = std::min(P(ui::radius::xs) * 1.5f, std::min(width(box), height(box)) / 6);
+    p.round(box, k, hot ? c.fill_hi : c.fill, dragging ? 0.94f : 1.0f);
+    p.round_stroke(box, k, P(kPeerStroke), c.accent_ink);
     {
-        const float tx = box.left + pad;
-        const float tw = width(box) - 2 * pad;
+        const float tx = box.left + P(ui::space::s12);
+        const float tw = width(box) - 2 * P(ui::space::s12);
         float ty = box.top + P(ui::space::s8);
-        const float readout_h = text_.metrics(TextStyle::Readout).line_px;
+        const float strong_h = text_.metrics(TextStyle::BodyStrong).line_px;
         const auto fits = [&](float h) { return ty + h <= box.bottom - P(ui::space::s4); };
-        if (fits(label_h)) {
-            p.text(TextStyle::Label, L"Other PC", tx, ty, tw, color::accent);
-            ty += label_h + P(ui::space::s4);
+        if (fits(caption_h)) {
+            p.text(TextStyle::Caption, L"Other PC", tx, ty, tw, c.accent_ink);
+            ty += caption_h + P(2);
         }
-        if (fits(readout_h)) {
-            p.text(TextStyle::Readout, peer_.known() ? widen(peer_.hostname) : std::wstring(ui::kUnknown), tx, ty, tw,
-                   color::text_hi);
-            ty += readout_h;
+        if (fits(strong_h)) {
+            p.text(TextStyle::BodyStrong, peer_.known() ? widen(peer_.hostname) : std::wstring(ui::kUnknown), tx, ty, tw,
+                   c.ink);
+            ty += strong_h;
         }
-        if (fits(label_h)) {
-            p.text(TextStyle::Label,
+        if (fits(caption_h)) {
+            p.text(TextStyle::Caption,
                    peer_.known() ? size_text(peer_w(), peer_h()) + ui::kSeparator + percent(peer_.scale)
-                                 : std::wstring(L"size not known yet"),
-                   tx, ty, tw, color::text_mid);
-            ty += label_h;
+                                 : std::wstring(L"Size not known yet"),
+                   tx, ty, tw, c.ink2);
+            ty += caption_h;
         }
-        if (fits(label_h)) {
+        if (fits(caption_h)) {
             const bool live = peer_live_ && peer_.known();
-            p.text(TextStyle::Label, live ? L"connected" : peer_.known() ? L"last seen" : L"not connected yet", tx, ty, tw,
-                   live ? color::ok : color::text_lo);
+            p.text(TextStyle::Caption, live ? L"Connected" : peer_.known() ? L"Last seen" : L"Not connected yet", tx, ty,
+                   tw, live ? c.ok : c.ink3);
         }
     }
 
     // Live detection line.
     const display::Rect desk = display::virtual_desktop(mons_);
-    const float sq = P(kStatusSquare);
+    const float dot = P(kDot);
     const float ly = map.top + pad;
-    p.fill({map.left + pad, std::round(ly + (label_h - sq) / 2), map.left + pad + sq, std::round(ly + (label_h - sq) / 2) + sq},
-           color::ok);
-    p.text(TextStyle::Label,
+    p.circle({map.left + pad + dot / 2, ly + caption_h / 2}, dot / 2, c.ok);
+    p.text(TextStyle::Caption,
            std::format(L"Live{}{} monitor{}{}{}", ui::kSeparator, mons_.size(), mons_.size() == 1 ? L"" : L"s",
                        ui::kSeparator, size_text(desk.width(), desk.height())),
-           map.left + pad + sq + P(ui::space::s8), ly, width(map) - 3 * pad - sq, color::text_lo);
+           map.left + pad + dot + P(ui::space::s8), ly, width(map) - 3 * pad - dot, c.ink3);
     rt_->PopAxisAlignedClip();
 }
 
 void DisplaySettings::draw_button(ui::Painter& p, const D2D1_RECT_F& r, std::wstring_view text, Hit hit, bool primary,
                                   bool selected) {
+    // Segments (sides, roles): `selected` = the raised segment. Buttons: primary = blue pill,
+    // otherwise a grey pill. Disabled = faded.
+    const ui::Palette& c = pal();
+    const bool segment = hit == Hit::SideLeft || hit == Hit::SideRight || hit == Hit::SideTop || hit == Hit::SideBottom ||
+                         hit == Hit::RoleHost || hit == Hit::RoleClient;
     const bool enabled = hit_enabled(hit) || selected;
     const bool hot = enabled && (hover_ == hit || pressed_ == hit);
-    std::uint32_t fill = color::bg2;
-    std::uint32_t ink = color::text_mid;
-    float ink_alpha = 1.0f;
-    if (selected || (primary && enabled)) {
-        fill = color::accent;
-        ink = color::on_accent;
-    } else if (!enabled) {
-        ink = color::text_lo;
-        ink_alpha = 0.5f;
-    } else if (hot) {
-        fill = color::line_strong;
-        ink = color::text_hi;
-    } else if (primary || hit == Hit::Revert || hit == Hit::Identify || hit == Hit::WindowsSettings) {
-        ink = color::text_hi;
+    if (segment) {
+        if (selected) {
+            p.pill(r, c.seg_on);
+        } else if (hot) {
+            p.pill(r, c.fill_hi);
+        }
+        p.text_center(TextStyle::BodyStrong, text, r, selected || hot ? c.ink : c.ink2, enabled ? 1.0f : ui::alpha::disabled);
+        return;
     }
-    p.fill(r, fill);
-    if ((selected || primary) && hot && !selected) p.fill(r, color::text_hi, 0.12f);
-    if (ink_alpha < 1.0f) {
-        // Dimmed label: mix towards the fill instead of real alpha (ClearType text needs opaque ink).
-        const auto mix = [&](int shift) {
-            const int a = (ink >> shift) & 0xFF;
-            const int b = (fill >> shift) & 0xFF;
-            return static_cast<std::uint32_t>(std::lround(b + (a - b) * ink_alpha)) << shift;
-        };
-        ink = mix(16) | mix(8) | mix(0);
+    if (primary) {
+        p.pill(r, hot ? c.accent_hover : c.accent, enabled ? 1.0f : ui::alpha::disabled);
+        p.text_center(TextStyle::BodyStrong, text, r, c.on_accent, enabled ? 1.0f : 0.6f);
+    } else {
+        p.pill(r, hot ? c.fill_hi : c.fill, enabled ? 1.0f : ui::alpha::disabled);
+        p.text_center(TextStyle::BodyStrong, text, r, c.ink, enabled ? 1.0f : ui::alpha::disabled);
     }
-    text_center(p, TextStyle::Label, text, r, ink);
 }
 
 void DisplaySettings::draw_panel(ui::Painter& p, const Layout& l) {
+    const ui::Palette& c = pal();
     const auto P = [this](float dp) { return static_cast<float>(px(dp, dpi_)); };
-    p.fill(l.panel, color::bg1);
-    const float pl = l.panel.left + P(ui::space::s16);
-    const float pr = l.panel.right - P(ui::space::s16);
-    const float label_h = text_.metrics(TextStyle::Label).line_px;
+    p.round(l.panel, P(ui::radius::lg), c.tile);
+    const float pl = l.panel.left + P(kTilePad);
+    const float pr = l.panel.right - P(kTilePad);
+    const float caption_h = text_.metrics(TextStyle::Caption).line_px;
     const bool dragging = dragging_ && drag_moved_;
     const Side side = dragging ? drag_side_ : pending_side_;
+    const float inset = P(kSegmentInset);
+    const auto track = [&](const D2D1_RECT_F& first, const D2D1_RECT_F& last) {
+        p.pill({first.left - inset, first.top - inset, last.right + inset, last.bottom + inset}, c.fill);
+    };
 
-    p.text(TextStyle::Label, L"Other PC is", pl, l.side_label_top, pr - pl, color::text_lo);
+    p.text(TextStyle::Caption, L"Other PC is", pl, l.side_label_top, pr - pl, c.ink3);
+    track(l.sides[0], l.sides[3]);
     for (int i = 0; i < 4; ++i) {
-        draw_button(p, l.sides[i], side_word(kSides[i]), kSideHits[i], false, kSides[i] == side);
+        draw_button(p, l.sides[i], capitalized(side_word(kSides[i])), kSideHits[i], false, kSides[i] == side);
     }
     if (!layout::kVerticalSidesAccepted) {
-        p.text(TextStyle::Label, L"Top / bottom: next host update", pl, l.side_note_top, pr - pl, color::text_lo);
+        p.text(TextStyle::Caption, L"Top and bottom: next host update.", pl, l.side_note_top, pr - pl, c.ink3);
     }
 
-    p.text(TextStyle::Label, options_.role ? L"This PC is the" : L"This PC is the (guessed)", pl, l.role_label_top,
-           pr - pl, color::text_lo);
+    p.text(TextStyle::Caption, options_.role ? L"This PC is the" : L"This PC is the (guessed)", pl, l.role_label_top,
+           pr - pl, c.ink3);
+    track(l.roles[0], l.roles[1]);
     draw_button(p, l.roles[0], L"Host", Hit::RoleHost, false, role_ == Role::Host);
     draw_button(p, l.roles[1], L"Client", Hit::RoleClient, false, role_ == Role::Client);
 
     // Readouts, as many as fit above the buttons.
+    std::wstring state;
+    std::uint32_t state_rgb = c.ink;
+    if (status_ == Status::Error) {
+        state = L"Error";
+        state_rgb = c.err;
+    } else if (dirty() || side != saved_side_) {  // while dragging: what dropping here would mean
+        state = L"Not saved";
+        state_rgb = c.warn;
+    } else if (status_ == Status::Saved) {
+        state = L"Saved";
+        state_rgb = c.ok;
+    } else {
+        state = cfg_.exists && !cfg_.client_side.empty() ? L"Saved" : L"Default";
+    }
     struct Row {
         std::wstring label, value;
         std::uint32_t rgb;
+        TextStyle style;
     };
-    std::wstring state;
-    std::uint32_t state_rgb = color::text_hi;
-    if (status_ == Status::Error) {
-        state = L"ERROR";
-        state_rgb = color::err;
-    } else if (dirty() || side != saved_side_) {  // while dragging: what dropping here would mean
-        state = L"NOT SAVED";
-        state_rgb = color::warn;
-    } else if (status_ == Status::Saved) {
-        state = L"SAVED";
-        state_rgb = color::ok;
-    } else {
-        state = cfg_.exists && !cfg_.client_side.empty() ? L"SAVED" : L"DEFAULT";
-    }
     const Row rows[] = {
-        {L"Mouse crosses", upper(side_word(side)) + L" EDGE", color::text_hi},
-        {L"Crossing edge", std::format(L"{} PX", layout::outer_edge_length(mons_, side)), color::text_hi},
-        {L"client_side", L"\"" + side_word(layout::client_side_for(role_, side)) + L"\"", color::text_hi},
-        {L"Status", state, state_rgb},
+        {L"Mouse crosses", capitalized(side_word(side)) + L" edge", c.ink, TextStyle::BodyStrong},
+        {L"Crossing edge", std::format(L"{} px", layout::outer_edge_length(mons_, side)), c.ink, TextStyle::MonoStrong},
+        {L"client_side", L"\"" + side_word(layout::client_side_for(role_, side)) + L"\"", c.ink, TextStyle::MonoStrong},
+        {L"Status", state, state_rgb, TextStyle::BodyStrong},
     };
     const float row_h = P(kRowH);
     const float line = static_cast<float>(ui::hairline(dpi_));
-    const float readout_h = text_.metrics(TextStyle::Readout).line_px;
     float y = l.rows_top;
     for (const auto& row : rows) {
         if (y + row_h > l.apply.top - P(ui::space::s8)) break;
-        p.text(TextStyle::Label, row.label, pl, std::round(y + (row_h - label_h) / 2), (pr - pl) / 2, color::text_lo);
-        p.text_right(TextStyle::Readout, row.value, pr, std::round(y + (row_h - readout_h) / 2), row.rgb);
+        p.text(TextStyle::Caption, row.label, pl, std::round(y + (row_h - caption_h) / 2), (pr - pl) / 2, c.ink3);
+        p.text_right(row.style, row.value, pr, std::round(y + (row_h - text_.metrics(row.style).line_px) / 2), row.rgb);
         y += row_h;
-        if (&row != &rows[std::size(rows) - 1]) p.fill({pl, y - line, pr, y}, color::line);
+        if (&row != &rows[std::size(rows) - 1]) p.fill({pl, y - line, pr, y}, c.ink, ui::alpha::line);
     }
 
     draw_button(p, l.apply, L"Apply", Hit::Apply, true, false);
@@ -1138,26 +1105,27 @@ void DisplaySettings::draw_panel(ui::Painter& p, const Layout& l) {
 }
 
 void DisplaySettings::draw_footer(ui::Painter& p, const Layout& l) {
+    const ui::Palette& c = pal();
     // Status line: what happened, or what to do next.
     std::wstring text = status_text_;
-    std::uint32_t rgb = color::text_mid;
+    std::uint32_t rgb = c.ink2;
     const std::wstring other = peer_name();
     const std::wstring this_side = side_word(display::opposite(pending_side_));
     switch (status_) {
     case Status::Error:
-        rgb = color::err;
+        rgb = c.err;
         break;
     case Status::Saved:
-        rgb = color::ok;
-        text = std::format(L"Saved. Restart Sarke on this PC - and on {} this PC must be on the {}.", other, this_side);
+        rgb = c.ok;
+        text = std::format(L"Saved. Restart Sarke on this PC \u2014 and on {}, this PC must be on the {}.", other, this_side);
         break;
     default:
         if (dirty()) {
-            rgb = color::warn;
+            rgb = c.warn;
             text = std::format(L"Not saved yet. Apply writes client_side \"{}\" to config.json, then restart Sarke.",
                                side_word(layout::client_side_for(role_, pending_side_)));
         } else if (!cfg_.exists) {
-            text = std::format(L"No config.json yet - Sarke uses \"right\". Apply creates it next to the app.");
+            text = L"No config.json yet \u2014 Sarke uses \"right\". Apply creates it next to the app.";
         } else {
             text = std::format(L"Each PC keeps its own setting: on {}, this PC must be on the {}.", other, this_side);
         }
@@ -1165,12 +1133,14 @@ void DisplaySettings::draw_footer(ui::Painter& p, const Layout& l) {
     }
     p.text(TextStyle::Body, text, l.x0, l.status_top, l.x1 - l.x0, rgb);
 
-    const float body_h = text_.metrics(TextStyle::Body).line_px;
-    const float ty = std::round((l.footer.top + l.footer.bottom - body_h) / 2);
-    p.text(TextStyle::Body, L"config: " + cfg_.path.wstring(), l.x0, ty, l.identify.left - l.x0 - px(ui::space::s16, dpi_),
-           color::text_lo);
+    const float mono_h = text_.metrics(TextStyle::Mono).line_px;
+    const float ty = std::round((l.footer.top + l.footer.bottom - mono_h) / 2);
+    p.text(TextStyle::Mono, cfg_.path.wstring(), l.x0, ty, l.identify.left - l.x0 - px(ui::space::s16, dpi_), c.ink3);
     draw_button(p, l.identify, L"Identify", Hit::Identify, false, false);
-    draw_button(p, l.windows_settings, L"Windows display settings", Hit::WindowsSettings, false, false);
+    // The website's secondary action: blue text with a chevron.
+    const bool link_hot = hover_ == Hit::WindowsSettings || pressed_ == Hit::WindowsSettings;
+    p.text_center(TextStyle::BodyStrong, L"Windows display settings \u203A", l.windows_settings,
+                  link_hot ? c.accent_hover : c.accent_ink);
 }
 
 }  // namespace kvm

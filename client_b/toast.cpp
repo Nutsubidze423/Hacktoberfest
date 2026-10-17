@@ -1,7 +1,6 @@
 #include "toast.h"
 
 #include <windowsx.h>
-#include <dwmapi.h>
 #include <shellscalingapi.h>
 
 #include <algorithm>
@@ -11,13 +10,11 @@
 
 #include "kvm/log.h"
 
-#pragma comment(lib, "dwmapi.lib")
-
 namespace kvm {
 
 namespace {
 
-namespace color = ui::color;
+using ui::pal;
 using ui::px;
 using ui::TextStyle;
 using Clock = std::chrono::steady_clock;
@@ -31,18 +28,21 @@ constexpr milliseconds kOutTime{180};
 
 // Card (dp), docs/DESIGN.md 9.3.
 constexpr float kWidth = 380;
-constexpr float kMargin = 16;   // from the top and right of the work area
+constexpr float kMargin = 16;   // card edge from the top and right of the work area
+constexpr float kShadow = 14;   // transparent room around the card for its shadow
 constexpr float kSlide = 32;    // how far it slides in (short, so it never shows on a monitor to the right)
 constexpr float kPad = 16;
-constexpr float kBar = 4;       // brand bar on the left
 constexpr float kLogo = 40;
 constexpr float kLogoGap = 14;
-constexpr float kRowGap = 4;
+constexpr float kRowGap = 2;
 constexpr float kClose = 24;
-constexpr float kCloseInset = 8;
+constexpr float kCloseInset = 10;
 constexpr float kCloseGlyph = 8;
-constexpr float kSquare = 8;
+constexpr float kDot = 7;
 constexpr float kProgress = 2;
+constexpr float kProgressInset = 8;
+constexpr float kShadowAlpha = 0.045f;  // per shadow ring
+constexpr int kShadowRings = 7;
 
 bool reduced_motion() {
     BOOL animate = TRUE;
@@ -52,9 +52,9 @@ bool reduced_motion() {
 
 std::uint32_t kind_color(Toast::Kind kind) {
     switch (kind) {
-    case Toast::Kind::Connected: return color::ok;
-    case Toast::Kind::Lost: return color::err;
-    default: return color::accent;
+    case Toast::Kind::Connected: return pal().ok;
+    case Toast::Kind::Lost: return pal().err;
+    default: return pal().accent_ink;
     }
 }
 
@@ -88,13 +88,10 @@ bool Toast::ensure_window() {
         return false;
     }
     if (!register_class(&Toast::wnd_proc)) return false;
+    // Per-pixel alpha (UpdateLayeredWindow): the rounded corners and the shadow are really transparent.
     CreateWindowExW(WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_LAYERED, kClassName, ui::kAppName,
                     WS_POPUP, 0, 0, 1, 1, nullptr, nullptr, GetModuleHandleW(nullptr), this);
-    if (!hwnd_) return false;  // set in WM_NCCREATE
-    const DWM_WINDOW_CORNER_PREFERENCE corners = DWMWCP_DONOTROUND;
-    DwmSetWindowAttribute(hwnd_, DWMWA_WINDOW_CORNER_PREFERENCE, &corners, sizeof(corners));
-    SetLayeredWindowAttributes(hwnd_, 0, 0, LWA_ALPHA);
-    return true;
+    return hwnd_ != nullptr;  // set in WM_NCCREATE
 }
 
 Toast::Geometry Toast::geometry() const {
@@ -108,14 +105,16 @@ Toast::Geometry Toast::geometry() const {
     if (FAILED(GetDpiForMonitor(monitor, MDT_EFFECTIVE_DPI, &dpi_x, &dpi_y))) dpi_x = GetDpiForSystem();
     g.dpi = dpi_x;
     const auto P = [&](float dp) { return px(dp, g.dpi); };
-    const auto spec_line = [&](TextStyle s) { return P(ui::text_style_spec(s).line_height_dp); };
-    g.w = P(kWidth);
-    const int text_h = spec_line(TextStyle::Label) + P(kRowGap) + spec_line(TextStyle::Title) +
-                       (content_.text.empty() ? 0 : spec_line(TextStyle::Body));
-    g.h = 2 * P(kPad) + std::max(P(kLogo), text_h);
-    g.x_shown = g.work.right - P(kMargin) - g.w;
+    const auto line = [&](TextStyle s) { return P(ui::text_style_spec(s).line_height_dp); };
+    g.margin = P(kShadow);
+    const int text_h = line(TextStyle::Caption) + P(kRowGap) + line(TextStyle::Title) +
+                       (content_.text.empty() ? 0 : line(TextStyle::Body));
+    const int card_h = 2 * P(kPad) + std::max(P(kLogo), text_h) + P(kProgressInset);
+    g.w = P(kWidth) + 2 * g.margin;
+    g.h = card_h + 2 * g.margin;
+    g.x_shown = g.work.right - P(kMargin) - P(kWidth) - g.margin;
     g.x_hidden = g.x_shown + P(kSlide);
-    g.y = g.work.top + P(kMargin);
+    g.y = g.work.top + P(kMargin) - g.margin;
     return g;
 }
 
@@ -127,9 +126,8 @@ bool Toast::show(Content content, std::function<void()> on_click, std::chrono::m
     reduced_motion_ = motion_override_ ? !*motion_override_ : reduced_motion();
 
     const Geometry g = geometry();
-    if (g.dpi != geo_.dpi || !rt_) text_.create(g.dpi);
+    if (g.dpi != geo_.dpi || phase_ == Phase::Hidden) text_.create(g.dpi);
     geo_ = g;
-    if (rt_) rt_->Resize(D2D1::SizeU(static_cast<UINT32>(g.w), static_cast<UINT32>(g.h)));
 
     const auto now = Clock::now();
     if (phase_ == Phase::Hold || phase_ == Phase::In) {
@@ -138,15 +136,16 @@ bool Toast::show(Content content, std::function<void()> on_click, std::chrono::m
             phase_start_ = now;
             held_ = milliseconds{0};
         }
+        render();
         place(phase_ == Phase::Hold ? 0.0 : 1.0 - ease_out(std::min(1.0, (now - phase_start_) / std::chrono::duration<double>(kInTime))),
-              1.0);
+              phase_ == Phase::Hold ? 1.0 : alpha_ / 255.0);
     } else {
         phase_ = Phase::In;
         phase_start_ = now;
         held_ = milliseconds{0};
+        render();
         place(1.0, 0.0);
     }
-    InvalidateRect(hwnd_, nullptr, FALSE);
     SetTimer(hwnd_, kTickTimer, kTickMs, nullptr);
     return true;
 }
@@ -159,9 +158,12 @@ void Toast::dismiss() {
 
 void Toast::place(double slide, double alpha) {
     if (reduced_motion_) slide = 0;  // animations off in Windows: fade only
-    const int x = geo_.x_shown + static_cast<int>(std::lround((geo_.x_hidden - geo_.x_shown) * slide));
-    SetLayeredWindowAttributes(hwnd_, 0, static_cast<BYTE>(std::lround(std::clamp(alpha, 0.0, 1.0) * 255)), LWA_ALPHA);
-    SetWindowPos(hwnd_, HWND_TOPMOST, x, geo_.y, geo_.w, geo_.h, SWP_NOACTIVATE | SWP_SHOWWINDOW);
+    x_ = geo_.x_shown + static_cast<int>(std::lround((geo_.x_hidden - geo_.x_shown) * slide));
+    alpha_ = static_cast<BYTE>(std::lround(std::clamp(alpha, 0.0, 1.0) * 255));
+    canvas_.present(hwnd_, x_, geo_.y, alpha_);
+    if (!IsWindowVisible(hwnd_)) {
+        SetWindowPos(hwnd_, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
+    }
 }
 
 void Toast::tick() {
@@ -170,6 +172,7 @@ void Toast::tick() {
     switch (phase_) {
     case Phase::In: {
         const double t = std::min(1.0, since / std::chrono::duration<double>(kInTime));
+        render();
         place(1.0 - ease_out(t), ease_out(t));
         if (t >= 1.0) {
             phase_ = Phase::Hold;
@@ -181,7 +184,8 @@ void Toast::tick() {
     case Phase::Hold: {
         const auto used = held_ + (hover_ ? milliseconds{0} : std::chrono::duration_cast<milliseconds>(now - phase_start_));
         if (used >= hold_) dismiss();
-        InvalidateRect(hwnd_, nullptr, FALSE);  // the time line
+        render();  // the time line
+        place(0.0, 1.0);
         break;
     }
     case Phase::Out: {
@@ -200,10 +204,17 @@ void Toast::tick() {
     }
 }
 
+D2D1_RECT_F Toast::card_rect() const {
+    const auto m = static_cast<float>(geo_.margin);
+    return {m, m, static_cast<float>(geo_.w) - m, static_cast<float>(geo_.h) - m};
+}
+
 D2D1_RECT_F Toast::close_rect() const {
     const auto P = [this](float dp) { return static_cast<float>(px(dp, geo_.dpi)); };
-    const float right = static_cast<float>(geo_.w) - P(kCloseInset);
-    return {right - P(kClose), P(kCloseInset), right, P(kCloseInset) + P(kClose)};
+    const auto card = card_rect();
+    const float right = card.right - P(kCloseInset);
+    const float top = card.top + P(kCloseInset);
+    return {right - P(kClose), top, right, top + P(kClose)};
 }
 
 LRESULT CALLBACK Toast::wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
@@ -219,15 +230,6 @@ LRESULT CALLBACK Toast::wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
 LRESULT Toast::handle_message(UINT msg, WPARAM wp, LPARAM lp) {
     const HWND hwnd = hwnd_;
     switch (msg) {
-    case WM_PAINT:
-        render();
-        ValidateRect(hwnd, nullptr);
-        return 0;
-    case WM_ERASEBKGND:
-        return 1;
-    case WM_SIZE:
-        if (rt_) rt_->Resize(D2D1::SizeU(LOWORD(lp), HIWORD(lp)));
-        return 0;
     case WM_TIMER:
         if (wp == kTickTimer) tick();
         return 0;
@@ -248,7 +250,10 @@ LRESULT Toast::handle_message(UINT msg, WPARAM wp, LPARAM lp) {
         const bool on_close = x >= r.left && x < r.right && y >= r.top && y < r.bottom;
         if (on_close != close_hover_) {
             close_hover_ = on_close;
-            InvalidateRect(hwnd, nullptr, FALSE);
+            if (phase_ == Phase::Hold) {
+                render();
+                place(0.0, 1.0);
+            }
         }
         return 0;
     }
@@ -259,7 +264,6 @@ LRESULT Toast::handle_message(UINT msg, WPARAM wp, LPARAM lp) {
             if (phase_ == Phase::Hold) phase_start_ = Clock::now();
         }
         close_hover_ = false;
-        InvalidateRect(hwnd, nullptr, FALSE);
         return 0;
     case WM_SETCURSOR:
         if (LOWORD(lp) == HTCLIENT && close_hover_) {
@@ -277,19 +281,19 @@ LRESULT Toast::handle_message(UINT msg, WPARAM wp, LPARAM lp) {
     }
     case WM_DISPLAYCHANGE:
     case WM_DPICHANGED:
+    case WM_SETTINGCHANGE:
+        if (msg == WM_SETTINGCHANGE && ui::is_theme_change(msg, lp)) ui::refresh_theme();
         if (phase_ != Phase::Hidden) {
             const Geometry g = geometry();
             if (g.dpi != geo_.dpi) text_.create(g.dpi);
             geo_ = g;
+            render();
             place(phase_ == Phase::Hold ? 0.0 : 1.0, 1.0);
-            InvalidateRect(hwnd, nullptr, FALSE);
         }
         return 0;
     case WM_NCDESTROY:
         SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
         hwnd_ = nullptr;
-        rt_.Reset();
-        brush_.Reset();
         phase_ = Phase::Hidden;
         break;
     default:
@@ -299,69 +303,61 @@ LRESULT Toast::handle_message(UINT msg, WPARAM wp, LPARAM lp) {
 }
 
 void Toast::render() {
-    if (!rt_) {
-        const auto props = D2D1::RenderTargetProperties(D2D1_RENDER_TARGET_TYPE_DEFAULT, D2D1::PixelFormat(), 96.0f, 96.0f);
-        const auto hwnd_props = D2D1::HwndRenderTargetProperties(
-            hwnd_, D2D1::SizeU(static_cast<UINT32>(geo_.w), static_cast<UINT32>(geo_.h)));
-        if (FAILED(ui::Graphics::get().d2d()->CreateHwndRenderTarget(props, hwnd_props, &rt_))) return;
-        rt_->SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_CLEARTYPE);
-        rt_->CreateSolidColorBrush(ui::to_color(color::text_hi), &brush_);
-    }
+    ID2D1RenderTarget* rt = canvas_.begin(geo_.w, geo_.h);
+    if (!rt) return;
+    const ui::Palette& c = pal();
     const auto P = [this](float dp) { return static_cast<float>(px(dp, geo_.dpi)); };
-    const auto w = static_cast<float>(geo_.w);
-    const auto h = static_cast<float>(geo_.h);
-    const float line = static_cast<float>(ui::hairline(geo_.dpi));
+    ui::Painter p(rt, canvas_.brush(), text_);
+    const auto card = card_rect();
+    const float k = P(ui::radius::md);
 
-    rt_->BeginDraw();
-    rt_->Clear(ui::to_color(color::bg1));
-    ui::Painter p(rt_.Get(), brush_.Get(), text_);
-    p.frame({0, 0, w, h}, line, color::line_strong);
-    p.fill({0, 0, P(kBar), h}, color::accent);
+    // Soft shadow: rings of faint black, wider and fainter outwards (the card floats over any app).
+    const float step = static_cast<float>(geo_.margin) / kShadowRings;
+    for (int i = kShadowRings; i >= 1; --i) {
+        const float o = step * static_cast<float>(i);
+        p.round({card.left - o, card.top - o + step, card.right + o, card.bottom + o + step}, k + o, 0x000000,
+                kShadowAlpha * static_cast<float>(kShadowRings - i + 1) / kShadowRings);
+    }
+    p.round(card, k, c.tile);
+    p.round_stroke(card, k, static_cast<float>(ui::hairline(geo_.dpi)), c.ink, ui::alpha::line);
 
-    // Logo tile.
+    // Logo.
     const float pad = P(kPad);
     const float logo = P(kLogo);
-    const float lx = P(kBar) + pad;
-    const float ly = std::round((h - logo) / 2);
-    p.fill({lx, ly, lx + logo, ly + logo}, ui::logo::background);
-    p.frame({lx, ly, lx + logo, ly + logo}, line, color::line);
-    const float unit = logo / ui::logo::grid;
-    for (const auto& c : ui::logo::cells) {
-        p.fill({std::round(lx + c.x * unit), std::round(ly + c.y * unit), std::round(lx + (c.x + c.w) * unit),
-                std::round(ly + (c.y + c.h) * unit)},
-               c.rgb);
-    }
+    const float lx = card.left + pad;
+    const float ly = std::round(card.top + (card.bottom - card.top - P(kProgressInset) - logo) / 2);
+    p.logo({lx, ly, lx + logo, ly + logo});
 
-    // Text block, vertically centred next to the logo.
+    // Text block next to the logo.
     const float tx = lx + logo + P(kLogoGap);
     const auto close = close_rect();
-    const float label_h = text_.metrics(TextStyle::Label).line_px;
+    const float caption_h = text_.metrics(TextStyle::Caption).line_px;
     const float title_h = text_.metrics(TextStyle::Title).line_px;
     const float body_h = content_.text.empty() ? 0 : text_.metrics(TextStyle::Body).line_px;
-    float ty = std::round((h - (label_h + P(kRowGap) + title_h + body_h)) / 2);
-    const float sq = P(kSquare);
-    p.fill({tx, std::round(ty + (label_h - sq) / 2), tx + sq, std::round(ty + (label_h - sq) / 2) + sq},
-           kind_color(content_.kind));
-    float x = tx + sq + P(ui::space::s8);
-    x += p.text(TextStyle::Label, ui::kAppName, x, ty, close.left - x, color::text_hi);
+    float ty = std::round(card.top + (card.bottom - card.top - P(kProgressInset) - (caption_h + P(kRowGap) + title_h + body_h)) / 2);
+    const float dot = P(kDot);
+    p.circle({tx + dot / 2, ty + caption_h / 2}, dot / 2, kind_color(content_.kind));
+    float x = tx + dot + P(6);
+    x += p.text(TextStyle::Caption, ui::kAppName, x, ty, close.left - x, c.ink);
     if (!content_.tag.empty()) {
-        p.text(TextStyle::Label, std::wstring(ui::kSeparator) + content_.tag, x, ty, close.left - x, color::text_lo);
+        p.text(TextStyle::Caption, std::wstring(ui::kSeparator) + content_.tag, x, ty, close.left - x, c.ink3);
     }
-    ty += label_h + P(kRowGap);
-    p.text(TextStyle::Title, content_.title, tx, ty, w - pad - tx, color::text_hi);
+    ty += caption_h + P(kRowGap);
+    p.text(TextStyle::Title, content_.title, tx, ty, card.right - pad - tx, c.ink);
     ty += title_h;
-    if (!content_.text.empty()) p.text(TextStyle::Body, content_.text, tx, ty, w - pad - tx, color::text_mid);
+    if (!content_.text.empty()) p.text(TextStyle::Body, content_.text, tx, ty, card.right - pad - tx, c.ink2);
 
-    // Close.
-    if (close_hover_) p.fill(close, color::bg2);
+    // Close: a round button that shows on hover.
+    if (close_hover_) p.circle({(close.left + close.right) / 2, (close.top + close.bottom) / 2}, P(kClose) / 2, c.fill_hi);
     const float g = P(kCloseGlyph);
     const float cx = std::round((close.left + close.right - g) / 2);
     const float cy = std::round((close.top + close.bottom - g) / 2);
-    const auto ink = close_hover_ ? color::text_hi : color::text_lo;
+    const auto ink = close_hover_ ? c.ink : c.ink3;
+    const float line = std::max(1.0f, P(1.25f));
     p.diagonal({cx, cy}, {cx + g, cy + g}, line, ink);
     p.diagonal({cx + g, cy}, {cx, cy + g}, line, ink);
 
-    // Time left.
+    // Time left: a thin pill near the bottom edge that runs out.
     if (phase_ == Phase::In || phase_ == Phase::Hold) {
         double left = 1.0;
         if (phase_ == Phase::Hold && hold_.count() > 0) {
@@ -369,15 +365,14 @@ void Toast::render() {
                                               : std::chrono::duration_cast<milliseconds>(Clock::now() - phase_start_));
             left = std::clamp(1.0 - static_cast<double>(used.count()) / static_cast<double>(hold_.count()), 0.0, 1.0);
         }
-        const float x0 = P(kBar);
-        p.fill({x0, h - P(kProgress), x0 + std::round(static_cast<float>((w - x0) * left)), h}, color::accent,
-               hover_ ? 0.35f : 0.8f);
+        const float x0 = card.left + pad;
+        const float x1 = card.right - pad;
+        const float y1 = card.bottom - P(kProgressInset);
+        p.pill({x0, y1 - P(kProgress), x1, y1}, c.ink, ui::alpha::line);
+        const float run = std::round(static_cast<float>((x1 - x0) * left));
+        if (run >= P(kProgress)) p.pill({x0, y1 - P(kProgress), x0 + run, y1}, c.accent_ink, hover_ ? 0.4f : 0.9f);
     }
-
-    if (rt_->EndDraw() == D2DERR_RECREATE_TARGET) {
-        rt_.Reset();
-        brush_.Reset();
-    }
+    canvas_.end();
 }
 
 }  // namespace kvm

@@ -1,5 +1,5 @@
-// App logo (docs/DESIGN.md section 9, concept C "Caret") rendered in code as an HICON at the exact
-// pixel size Windows asks for, so it stays sharp at every DPI and needs no .ico/.rc file.
+// App logo (docs/DESIGN.md section 9: the website's Sarke mark) rendered in code as an HICON at the
+// exact pixel size Windows asks for, so it stays sharp at every DPI and needs no .ico/.rc file.
 #pragma once
 
 #include <windows.h>
