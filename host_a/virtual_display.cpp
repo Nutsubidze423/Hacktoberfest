@@ -1,0 +1,223 @@
+#include "virtual_display.h"
+
+#include <algorithm>
+#include <chrono>
+#include <string_view>
+#include <thread>
+#include <vector>
+
+#include "kvm/log.h"
+
+namespace kvm {
+namespace {
+
+constexpr std::wstring_view kAdapterName = L"Virtual Display Driver";
+// Windows applies display changes asynchronously; give the desktop this long to settle.
+constexpr auto kSettleTimeout = std::chrono::seconds(3);
+
+std::string utf8(const std::wstring& s) {
+    if (s.empty()) return {};
+    const int n = WideCharToMultiByte(CP_UTF8, 0, s.data(), static_cast<int>(s.size()), nullptr, 0, nullptr, nullptr);
+    std::string out(static_cast<size_t>(n), '\0');
+    WideCharToMultiByte(CP_UTF8, 0, s.data(), static_cast<int>(s.size()), out.data(), n, nullptr, nullptr);
+    return out;
+}
+
+const char* disp_change_name(LONG result) {
+    switch (result) {
+        case DISP_CHANGE_SUCCESSFUL: return "DISP_CHANGE_SUCCESSFUL";
+        case DISP_CHANGE_RESTART: return "DISP_CHANGE_RESTART";
+        case DISP_CHANGE_FAILED: return "DISP_CHANGE_FAILED";
+        case DISP_CHANGE_BADMODE: return "DISP_CHANGE_BADMODE";
+        case DISP_CHANGE_NOTUPDATED: return "DISP_CHANGE_NOTUPDATED";
+        case DISP_CHANGE_BADFLAGS: return "DISP_CHANGE_BADFLAGS";
+        case DISP_CHANGE_BADPARAM: return "DISP_CHANGE_BADPARAM";
+        case DISP_CHANGE_BADDUALVIEW: return "DISP_CHANGE_BADDUALVIEW";
+        default: return "DISP_CHANGE_?";
+    }
+}
+
+struct AttachedMonitor {
+    std::wstring device;
+    RECT rect{};
+    HMONITOR handle = nullptr;
+};
+
+std::vector<AttachedMonitor> attached_monitors() {
+    std::vector<AttachedMonitor> out;
+    EnumDisplayMonitors(
+        nullptr, nullptr,
+        [](HMONITOR handle, HDC, LPRECT, LPARAM param) -> BOOL {
+            MONITORINFOEXW info{};
+            info.cbSize = sizeof(info);
+            if (GetMonitorInfoW(handle, &info)) {
+                reinterpret_cast<std::vector<AttachedMonitor>*>(param)->push_back({info.szDevice, info.rcMonitor, handle});
+            }
+            return TRUE;
+        },
+        reinterpret_cast<LPARAM>(&out));
+    return out;
+}
+
+// Top-left corner for a width x height monitor on `side` of `others`, aligned with the monitor that
+// forms that outer edge.
+POINT position_for(display::Side side, int width, int height, const std::vector<AttachedMonitor>& others) {
+    if (others.empty()) return {0, 0};
+    const auto by = [](auto key) { return [key](const AttachedMonitor& a, const AttachedMonitor& b) { return key(a) < key(b); }; };
+    switch (side) {
+        case display::Side::Left: {
+            const auto& m = *std::min_element(others.begin(), others.end(), by([](const auto& m) { return m.rect.left; }));
+            return {m.rect.left - width, m.rect.top};
+        }
+        case display::Side::Top: {
+            const auto& m = *std::min_element(others.begin(), others.end(), by([](const auto& m) { return m.rect.top; }));
+            return {m.rect.left, m.rect.top - height};
+        }
+        case display::Side::Bottom: {
+            const auto& m = *std::max_element(others.begin(), others.end(), by([](const auto& m) { return m.rect.bottom; }));
+            return {m.rect.left, m.rect.bottom};
+        }
+        case display::Side::Right:
+        default: {
+            const auto& m = *std::max_element(others.begin(), others.end(), by([](const auto& m) { return m.rect.right; }));
+            return {m.rect.right, m.rect.top};
+        }
+    }
+}
+
+// Stages `dm` for `device` in the registry and applies all staged changes at once.
+bool apply(const std::wstring& device, DEVMODEW& dm, const char* what) {
+    const LONG staged = ChangeDisplaySettingsExW(device.c_str(), &dm, nullptr, CDS_UPDATEREGISTRY | CDS_NORESET, nullptr);
+    if (staged != DISP_CHANGE_SUCCESSFUL) {
+        log::warn("vdd: {} {}: {}", what, utf8(device), disp_change_name(staged));
+        return false;
+    }
+    const LONG applied = ChangeDisplaySettingsExW(nullptr, nullptr, nullptr, 0, nullptr);
+    if (applied != DISP_CHANGE_SUCCESSFUL) {
+        log::warn("vdd: {} {}: apply returned {}", what, utf8(device), disp_change_name(applied));
+        return false;
+    }
+    return true;
+}
+
+template <class Pred>
+bool wait_until(Pred done) {
+    const auto deadline = std::chrono::steady_clock::now() + kSettleTimeout;
+    while (!done()) {
+        if (std::chrono::steady_clock::now() >= deadline) return false;
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+    return true;
+}
+
+}  // namespace
+
+std::optional<VirtualDisplay> VirtualDisplay::find() {
+    for (DWORD i = 0;; ++i) {
+        DISPLAY_DEVICEW dd{};
+        dd.cb = sizeof(dd);
+        if (!EnumDisplayDevicesW(nullptr, i, &dd, 0)) break;
+        if (kAdapterName == dd.DeviceString) return VirtualDisplay(dd.DeviceName);
+    }
+    return std::nullopt;
+}
+
+bool VirtualDisplay::attached() const {
+    for (DWORD i = 0;; ++i) {
+        DISPLAY_DEVICEW dd{};
+        dd.cb = sizeof(dd);
+        if (!EnumDisplayDevicesW(nullptr, i, &dd, 0)) return false;
+        if (device_ == dd.DeviceName) return (dd.StateFlags & DISPLAY_DEVICE_ATTACHED_TO_DESKTOP) != 0;
+    }
+}
+
+std::optional<VirtualDisplay::MonitorRect> VirtualDisplay::rect() const {
+    for (const auto& m : attached_monitors()) {
+        if (m.device == device_) return MonitorRect{m.rect, m.handle};
+    }
+    return std::nullopt;
+}
+
+bool VirtualDisplay::set_mode(int width, int height, int hz) {
+    DEVMODEW dm{};
+    dm.dmSize = sizeof(dm);
+    if (!EnumDisplaySettingsW(device_.c_str(), ENUM_CURRENT_SETTINGS, &dm)) {
+        log::warn("vdd: set_mode {}: not attached", utf8(device_));
+        return false;
+    }
+    dm.dmPelsWidth = static_cast<DWORD>(width);
+    dm.dmPelsHeight = static_cast<DWORD>(height);
+    dm.dmDisplayFrequency = static_cast<DWORD>(hz);
+    dm.dmFields = DM_PELSWIDTH | DM_PELSHEIGHT | DM_DISPLAYFREQUENCY;
+    if (!apply(device_, dm, "set_mode")) {
+        log::warn("vdd: is {}x{} @ {} Hz listed in C:\\VirtualDisplayDriver\\vdd_settings.xml?", width, height, hz);
+        return false;
+    }
+    return wait_until([&] {
+        const auto r = rect();
+        return r && r->rect.right - r->rect.left == width && r->rect.bottom - r->rect.top == height;
+    });
+}
+
+bool VirtualDisplay::place(display::Side side) {
+    DEVMODEW dm{};
+    dm.dmSize = sizeof(dm);
+    if (!EnumDisplaySettingsW(device_.c_str(), ENUM_CURRENT_SETTINGS, &dm)) {
+        log::warn("vdd: place {}: not attached", utf8(device_));
+        return false;
+    }
+    auto others = attached_monitors();
+    std::erase_if(others, [&](const AttachedMonitor& m) { return m.device == device_; });
+    const POINT pos = position_for(side, static_cast<int>(dm.dmPelsWidth), static_cast<int>(dm.dmPelsHeight), others);
+    dm.dmPosition = {pos.x, pos.y};
+    dm.dmFields = DM_POSITION;
+    if (!apply(device_, dm, "place")) return false;
+    return wait_until([&] {
+        const auto r = rect();
+        return r && r->rect.left == pos.x && r->rect.top == pos.y;
+    });
+}
+
+bool VirtualDisplay::attach(int width, int height, int hz, display::Side side) {
+    auto others = attached_monitors();
+    std::erase_if(others, [&](const AttachedMonitor& m) { return m.device == device_; });
+    const POINT pos = position_for(side, width, height, others);
+
+    // Classic way: give the detached output a size and a position.
+    DEVMODEW dm{};
+    dm.dmSize = sizeof(dm);
+    dm.dmPelsWidth = static_cast<DWORD>(width);
+    dm.dmPelsHeight = static_cast<DWORD>(height);
+    dm.dmDisplayFrequency = static_cast<DWORD>(hz);
+    dm.dmPosition = {pos.x, pos.y};
+    dm.dmFields = DM_POSITION | DM_PELSWIDTH | DM_PELSHEIGHT | DM_DISPLAYFREQUENCY;
+    if (apply(device_, dm, "attach") && wait_until([&] { return rect().has_value(); })) {
+        log::info("vdd: attached {} via ChangeDisplaySettingsEx", utf8(device_));
+    } else {
+        // Fallback: the same as Win+P -> Extend. Also re-attaches other detached displays.
+        const LONG r = SetDisplayConfig(0, nullptr, 0, nullptr, SDC_TOPOLOGY_EXTEND | SDC_APPLY);
+        if (r != ERROR_SUCCESS || !wait_until([&] { return rect().has_value(); })) {
+            log::error("vdd: attach {} failed (SetDisplayConfig EXTEND returned {})", utf8(device_), r);
+            return false;
+        }
+        log::info("vdd: attached {} via SetDisplayConfig(EXTEND)", utf8(device_));
+    }
+    // Make sure mode and position are what was asked for, whichever way it got attached.
+    return set_mode(width, height, hz) && place(side);
+}
+
+bool VirtualDisplay::detach() {
+    if (!attached()) return true;
+    DEVMODEW dm{};
+    dm.dmSize = sizeof(dm);
+    dm.dmFields = DM_POSITION | DM_PELSWIDTH | DM_PELSHEIGHT;  // zero size = remove from the desktop
+    if (!apply(device_, dm, "detach")) return false;
+    if (!wait_until([&] { return !attached(); })) {
+        log::error("vdd: {} is still attached after detach", utf8(device_));
+        return false;
+    }
+    log::info("vdd: detached {}", utf8(device_));
+    return true;
+}
+
+}  // namespace kvm

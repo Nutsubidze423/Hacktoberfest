@@ -134,7 +134,7 @@ Claude წაიკითხავს ამ ფაილს, იპოვის
 დეტალები: `ARTEFACT/თემო — დავალებები (ლუკა → თემო).md`.
 - [x] `window_picker.*`: ფანჯრების სია და არჩევა
 - [x] T1: `capture_test` — `#include` .cpp-ის ნაცვლად `kvm_host_lib`
-- [ ] T2: `virtual_display.*`: პოვნა, რეჟიმი, მხარე, attach/detach + `tools/vdd_test.cpp`
+- [x] T2: `virtual_display.*`: პოვნა, რეჟიმი, მხარე, attach/detach + `tools/vdd_test.cpp` (თემოს ლეპტოპზე გადის; A-ზე ლუკამ გაუშვას)
 - [ ] T3: `window_mover.*`: ფანჯარა VDD-ზე (maximize) და უკან
 - [ ] T4: `capture.*`: WGC `CreateForMonitor` → BGRA → `LatestSlot`
 - [ ] T5: `jpeg_encoder.*`: TurboJPEG + დროის გაზომვა
