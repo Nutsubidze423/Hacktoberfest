@@ -293,6 +293,18 @@ int wmain(int argc, wchar_t** argv) {
 
         // Files (port 50502): drop window + Ctrl+Alt+Shift+F, received files land in Downloads\KVM.
         kvm::FileLink files;
+        if (kvm_link) {
+            // A file dragged to the edge towards the other PC opens the drop box there (Demetre's D1);
+            // the cursor sits on the edge pixel at that moment.
+            kvm_link->set_on_drag_at_edge([&files](double, kvm::display::Point) { files.show_catcher_at_cursor(); });
+        }
+        // Unhook before `files` goes away (declared after it, so destroyed first).
+        struct DragReset {
+            kvm::KvmLink* link;
+            ~DragReset() {
+                if (link) link->set_on_drag_at_edge(nullptr);
+            }
+        } drag_reset{kvm_link ? &*kvm_link : nullptr};
         std::jthread file_acceptor([&] {
             while (g_running) {
                 if (auto channel = file_server.accept(files.callbacks())) {
