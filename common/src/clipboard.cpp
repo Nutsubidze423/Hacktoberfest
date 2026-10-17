@@ -1,6 +1,8 @@
 #include "kvm/clipboard.h"
 
 #include <windows.h>
+#include <shellapi.h>
+#include <shlobj.h>
 #include <shlwapi.h>
 #include <wincodec.h>
 #include <wrl/client.h>
@@ -17,6 +19,7 @@
 #pragma comment(lib, "windowscodecs.lib")
 #pragma comment(lib, "ole32.lib")
 #pragma comment(lib, "shlwapi.lib")
+#pragma comment(lib, "shell32.lib")
 
 namespace kvm::clip {
 namespace {
@@ -25,6 +28,11 @@ using Microsoft::WRL::ComPtr;
 
 constexpr UINT kMsgApply = WM_APP + 1;  // complete content from the peer is waiting
 constexpr UINT kMsgStop = WM_APP + 2;
+constexpr UINT kMsgApplyFiles = WM_APP + 3;  // the peer's copied files arrived
+// How long an announced file copy waits for its files, and how long files that
+// arrived first wait for their announcement.
+constexpr auto kFilesExpectedFor = std::chrono::minutes(30);
+constexpr auto kFilesUnclaimedFor = std::chrono::seconds(10);
 constexpr UINT_PTR kSettleTimer = 1;
 // Apps often write several formats one after another; read once they're done.
 constexpr UINT kSettleMs = 80;
@@ -194,6 +202,59 @@ std::optional<Pixels> decode_png(std::span<const std::uint8_t> png) {
     return p;
 }
 
+std::vector<std::filesystem::path> dropped_files(HANDLE drop) {
+    std::vector<std::filesystem::path> paths;
+    Locked lock(drop);
+    if (!lock.get()) return paths;
+    auto* hdrop = static_cast<HDROP>(drop);
+    const UINT n = DragQueryFileW(hdrop, 0xFFFFFFFF, nullptr, 0);
+    for (UINT i = 0; i < n; ++i) {
+        const UINT len = DragQueryFileW(hdrop, i, nullptr, 0);
+        std::wstring path(len, L'\0');
+        DragQueryFileW(hdrop, i, path.data(), len + 1);
+        paths.emplace_back(std::move(path));
+    }
+    return paths;
+}
+
+// Adds up sizes and file counts (folders recursively); false as soon as a limit is passed.
+bool within_limits(const std::vector<std::filesystem::path>& items, std::uint64_t max_bytes, std::size_t max_count,
+                   std::uint64_t& bytes, std::size_t& count) {
+    namespace fs = std::filesystem;
+    bytes = 0;
+    count = 0;
+    std::error_code ec;
+    const auto add = [&](std::uint64_t size) { bytes += size; return ++count <= max_count && bytes <= max_bytes; };
+    for (const auto& item : items) {
+        if (fs::is_directory(item, ec)) {
+            for (auto it = fs::recursive_directory_iterator(item, fs::directory_options::skip_permission_denied, ec);
+                 !ec && it != fs::recursive_directory_iterator(); it.increment(ec)) {
+                if (it->is_regular_file(ec) && !add(it->file_size(ec))) return false;
+            }
+        } else if (!add(fs::file_size(item, ec))) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// CF_HDROP for Explorer's paste, wide paths.
+HGLOBAL make_hdrop(const std::vector<std::filesystem::path>& paths) {
+    std::wstring list;
+    for (const auto& p : paths) {
+        list += p.wstring();
+        list += L'\0';
+    }
+    list += L'\0';
+    std::vector<std::uint8_t> buffer(sizeof(DROPFILES) + list.size() * sizeof(wchar_t));
+    DROPFILES header{};
+    header.pFiles = sizeof(DROPFILES);
+    header.fWide = TRUE;
+    std::memcpy(buffer.data(), &header, sizeof(header));
+    std::memcpy(buffer.data() + sizeof(header), list.data(), list.size() * sizeof(wchar_t));
+    return make_global(buffer.data(), buffer.size());
+}
+
 // 32-bit bottom-up CF_DIB, which every app that pastes images understands.
 HGLOBAL make_dib(const Pixels& p) {
     BITMAPINFOHEADER header{};
@@ -309,6 +370,9 @@ struct ClipboardThread {
             case kMsgApply:
                 if (sync) apply(*sync, h);
                 return 0;
+            case kMsgApplyFiles:
+                if (sync) apply_files(*sync, h);
+                return 0;
             case kMsgStop:
                 RemoveClipboardFormatListener(h);
                 PostQuitMessage(0);
@@ -324,6 +388,7 @@ struct ClipboardThread {
             if (!sync.sink_) return;  // nobody to send to
         }
         ClipboardSync::Content content;
+        std::vector<std::filesystem::path> files;
         {
             OpenedClipboard opened(h);
             if (!opened) {
@@ -331,7 +396,9 @@ struct ClipboardThread {
                 return;
             }
             if (GetClipboardOwner() == h) return;
-            if (sync.options_.text && IsClipboardFormatAvailable(CF_UNICODETEXT)) {
+            if (sync.options_.files && IsClipboardFormatAvailable(CF_HDROP)) {
+                files = dropped_files(GetClipboardData(CF_HDROP));
+            } else if (sync.options_.text && IsClipboardFormatAvailable(CF_UNICODETEXT)) {
                 Locked text(GetClipboardData(CF_UNICODETEXT));
                 if (const auto* w = static_cast<const wchar_t*>(text.get())) {
                     const std::size_t max_chars = text.size() / sizeof(wchar_t);
@@ -351,9 +418,11 @@ struct ClipboardThread {
                 } else {
                     log::warn("clipboard: could not convert the copied image");
                 }
-            } else if (IsClipboardFormatAvailable(CF_HDROP)) {
-                log::info("clipboard: copied files are not shared yet");
             }
+        }
+        if (!files.empty()) {
+            send_files(sync, std::move(files));
+            return;
         }
         if (content.kind.empty() || content.bytes.empty()) return;
         if (content.bytes.size() > sync.options_.max_bytes) {
@@ -362,6 +431,56 @@ struct ClipboardThread {
             return;
         }
         sync.send_content(content);
+    }
+
+    // Files copied here: announce them to the peer, then hand them to the file channel.
+    static void send_files(ClipboardSync& sync, std::vector<std::filesystem::path> files) {
+        ClipboardSync::FilesCopied callback;
+        {
+            std::lock_guard lock(sync.incoming_mutex_);
+            callback = sync.on_files_copied_;
+        }
+        if (!callback) {
+            log::info("clipboard: files were copied, but there is no file channel to send them");
+            return;
+        }
+        std::uint64_t bytes = 0;
+        std::size_t count = 0;
+        if (!within_limits(files, sync.options_.max_file_bytes, sync.options_.max_file_count, bytes, count)) {
+            log::warn("clipboard: copied files are too big to share (limit {} / {} files) - drag them to the edge instead",
+                      size_text(static_cast<std::size_t>(sync.options_.max_file_bytes)), sync.options_.max_file_count);
+            return;
+        }
+        std::string names;
+        for (const auto& f : files) names += to_utf8(f.filename().wstring()) + "\n";
+        sync.send_content({"files", std::vector<std::uint8_t>(names.begin(), names.end())});
+        log::info("clipboard: sharing {} copied file(s), {}, over the file channel", count, size_text(static_cast<std::size_t>(bytes)));
+        callback(std::move(files));
+    }
+
+    // The peer's copied files arrived: put them on this clipboard for Explorer's paste.
+    static void apply_files(ClipboardSync& sync, HWND h) {
+        std::optional<std::vector<std::filesystem::path>> files;
+        {
+            std::lock_guard lock(sync.incoming_mutex_);
+            files = std::exchange(sync.files_to_apply_, std::nullopt);
+        }
+        if (!files || files->empty()) return;
+        OpenedClipboard opened(h);
+        if (!opened) {
+            log::warn("clipboard: could not open the clipboard to paste the other PC's files");
+            return;
+        }
+        EmptyClipboard();  // makes this window the owner, so the change isn't echoed back
+        const DWORD copy = DROPEFFECT_COPY;  // paste copies them out of Downloads\KVM, never moves
+        const bool ok = set_data(CF_HDROP, make_hdrop(*files));
+        set_data(RegisterClipboardFormatW(CFSTR_PREFERREDDROPEFFECT), make_global(&copy, sizeof(copy)));
+        if (ok) {
+            log::info("clipboard: {} file(s) from the other PC are on the clipboard - Ctrl+V in Explorer to paste",
+                      files->size());
+        } else {
+            log::warn("clipboard: could not put the other PC's files on the clipboard");
+        }
     }
 
     static void apply(ClipboardSync& sync, HWND h) {
@@ -443,8 +562,31 @@ void ClipboardSync::send_content(const Content& content) {
     const std::uint32_t seq = next_seq_++;
     latest_seq_ = seq;
     for (Chunk& c : split(seq, content.kind, content.bytes)) outgoing_.push(std::move(c));
-    log::info("clipboard: sharing copied {} ({})", content.kind == "text" ? "text" : "image",
-              size_text(content.bytes.size()));
+    if (content.kind != "files") {
+        log::info("clipboard: sharing copied {} ({})", content.kind == "text" ? "text" : "image",
+                  size_text(content.bytes.size()));
+    }
+}
+
+void ClipboardSync::set_on_files_copied(FilesCopied callback) {
+    std::lock_guard lock(incoming_mutex_);
+    on_files_copied_ = std::move(callback);
+}
+
+bool ClipboardSync::files_received(const std::vector<std::filesystem::path>& saved) {
+    if (!options_.files || saved.empty()) return false;
+    std::lock_guard lock(incoming_mutex_);
+    const auto now = std::chrono::steady_clock::now();
+    if (now < files_expected_until_) {
+        files_expected_until_ = {};
+        files_to_apply_ = saved;
+        if (HWND h = static_cast<HWND>(hwnd_.load())) PostMessageW(h, kMsgApplyFiles, 0, 0);
+        return true;
+    }
+    // Maybe the announcement is still on its way (it travels on the control channel).
+    files_unclaimed_ = saved;
+    files_unclaimed_at_ = now;
+    return false;
 }
 
 void ClipboardSync::sender_main() {
@@ -460,12 +602,15 @@ void ClipboardSync::sender_main() {
 
 void ClipboardSync::receive(const Chunk& chunk) {
     const auto bytes = base64_decode(chunk.data);
-    if (!bytes || (chunk.kind != "text" && chunk.kind != "png") || chunk.total > options_.max_bytes ||
-        chunk.offset > chunk.total || bytes->size() > chunk.total - chunk.offset) {
+    if (!bytes || (chunk.kind != "text" && chunk.kind != "png" && chunk.kind != "files") ||
+        chunk.total > options_.max_bytes || chunk.offset > chunk.total || bytes->size() > chunk.total - chunk.offset) {
         log::warn("clipboard: dropped a malformed piece from the other PC");
         return;
     }
-    if ((chunk.kind == "text" && !options_.text) || (chunk.kind == "png" && !options_.images)) return;
+    if ((chunk.kind == "text" && !options_.text) || (chunk.kind == "png" && !options_.images) ||
+        (chunk.kind == "files" && !options_.files)) {
+        return;
+    }
 
     std::lock_guard lock(incoming_mutex_);
     if (chunk.seq != incoming_seq_ || chunk.kind != incoming_kind_ || incoming_.size() != chunk.total) {
@@ -477,6 +622,24 @@ void ClipboardSync::receive(const Chunk& chunk) {
     std::copy(bytes->begin(), bytes->end(), incoming_.begin() + chunk.offset);
     incoming_received_ += bytes->size();
     if (incoming_received_ < incoming_.size()) return;
+
+    if (incoming_kind_ == "files") {
+        // The peer copied files; they come over the file channel (files_received).
+        const auto names = static_cast<std::size_t>(std::count(incoming_.begin(), incoming_.end(), '\n'));
+        incoming_.clear();
+        incoming_seq_ = 0;
+        incoming_kind_.clear();
+        incoming_received_ = 0;
+        const auto now = std::chrono::steady_clock::now();
+        log::info("clipboard: the other PC copied {} file(s), they arrive over the file channel", names);
+        if (!files_unclaimed_.empty() && now - files_unclaimed_at_ < kFilesUnclaimedFor) {
+            files_to_apply_ = std::exchange(files_unclaimed_, {});  // they were faster than this message
+            if (HWND h = static_cast<HWND>(hwnd_.load())) PostMessageW(h, kMsgApplyFiles, 0, 0);
+        } else {
+            files_expected_until_ = now + kFilesExpectedFor;
+        }
+        return;
+    }
 
     to_apply_ = Content{incoming_kind_, std::move(incoming_)};
     incoming_.clear();

@@ -15,10 +15,21 @@
 //
 // Content travels as Chunks of at most kChunkBytes (base64), so each one fits a
 // control-channel message; a newer copy cancels an unsent older one.
+//
+// Copied files (Explorer Ctrl+C / Ctrl+X) don't travel here: this PC tells the
+// peer they're coming (a "files" chunk) and hands their paths to
+// on_files_copied, which sends them over the file channel. When the peer's
+// file channel has them (files_received), the peer puts them on its clipboard,
+// so Ctrl+V in Explorer pastes them there. Originals are never deleted.
+//
+//   clip.set_on_files_copied([&](std::vector<std::filesystem::path> p) { files.send(std::move(p)); });
+//   file channel on_received(saved):  if (!clip.files_received(saved)) { ...dragged files: open Explorer... }
 
 #include <atomic>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>
 #include <functional>
 #include <mutex>
 #include <optional>
@@ -36,7 +47,7 @@ namespace kvm::clip {
 // seq; offset / total let the receiver put them together.
 struct Chunk {
     std::uint32_t seq = 0;
-    std::string kind;          // "text" (UTF-8) or "png"
+    std::string kind;          // "text" (UTF-8), "png", or "files" (names of copied files, one per line)
     std::uint32_t total = 0;   // size of the whole content in bytes (decoded)
     std::uint32_t offset = 0;  // where this piece starts
     std::string data;          // base64 of the piece
@@ -48,8 +59,12 @@ inline constexpr std::size_t kChunkBytes = 32 * 1024;
 struct ClipboardOptions {
     bool text = true;
     bool images = true;
-    // Bigger content is not sent (it would hold up mouse and keyboard traffic).
+    bool files = true;
+    // Bigger text / images are not sent (they would hold up mouse and keyboard traffic).
     std::size_t max_bytes = 16 * 1024 * 1024;
+    // Copied files go along up to this size and count in total.
+    std::uint64_t max_file_bytes = 4ull * 1024 * 1024 * 1024;
+    std::size_t max_file_count = 20000;
 };
 
 class ClipboardSync {
@@ -73,6 +88,16 @@ public:
     // A chunk from the peer; when the content is complete it goes on this PC's
     // clipboard. Any thread.
     void receive(const Chunk& chunk);
+
+    // Files copied here go to this callback (clipboard thread), to be sent over
+    // the file channel. Without it, copied files are not shared.
+    using FilesCopied = std::function<void(std::vector<std::filesystem::path>)>;
+    void set_on_files_copied(FilesCopied callback);
+
+    // The file channel saved files from the peer (any thread). If the peer had
+    // copied them, they go on this clipboard and true is returned; false =
+    // they were dragged / dropped, not copied.
+    bool files_received(const std::vector<std::filesystem::path>& saved);
 
 private:
     friend struct ClipboardThread;
@@ -104,6 +129,13 @@ private:
     std::vector<std::uint8_t> incoming_;
     std::size_t incoming_received_ = 0;
     std::optional<Content> to_apply_;  // complete content waiting for the clipboard thread
+
+    // Copied files: guarded by incoming_mutex_.
+    FilesCopied on_files_copied_;
+    std::chrono::steady_clock::time_point files_expected_until_{};  // the peer announced a file copy
+    std::vector<std::filesystem::path> files_unclaimed_;            // arrived before the announcement
+    std::chrono::steady_clock::time_point files_unclaimed_at_{};
+    std::optional<std::vector<std::filesystem::path>> files_to_apply_;
 };
 
 // Exposed for tests.
