@@ -117,7 +117,9 @@ Claude წაიკითხავს ამ ფაილს, იპოვის
 - [x] `hello` (+ ვერსიის შემოწმება), `ping`/`pong` + clock offset (min-RTT, NTP-ს მსგავსად)
 - [x] ping ტესტი — `kvm_host`/`kvm_client` ყოველ 5 წმ-ში წერენ rtt-ს; Python ფაილები წაშლილია
 - [x] ვიდეოს არხი 50501: `video.h` (`FrameChannel`, `VideoServer`, `connect_video`) + `tools/video_test.cpp`; `kvm_host --test-video` (სატესტო სტრიმი, B ლოგავს fps/Mbit/latency)
-- [ ] M1: KVM ინტეგრაცია დემეტრესთან; ვიდეოს ინტეგრაცია თემოსთან და სანდროსთან
+- [x] M1a: KVM ინტეგრაცია დემეტრესთან — ტესტი 2 გავიდა ორ კომპიუტერზე (`4d16b70`, touchpad-ის ჩათვლით)
+- [ ] ტესტი 3: სატესტო ვიდეო ნამდვილ ქსელზე (`5_run_host_video_test.cmd`) — fps / Mbit/s / latency
+- [ ] M1b: ვიდეოს ინტეგრაცია თემოსთან და სანდროსთან (`main.cpp`: ფანჯარა → VDD → capture → JPEG → B)
 - [ ] ფაზა 2: end-to-end latency, კავშირის გაწყვეტის სცენარები
 - [ ] M2: დემოს სცენარი, README
 
