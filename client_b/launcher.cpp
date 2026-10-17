@@ -348,23 +348,13 @@ void App::decide_role() {
     if (options_.role) {
         role_ = *options_.role;
     } else if (settings_.role) {
-        role_ = *settings_.role;
+        role_ = *settings_.role;  // the role picked last time (e.g. the laptop stays the client)
     } else {
-        // First run: if another PC already runs a host, this one is the client.
-        WSADATA wsa{};
-        const bool wsa_ok = WSAStartup(MAKEWORD(2, 2), &wsa) == 0;
-        std::vector<discovery::Host> hosts;
-        try {
-            hosts = discovery::find();
-        } catch (const std::exception& e) {
-            log::warn("launcher: discovery: {}", e.what());
-        }
-        if (wsa_ok) WSACleanup();
-        const std::string me = layout::computer_name();
-        const bool other_host = std::any_of(hosts.begin(), hosts.end(), [&](const auto& h) { return _stricmp(h.name.c_str(), me.c_str()) != 0; });
-        role_ = other_host ? Role::Client : Role::Host;
-        log::info("launcher: first run, {} -> this PC is the {}", other_host ? "found a host" : "no host found",
-                  narrow(role_word(role_)));
+        // Every PC starts as the host, ready for the other one to join - no network guessing. To
+        // join, pick "Connect to the other PC" in the tray menu on one of them (it becomes the
+        // client and finds the host on the network). Two hosts simply wait until one connects.
+        role_ = Role::Host;
+        log::info("launcher: starting as the host; use the tray menu to connect to another PC");
     }
     settings_.role = role_;
     save_settings(settings_);
@@ -673,10 +663,12 @@ std::vector<TrayIcon::MenuItem> App::build_menu() {
     m.push_back({.id = kCmdOpenFiles, .text = L"Open received files"});
     m.push_back({.id = kCmdOpenConfig, .text = L"Open config.json"});
     m.push_back({.id = kCmdShowLog, .text = L"Show log", .enabled = !log_path_.empty()});
-    Item role{.text = L"This PC is the"};
-    role.submenu.push_back({.id = kCmdRoleHost, .text = L"Host (main PC)", .checked = role_ == Role::Host, .radio = true});
-    role.submenu.push_back({.id = kCmdRoleClient, .text = L"Client", .checked = role_ == Role::Client, .radio = true});
-    m.push_back(std::move(role));
+    // Every PC runs as a host; one explicit action makes this PC connect to the other as the client.
+    if (role_ == Role::Host) {
+        m.push_back({.id = kCmdRoleClient, .text = L"Connect to the other PC"});
+    } else {
+        m.push_back({.id = kCmdRoleHost, .text = L"Disconnect (make this PC the host)"});
+    }
     m.push_back({.separator = true});
     m.push_back({.id = kCmdRestart, .text = process_ ? L"Restart Sarke" : L"Start Sarke"});
     m.push_back({.id = kCmdQuit, .text = L"Quit Sarke"});
@@ -734,7 +726,7 @@ void App::on_command(UINT id) {
         settings_.role = want;
         save_settings(settings_);
         peer_name_.clear();
-        restart(std::format(L"as the {}", role_word(role_)));
+        restart(want == Role::Client ? L"Connecting to the other PC" : L"This PC is the host now");
         break;
     }
     case kCmdRestart:
