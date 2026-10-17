@@ -34,6 +34,7 @@ KvmLink::~KvmLink() {
 bool KvmLink::start() {
     if (!options_.send_input || capture_) return true;
     capture_.emplace(capture_options(options_));
+    if (on_drag_at_edge_) capture_->set_on_drag_at_edge(on_drag_at_edge_);
     if (capture_->start()) return true;
     capture_.reset();
     log::error("kvm: input hooks failed - the other PC can still control this one, but not the other way round");
@@ -43,6 +44,11 @@ bool KvmLink::start() {
 void KvmLink::stop() {
     detach();
     capture_.reset();  // ~InputCapture stops the hooks
+}
+
+void KvmLink::set_on_drag_at_edge(host::InputCapture::DragAtEdge callback) {
+    on_drag_at_edge_ = std::move(callback);
+    if (capture_) capture_->set_on_drag_at_edge(on_drag_at_edge_);
 }
 
 void KvmLink::attach(Sink send_fn) {

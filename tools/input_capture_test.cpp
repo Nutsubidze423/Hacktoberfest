@@ -266,10 +266,28 @@ int main() {
         // -- a held mouse button blocks switching (no lost drag)
         cap.on_focus_leave({.y_norm = 0.5});
         wait_until([&] { return !cap.remote(); });
+        std::vector<std::pair<double, display::Point>> drags;
+        cap.set_on_drag_at_edge([&](double y, display::Point at) {
+            std::lock_guard l(g_mu);
+            drags.emplace_back(y, at);
+        });
+        const auto drag_count = [&] { std::lock_guard l(g_mu); return drags.size(); };
         mouse(MOUSEEVENTF_LEFTDOWN); settle();
         abs_move(edge_at(0.5)); settle();
         check(!cap.remote(), "left button held: edge does not switch");
+        {
+            std::lock_guard l(g_mu);
+            check(drags.size() == 1 && std::abs(drags[0].first - right.position(edge_at(0.5)).value()) < 1e-9 &&
+                      drags[0].second.x == edge_at(0.5).x && drags[0].second.y == edge_at(0.5).y,
+                  "drag reaching the edge is reported once, with the edge pixel (file drop, D1)");
+        }
+        abs_move(edge_at(0.55)); settle();
+        check(drag_count() == 1, "...not again while it stays on the edge");
+        abs_move(inside); settle();
+        abs_move(edge_at(0.6)); settle();
+        check(drag_count() == 2, "...again after leaving the edge and coming back");
         mouse(MOUSEEVENTF_LEFTUP); settle();
+        cap.set_on_drag_at_edge(nullptr);
         abs_move(inside); settle();
         abs_move(edge_at(0.5));
         check(wait_until([&] { return cap.remote(); }), "button released: edge switches");

@@ -22,6 +22,7 @@
 #include <atomic>
 #include <functional>
 #include <mutex>
+#include <optional>
 #include <thread>
 
 #include "kvm/dpi.h"
@@ -82,6 +83,13 @@ public:
     // this PC). Leaving suspension starts the switch cooldown.
     void set_suspended(bool suspended);
 
+    // Called (on the capture's worker thread) when the left button is held while
+    // the cursor touches the edge towards the peer, e.g. files dragged out of
+    // Explorer: `at` is the edge pixel, for a "drop here" window. Control does
+    // not switch mid-drag. Once per touch; nothing while suspended / no peer.
+    using DragAtEdge = std::function<void(double y_norm, display::Point at)>;
+    void set_on_drag_at_edge(DragAtEdge callback);
+
     // Control is currently on the peer.
     bool remote() const { return remote_; }
     // The emergency exit was used; the hooks are gone.
@@ -95,6 +103,7 @@ private:
         bool send = true;            // false = only logged (e.g. B's own focus_leave)
         bool emergency = false;      // FocusLeave caused by Ctrl+Alt+Shift+Q
         const char* note = nullptr;  // log line only, msg is ignored
+        std::optional<input::Point> drag_at;  // drag reached the edge here (msg = FocusEnter with its y_norm)
     };
 
     void hook_thread_main();
@@ -112,6 +121,7 @@ private:
     BlockingQueue<Event> events_{4096};
     std::mutex sink_mutex_;
     Sink sink_;
+    DragAtEdge on_drag_at_edge_;  // guarded by sink_mutex_
 
     std::thread hook_thread_;
     std::thread worker_;

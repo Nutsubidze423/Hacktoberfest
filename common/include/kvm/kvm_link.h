@@ -70,6 +70,10 @@ public:
     // clicks and keys while the peer is not controlling this PC.
     bool handle(const proto::Message& msg);
 
+    // Left button held at the edge towards the peer (e.g. files dragged out of
+    // Explorer): show a "drop here" window at `at`. See InputCapture::set_on_drag_at_edge.
+    void set_on_drag_at_edge(host::InputCapture::DragAtEdge callback);
+
     bool controlling_peer() const { return capture_ && capture_->remote(); }
     bool controlled_by_peer() const { return inject_.active(); }
     // Ctrl+Alt+Shift+Q was pressed here: this PC no longer sends its input.
@@ -82,6 +86,7 @@ private:
     std::mutex sink_mutex_;
     Sink sink_;
     std::optional<host::InputCapture> capture_;
+    host::InputCapture::DragAtEdge on_drag_at_edge_;
     client::InputInject inject_;
 };
 

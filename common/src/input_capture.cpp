@@ -36,6 +36,9 @@ constexpr int kRawGrace = 12;
 // would otherwise flood Wi-Fi with tiny packets. Other input is never delayed.
 constexpr auto kMoveInterval = std::chrono::milliseconds(4);
 
+constexpr UINT_PTR kMonitorTimer = 1;
+constexpr UINT kMonitorRefreshMs = 2000;
+
 constexpr wchar_t kWindowClass[] = L"KvmInputCapture";
 
 WPARAM pack(double y) {
@@ -67,6 +70,16 @@ struct CaptureThread {
     static inline bool hook_motion = false;        // motion from the hook (cursor parked) instead of Raw Input
     static inline input::Point park;
     static inline ULONGLONG no_switch_until = 0;   // GetTickCount64() of the end of the cooldown
+    static inline bool drag_signalled = false;     // this left-button drag already reported at the edge
+    static constexpr unsigned kLeftButton = 1u << static_cast<unsigned>(proto::MouseButton::Left);
+
+    // Left button held while the cursor touches the edge: e.g. files dragged
+    // from Explorer that should go to the peer. Reported once per touch.
+    static void drag_at_edge(double y_norm, input::Point at) {
+        if (drag_signalled || cap->disabled_ || !cap->has_client_ || cap->suspended_) return;
+        drag_signalled = true;
+        cap->events_.push({.msg = proto::FocusEnter{.y_norm = y_norm}, .send = false, .drag_at = at});
+    }
 
     static void start_cooldown() {
         no_switch_until = GetTickCount64() + static_cast<ULONGLONG>(std::max(0, cap->options_.switch_cooldown_ms));
@@ -190,14 +203,18 @@ struct CaptureThread {
         }
 
         if (!cap->remote_) {
-            // Never switch mid-drag: the button release would be lost on A.
-            if (wp == WM_MOUSEMOVE && cap->options_.edge_switching && buttons_down == 0 &&
-                GetTickCount64() >= no_switch_until) {
-                if (const auto t = edge.position({m.pt.x, m.pt.y})) {
+            if (wp == WM_MOUSEMOVE && cap->options_.edge_switching) {
+                const auto t = edge.position({m.pt.x, m.pt.y});
+                if (t && buttons_down == 0 && GetTickCount64() >= no_switch_until) {
                     // With the cursor parked, this move must not land on the edge.
                     if (enter_remote(*t, {m.pt.x, m.pt.y}) && hook_motion) return 1;
+                } else if (t && buttons_down == kLeftButton) {
+                    drag_at_edge(*t, {m.pt.x, m.pt.y});  // never switch mid-drag, but a file drag may want out
+                } else if (!t) {
+                    drag_signalled = false;
                 }
             }
+            if (!(buttons_down & kLeftButton)) drag_signalled = false;
             return CallNextHookEx(nullptr, code, wp, lp);
         }
 
@@ -292,6 +309,9 @@ struct CaptureThread {
             case WM_DISPLAYCHANGE:
                 refresh_monitors();
                 return 0;
+            case WM_TIMER:
+                if (wp == kMonitorTimer) refresh_monitors();
+                return 0;
             case kMsgRemote: enter_remote(unpack(wp), cursor_pos()); return 0;
             case kMsgLocal: leave_remote(wp != 0); return 0;
             case kMsgReturned: returned(unpack(wp)); return 0;
@@ -370,6 +390,11 @@ void InputCapture::switch_to_local(bool tell_peer) {
     post(kMsgLocal, tell_peer ? 1 : 0);
 }
 
+void InputCapture::set_on_drag_at_edge(DragAtEdge callback) {
+    std::lock_guard lock(sink_mutex_);
+    on_drag_at_edge_ = std::move(callback);
+}
+
 void InputCapture::set_suspended(bool suspended) {
     if (suspended_.exchange(suspended) && !suspended) post(kMsgCooldown);
 }
@@ -415,6 +440,9 @@ void InputCapture::hook_thread_main() {
     if (!RegisterRawInputDevices(&rid, 1, sizeof(rid))) return fail("RegisterRawInputDevices");
 
     T::refresh_monitors();
+    // Also re-read the monitors now and then: a virtual display (VDD) appearing
+    // or moving must never leave the edge stale, even if WM_DISPLAYCHANGE is missed.
+    SetTimer(T::hwnd, kMonitorTimer, kMonitorRefreshMs, nullptr);
     T::mouse_hook = SetWindowsHookExW(WH_MOUSE_LL, &T::mouse_proc, inst, 0);
     if (!T::mouse_hook) return fail("SetWindowsHookEx(WH_MOUSE_LL)");
     T::key_hook = SetWindowsHookExW(WH_KEYBOARD_LL, &T::key_proc, inst, 0);
@@ -475,6 +503,11 @@ void InputCapture::worker_main() {
         for (const Event& ev : batch) {
             if (ev.note) {
                 log::info("{}", ev.note);
+                continue;
+            }
+            if (ev.drag_at) {
+                std::lock_guard lock(sink_mutex_);
+                if (on_drag_at_edge_) on_drag_at_edge_(std::get<proto::FocusEnter>(ev.msg).y_norm, *ev.drag_at);
                 continue;
             }
             if (const auto* enter = std::get_if<proto::FocusEnter>(&ev.msg)) {
