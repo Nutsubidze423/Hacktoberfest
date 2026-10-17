@@ -1,7 +1,9 @@
 // kvm_client.exe — runs on B (receives input and the window stream from A).
-// Usage: kvm_client.exe [--host <A's IP>] [--config <path>] [--log <file>] [--no-kvm] [--no-clipboard]
+// Usage: kvm_client.exe [--host <A's IP>] [--config <path>] [--log <file>] [--no-kvm] [--no-clipboard] [--no-desk]
 //   --no-kvm        don't install the input hooks (A can still control B)
 //   --no-clipboard  don't share copied text/images with the host
+//   --no-desk       no desk mode (the host's screen as one more monitor); Ctrl+Alt+Shift+W uses the viewer
+//   --desk-no-vdd   desk mode, but only show the host's windows (one-PC tests: the host owns the VDD)
 
 #include <atomic>
 #include <chrono>
@@ -18,6 +20,7 @@
 
 #include "kvm/clipboard.h"
 #include "kvm/config.h"
+#include "kvm/desk_region.h"
 #include "kvm/dpi.h"
 #include "kvm/file_link.h"
 #include "kvm/file_transfer.h"
@@ -45,9 +48,19 @@ constexpr auto kReconnectDelay = 1s;
 constexpr auto kStatsInterval = 5s;
 
 std::atomic<bool> g_running{true};
+std::atomic<bool> g_desk{false};        // desk mode may have the VDD attached
+std::atomic<bool> g_cleaned_up{false};  // wmain's objects are gone (windows home, VDD detached)
 
-BOOL WINAPI on_console_ctrl(DWORD) {
+BOOL WINAPI on_console_ctrl(DWORD type) {
     g_running = false;
+    if (type == CTRL_CLOSE_EVENT || type == CTRL_LOGOFF_EVENT || type == CTRL_SHUTDOWN_EVENT) {
+        // Windows ends the process as soon as this returns: give the main thread time to bring the
+        // windows home from the VDD, and never leave the VDD attached (windows would sit on an invisible monitor).
+        for (int i = 0; i < 90 && !g_cleaned_up; ++i) Sleep(50);
+        if (!g_cleaned_up && g_desk) {
+            if (auto vdd = kvm::VirtualDisplay::find(); vdd && vdd->attached()) vdd->detach();
+        }
+    }
     return TRUE;
 }
 
@@ -59,7 +72,7 @@ std::string narrow(std::wstring_view s) {
 }
 
 // Screen = B's primary monitor, in physical pixels.
-proto::Hello make_hello() {
+proto::Hello make_hello(bool desk) {
     wchar_t name[256];
     DWORD name_len = static_cast<DWORD>(std::size(name));
     if (!GetComputerNameExW(ComputerNameDnsHostname, name, &name_len)) {
@@ -71,6 +84,7 @@ proto::Hello make_hello() {
         .screen_h = primary.rect.height(),
         .dpi_scale = primary.scale,
         .hostname = narrow(std::wstring_view(name, name_len)),
+        .desk = desk,
     };
 }
 
@@ -84,7 +98,7 @@ kvm::clip::Chunk to_chunk(const proto::Clipboard& m) {
 
 void run_session(kvm::net::Connection& conn, const kvm::Config& cfg, kvm::KvmLink* kvm,
                  kvm::clip::ClipboardSync* clip, kvm::FileLink& files, kvm::WindowLink& windows) {
-    if (!conn.send(make_hello())) {
+    if (!conn.send(make_hello(cfg.desk))) {
         return;
     }
     kvm::log::info("connected to host {}", conn.peer());
@@ -132,8 +146,8 @@ void run_session(kvm::net::Connection& conn, const kvm::Config& cfg, kvm::KvmLin
                 kvm::log::info("host '{}': screen {}x{}, dpi scale {:.2f}", h->hostname, h->screen_w, h->screen_h,
                                h->dpi_scale);
                 const auto client_side = kvm::display::parse_side(cfg.client_side).value_or(kvm::display::Side::Right);
-                match_vdd_to_peer(h->screen_w, h->screen_h, kvm::display::opposite(client_side));
-                windows.set_peer_screen(h->screen_w, h->screen_h);  // B's window goes to A at A's size
+                if (!cfg.desk) match_vdd_to_peer(h->screen_w, h->screen_h, kvm::display::opposite(client_side));
+                windows.set_peer(*h);  // B's windows go to A at A's size; desk mode: A's screen = one more monitor
             } else {
                 kvm::log::info("from host: {}", proto::encode(*msg).dump());
             }
@@ -167,6 +181,8 @@ int wmain(int argc, wchar_t** argv) {
     std::optional<std::string> host_override;
     bool kvm_enabled = true;
     bool clipboard_enabled = true;
+    bool desk_enabled = true;
+    bool desk_own_vdd = true;
     for (int i = 1; i < argc; ++i) {
         const std::wstring_view arg = argv[i];
         if (arg == L"--config" && i + 1 < argc) {
@@ -179,14 +195,23 @@ int wmain(int argc, wchar_t** argv) {
             kvm_enabled = false;
         } else if (arg == L"--no-clipboard") {
             clipboard_enabled = false;
+        } else if (arg == L"--no-desk") {
+            desk_enabled = false;
+        } else if (arg == L"--desk-no-vdd") {
+            desk_own_vdd = false;  // e.g. host and client on one PC: only the host uses the VDD
         }
     }
 
     try {
+        struct CleanedUp {  // first in this scope, so it is destroyed last
+            ~CleanedUp() { g_cleaned_up = true; }
+        } cleaned_up;
         kvm::Config cfg = kvm::load_config(config_path);
         if (host_override) {
             cfg.host_ip = *host_override;
         }
+        cfg.desk = cfg.desk && desk_enabled;
+        g_desk = cfg.desk && desk_own_vdd;
         kvm::log::info("kvm_client: protocol v{}, host {}:{}. Ctrl+C to quit.", proto::kProtocolVersion, cfg.host_ip,
                        cfg.control_port);
 
@@ -198,10 +223,14 @@ int wmain(int argc, wchar_t** argv) {
         }
         const auto host_side = kvm::display::opposite(*side);
 
+        // Desk mode (Temo): B's virtual display = A's screen; the KVM hooks and WindowLink share it.
+        kvm::desk::Region desk_region;
+        kvm::desk::Region* desk = cfg.desk ? &desk_region : nullptr;
+
         // KVM lives for the whole process: its hooks stay installed across reconnects.
         std::optional<kvm::KvmLink> kvm_link;
         if (kvm_enabled) {
-            kvm_link.emplace(kvm::KvmOptions{.peer_side = host_side, .is_host = false});
+            kvm_link.emplace(kvm::KvmOptions{.peer_side = host_side, .is_host = false, .desk = desk});
             kvm_link->start();  // false = hooks failed (logged); A can still control B
         }
         kvm::clip::ClipboardSync clip;
@@ -241,7 +270,19 @@ int wmain(int argc, wchar_t** argv) {
 
         // Windows A <-> B (Ctrl+Alt+Shift+W): A's windows show up in the viewer here; a window of B
         // goes to A's viewer and back.
-        kvm::WindowLink windows({.jpeg_quality = cfg.jpeg_quality, .max_fps = cfg.max_fps, .peer_side = host_side});
+        kvm::WindowLink windows({.jpeg_quality = cfg.jpeg_quality,
+                                 .max_fps = cfg.max_fps,
+                                 .peer_side = host_side,
+                                 .desk = desk,
+                                 .own_vdd = desk_own_vdd});
+        // Ctrl+Alt+Shift+Q also ends desk mode (the hooks that keep the cursor off the VDD are gone).
+        if (kvm_link) kvm_link->set_on_emergency([&windows] { windows.disable_desk(); });
+        struct EmergencyReset {  // declared after `windows`, so it runs before `windows` goes away
+            kvm::KvmLink* link;
+            ~EmergencyReset() {
+                if (link) link->set_on_emergency(nullptr);
+            }
+        } emergency_reset{kvm_link ? &*kvm_link : nullptr};
 
         kvm::Hotkeys hotkeys;
         hotkeys.add('F', [&] { files.show_catcher_at_cursor(); });

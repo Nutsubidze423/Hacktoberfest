@@ -24,6 +24,10 @@ public:
     // Replaces `out` with the JPEG of `frame`. False on error (logged), `out` is then empty.
     bool encode(const CapturedFrame& frame, std::vector<std::uint8_t>& out);
 
+    // Same for a width x height block of BGRX pixels starting at `first` with `stride` bytes per row,
+    // e.g. a crop of a frame: frame.bgra.data() + y * frame.stride + x * 4.
+    bool encode(const std::uint8_t* first, int width, int height, int stride, std::vector<std::uint8_t>& out);
+
     int quality() const { return quality_; }
 
     // Duration of the last successful encode() in milliseconds.

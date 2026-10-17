@@ -30,13 +30,22 @@ bool JpegEncoder::encode(const CapturedFrame& frame, std::vector<std::uint8_t>& 
                    frame.bgra.size());
         return false;
     }
+    return encode(frame.bgra.data(), frame.width, frame.height, frame.stride, out);
+}
+
+bool JpegEncoder::encode(const std::uint8_t* first, int width, int height, int stride, std::vector<std::uint8_t>& out) {
+    out.clear();
+    if (!first || width <= 0 || height <= 0 || stride < width * 4) {
+        log::error("jpeg: bad image {}x{} stride {}", width, height, stride);
+        return false;
+    }
 
     const auto start = std::chrono::steady_clock::now();
     // Worst-case JPEG size, so TurboJPEG never needs to reallocate.
-    out.resize(tj3JPEGBufSize(frame.width, frame.height, TJSAMP_420));
+    out.resize(tj3JPEGBufSize(width, height, TJSAMP_420));
     unsigned char* dst = out.data();
     size_t size = out.size();
-    if (tj3Compress8(handle_, frame.bgra.data(), frame.width, frame.stride, frame.height, TJPF_BGRX, &dst, &size) != 0) {
+    if (tj3Compress8(handle_, first, width, stride, height, TJPF_BGRX, &dst, &size) != 0) {
         log::error("jpeg: {}", tj3GetErrorStr(handle_));
         out.clear();
         return false;

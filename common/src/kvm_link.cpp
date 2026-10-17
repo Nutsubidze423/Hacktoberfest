@@ -14,6 +14,7 @@ namespace {
 host::CaptureOptions capture_options(const KvmOptions& o) {
     host::CaptureOptions c = o.capture;
     c.client_side = o.peer_side;
+    c.desk = o.desk;
     return c;
 }
 
@@ -28,7 +29,9 @@ KvmLink::KvmLink(KvmOptions options)
                   if (std::holds_alternative<proto::FocusLeave>(m) && capture_) capture_->set_suspended(false);
                   return send(m);
               },
-              options_.leave_cooldown) {}
+              options_.leave_cooldown) {
+    inject_.set_desk(options_.desk);
+}
 
 KvmLink::~KvmLink() {
     stop();
@@ -38,6 +41,7 @@ bool KvmLink::start() {
     if (!options_.send_input || capture_) return true;
     capture_.emplace(capture_options(options_));
     if (on_drag_at_edge_) capture_->set_on_drag_at_edge(on_drag_at_edge_);
+    if (on_emergency_) capture_->set_on_emergency(on_emergency_);
     capture_->set_on_local_activity([this] { take_back(); });
     if (capture_->start()) return true;
     capture_.reset();
@@ -57,6 +61,11 @@ void KvmLink::set_on_drag_at_edge(host::InputCapture::DragAtEdge callback) {
 
 void KvmLink::switch_to_peer(double y_norm) {
     if (capture_) capture_->switch_to_remote(y_norm);
+}
+
+void KvmLink::set_on_emergency(std::function<void()> callback) {
+    on_emergency_ = std::move(callback);
+    if (capture_) capture_->set_on_emergency(on_emergency_);
 }
 
 void KvmLink::attach(Sink send_fn) {
@@ -125,9 +134,9 @@ bool KvmLink::handle(const proto::Message& msg) {
         }
         return true;
     }
-    if (std::holds_alternative<proto::MouseMove>(msg)) {
+    if (std::holds_alternative<proto::MouseMove>(msg) || std::holds_alternative<proto::DeskMove>(msg)) {
         if (inject_.active()) inject_.handle(msg);
-        return true;  // only the KVM sends mouse_move
+        return true;  // only the KVM sends mouse_move / desk_move
     }
     if (std::holds_alternative<proto::MouseButtonEvent>(msg) || std::holds_alternative<proto::MouseWheel>(msg) ||
         std::holds_alternative<proto::Key>(msg)) {

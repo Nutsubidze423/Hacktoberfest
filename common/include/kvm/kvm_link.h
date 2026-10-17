@@ -44,6 +44,8 @@ struct KvmOptions {
     host::CaptureOptions capture{};
     // After the peer takes control here, its cursor can't leave again this soon.
     std::chrono::milliseconds leave_cooldown{250};
+    // Desk mode: this PC's VDD and its windows (kvm/desk_region.h); nullptr = off. Outlives the link.
+    desk::Region* desk = nullptr;
 };
 
 class KvmLink {
@@ -78,8 +80,12 @@ public:
 
     // Hands control to the peer now, as if the cursor had crossed the edge at y_norm, also while a
     // button is held: a file drag caught at the edge continues on the peer (FileLink::catch_drag).
+    // In desk mode the drag is already on the peer's screen; the button's release goes there.
     // No-op without hooks.
     void switch_to_peer(double y_norm);
+
+    // Called after Ctrl+Alt+Shift+Q (e.g. desk mode off, VDD detached).
+    void set_on_emergency(std::function<void()> callback);
 
     bool controlling_peer() const { return capture_ && capture_->remote(); }
     bool controlled_by_peer() const { return inject_.active(); }
@@ -95,6 +101,7 @@ private:
     Sink sink_;
     std::optional<host::InputCapture> capture_;
     host::InputCapture::DragAtEdge on_drag_at_edge_;
+    std::function<void()> on_emergency_;
     std::mutex inject_mutex_;  // inject_ is used by the session thread and by take_back()
     client::InputInject inject_;
 };
