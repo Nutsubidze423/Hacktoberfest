@@ -149,7 +149,7 @@ Claude წაიკითხავს ამ ფაილს, იპოვის
 - [x] T7: `video_sender.*`: `LatestSlot` → `FrameChannel::send_frame` (ლუკას `video.h`); `tools/video_sender_test.exe` გადის, მათ შორის TCP-ზე (30 fps, capture → B ~25 ms loopback-ზე)
 - [x] `window_share.*`: გაზიარების მთელი owner-მხარე ერთ ობიექტში (VDD → ფანჯარა → capture → sender, უკან სწორი თანმიმდევრობით; `tools/window_share_test.exe`)
 - [x] T8: `remote_input.*`: viewer-ის `remote_*`/`key` → VDD-ზე `SendInput` (`tools/remote_input_test.exe`: Paint-ში ხაზი და Ctrl+Z, სათაურზე კლიკის შემდეგაც მაქსიმალებული რჩება)
-- [ ] T9: ფაილები A ⇄ B: `common/file_transfer.*` (50502) + `common/file_drop.*` (დემეტრეს D1-თან ერთად)
+- [ ] T9: ფაილები A ⇄ B: `common/file_transfer.*` (50502) + `common/file_drop.*` (დემეტრეს D1-თან ერთად) — (ა) არხი მზადაა: `tools/file_transfer_test.exe` გადის ორივე მიმართულებით, უსაფრთხოების შემოწმებით; (ბ) `file_drop` მიმდინარეობს
 - [ ] M1: რეალური ფანჯრის სტრიმი B-ზე (ლუკასთან და სანდროსთან ერთად)
 - [ ] ფაზა 2: (სურვ.) H.264 Media Foundation
 
