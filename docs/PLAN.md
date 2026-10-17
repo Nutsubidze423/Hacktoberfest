@@ -137,8 +137,8 @@ Claude წაიკითხავს ამ ფაილს, იპოვის
 - [x] M1: მაუსი + კლავიატურა A → B ქსელით (ტესტი 2, `4d16b70`; სიგლუვე `8461a31`)
 - [ ] ფაზა 2: სქროლი (ჰორიზ. ჩათვლით), extended კლავიშები, გაჭედილი კლავიშების გასუფთავება
 
-### თემო — ფანჯარა B-ზე და უკან (VDD + ვიდეო A მხარეს)
-დეტალები: `ARTEFACT/თემო — დავალებები (ლუკა → თემო).md`.
+### თემო — ფანჯარა A ⇄ B (VDD + ვიდეო owner-ის მხარეს) და ფაილები
+დეტალები: `ARTEFACT/თემო — დავალებები (ლუკა → თემო).md`, `ARTEFACT/გადაწყვეტილებები 2 (ლუკა → თემო, სანდრო, დემეტრე).md`.
 - [x] `window_picker.*`: ფანჯრების სია და არჩევა
 - [x] T1: `capture_test` — `#include` .cpp-ის ნაცვლად `kvm_host_lib`
 - [x] T2: `virtual_display.*`: პოვნა, რეჟიმი, მხარე, attach/detach + `tools/vdd_test.cpp` (თემოს ლეპტოპზე გადის; A-ზე ლუკამ გაუშვას)
@@ -147,6 +147,9 @@ Claude წაიკითხავს ამ ფაილს, იპოვის
 - [x] T5: `jpeg_encoder.*`: TurboJPEG + დროის გაზომვა (`tools/jpeg_test.exe`; თემოს ლეპტოპზე 1920×1080: 4.2 ms, 69 KB რეალურ ეკრანზე)
 - [x] T6: `capture_test`: ფანჯარა VDD-ზე → 10 ფრეიმი `captures/*.jpg` → უკან (`--menu`-ით მენიუც ჩანს)
 - [x] T7: `video_sender.*`: `LatestSlot` → `FrameChannel::send_frame` (ლუკას `video.h`); `tools/video_sender_test.exe` გადის, მათ შორის TCP-ზე (30 fps, capture → B ~25 ms loopback-ზე)
+- [x] `window_share.*`: გაზიარების მთელი owner-მხარე ერთ ობიექტში (VDD → ფანჯარა → capture → sender, უკან სწორი თანმიმდევრობით; `tools/window_share_test.exe`)
+- [x] T8: `remote_input.*`: viewer-ის `remote_*`/`key` → VDD-ზე `SendInput` (`tools/remote_input_test.exe`: Paint-ში ხაზი და Ctrl+Z, სათაურზე კლიკის შემდეგაც მაქსიმალებული რჩება)
+- [ ] T9: ფაილები A ⇄ B: `common/file_transfer.*` (50502) + `common/file_drop.*` (დემეტრეს D1-თან ერთად)
 - [ ] M1: რეალური ფანჯრის სტრიმი B-ზე (ლუკასთან და სანდროსთან ერთად)
 - [ ] ფაზა 2: (სურვ.) H.264 Media Foundation
 
