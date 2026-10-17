@@ -31,6 +31,44 @@ void reveal(const std::vector<std::filesystem::path>& saved) {
     ShellExecuteW(nullptr, L"open", L"explorer.exe", args.c_str(), nullptr, SW_SHOWNORMAL);
 }
 
+// A free name for `name` in `dir`: "photo.jpg", else "photo (2).jpg", "photo (3).jpg", ...
+std::filesystem::path free_name(const std::filesystem::path& dir, const std::filesystem::path& name) {
+    std::error_code ec;
+    auto candidate = dir / name;
+    for (int n = 2; std::filesystem::exists(candidate, ec) && n < 10000; ++n) {
+        candidate = dir / (name.stem().wstring() + L" (" + std::to_wstring(n) + L")" + name.extension().wstring());
+    }
+    return candidate;
+}
+
+// A drag from the other PC that didn't drop anywhere here: its files sit in a temporary folder, so
+// move them to Downloads\KVM (as a normal transfer would) and return where they ended up.
+std::vector<std::filesystem::path> keep_in_downloads(const std::vector<std::filesystem::path>& items) {
+    namespace fs = std::filesystem;
+    const fs::path target = files::default_target();
+    std::error_code ec;
+    fs::create_directories(target, ec);
+    std::vector<fs::path> kept;
+    for (const auto& item : items) {
+        if (!fs::exists(item, ec)) continue;  // already moved by a drop
+        const fs::path dest = free_name(target, item.filename());
+        fs::rename(item, dest, ec);
+        if (ec) {  // e.g. another volume: copy, then remove the temporary copy
+            ec.clear();
+            fs::copy(item, dest, fs::copy_options::recursive, ec);
+            if (!ec) fs::remove_all(item, ec);
+        }
+        if (fs::exists(dest)) {
+            log::info("files: kept {}", utf8(dest));
+            kept.push_back(dest);
+        } else {
+            log::warn("files: could not move {} to {}", utf8(item), utf8(target));
+            kept.push_back(item);
+        }
+    }
+    return kept;
+}
+
 }  // namespace
 
 FileLink::FileLink()
@@ -72,10 +110,12 @@ files::Callbacks FileLink::callbacks() const {
         .on_drag_received =
             [this](const std::vector<std::filesystem::path>& saved) {
                 log::info("files: drag from the other PC arrived ({} item(s)), continuing it here", saved.size());
-                if (!drag_source_->start(saved, [](DWORD effect) {
+                // If the drag can't go on here or is cancelled, the files still land in Downloads\KVM.
+                if (!drag_source_->start(saved, [saved](DWORD effect) {
                         log::info("files: drag {}", effect != DROPEFFECT_NONE ? "dropped" : "cancelled");
+                        if (effect == DROPEFFECT_NONE) reveal(keep_in_downloads(saved));
                     })) {
-                    reveal(saved);  // a drag is still running: at least show where the files are
+                    reveal(keep_in_downloads(saved));  // a drag is still running
                 }
             },
     };
