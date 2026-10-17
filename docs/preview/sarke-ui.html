@@ -4,54 +4,57 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Sarke interface preview</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
 <style>
-  /* Tokens from docs/DESIGN.md section 2 (the app's own colors). */
+  /* Tokens from docs/DESIGN.md section 2 = the website's (sarke-nine.vercel.app), dark theme. */
+  @font-face { font-family: "Google Sans Variable"; font-weight: 400 700; font-display: swap;
+               src: url("https://cdn.jsdelivr.net/npm/@fontsource-variable/google-sans@5.3.2/files/google-sans-latin-wght-normal.woff2") format("woff2"); }
+  @font-face { font-family: "Geist Mono"; font-weight: 400; font-display: swap; src: url("https://cdn.jsdelivr.net/npm/geist@1.8.1/dist/fonts/geist-mono/GeistMono-Regular.woff2") format("woff2"); }
+  @font-face { font-family: "Geist Mono"; font-weight: 500; font-display: swap; src: url("https://cdn.jsdelivr.net/npm/geist@1.8.1/dist/fonts/geist-mono/GeistMono-Medium.woff2") format("woff2"); }
   :root {
-    --bg0: #0B0B0C; --bg1: #141416; --bg2: #1C1C1F; --line: #2A2A2E; --line-strong: #3A3A40;
-    --text-hi: #EDEDED; --text-mid: #B4B4BA; --text-lo: #8A8A92;
-    --accent: #FF5A1F; --ok: #3DDC84; --warn: #FFC21A; --err: #FF4D4D;
-    --mono: 'JetBrains Mono', Consolas, monospace;
-    --ui: 'Segoe UI', system-ui, sans-serif;
+    --bg0: #050506; --bg1: #1d1d1f; --bg2: #2c2c2e; --bg3: #3a3a3c; --seg-on: #545458;
+    --line: rgba(255, 255, 255, 0.1); --line-strong: rgba(255, 255, 255, 0.16);
+    --text-hi: #f5f5f7; --text-mid: #a1a1a6; --text-lo: #86868b;
+    --accent: #2997ff; --accent-fill: #0071e3; --ok: #30d158; --warn: #ff9f0a; --err: #ff453a;
+    --halo-1: rgba(98, 118, 164, 0.17); --halo-2: rgba(72, 84, 116, 0.11);
+    --mono: "Geist Mono", "Cascadia Mono", Consolas, monospace;
+    --ui: "Google Sans Variable", "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
     /* Page around the mock-up (not part of the app). */
-    --page: #17191D; --page-text: #D6D6DA; --page-dim: #9A9AA2; --desk: #2A2E36; --taskbar: #1F1F1F;
+    --page: #000000; --page-text: #f5f5f7; --page-dim: #86868b; --desk: #1b2333; --taskbar: #1c1c1c;
   }
   * { box-sizing: border-box; }
-  html, body { margin: 0; background: var(--page); color: var(--page-text); font-family: var(--ui); }
+  html, body { margin: 0; background: var(--page); color: var(--page-text); font-family: var(--ui); letter-spacing: -0.01em; -webkit-font-smoothing: antialiased; }
   button { font: inherit; color: inherit; }
 
   /* ---------- page chrome ---------- */
-  .top { display: flex; flex-wrap: wrap; align-items: center; gap: 16px; padding: 16px 24px;
-         border-bottom: 1px solid #262930; }
+  .top { display: flex; flex-wrap: wrap; align-items: center; gap: 16px; padding: 16px 24px; }
   .brand { display: flex; align-items: center; gap: 10px; font-weight: 600; font-size: 15px; margin-right: 8px; }
   .brand svg { display: block; }
   .tabs { display: flex; flex-wrap: wrap; gap: 4px; }
-  .tab { border: 1px solid #30333B; background: #1E2026; padding: 7px 12px; font-family: var(--mono);
-         font-size: 12px; letter-spacing: 0.04em; cursor: pointer; display: flex; align-items: center; gap: 8px; }
-  .tab:hover { background: #262931; }
-  .tab[aria-pressed="true"] { background: #2C2F38; border-color: #5A5E6A; }
-  .tab .dot { width: 8px; height: 8px; display: inline-block; }
+  .tab { border: 0; background: var(--bg1); padding: 7px 14px; border-radius: 999px;
+         font-size: 13px; cursor: pointer; display: flex; align-items: center; gap: 8px; color: var(--text-mid); }
+  .tab:hover { background: var(--bg2); color: var(--text-hi); }
+  .tab[aria-pressed="true"] { background: var(--seg-on); color: var(--text-hi); }
+  .tab .dot { width: 7px; height: 7px; display: inline-block; border-radius: 50%; }
   .play { margin-left: auto; }
   .main { display: flex; flex-wrap: wrap; gap: 24px; padding: 24px; align-items: flex-start; }
   .stage-wrap { flex: 1 1 760px; min-width: 0; }
   .info { flex: 0 1 340px; min-width: 260px; }
   .info h2 { margin: 0 0 4px; font-size: 18px; }
-  .info .kicker { font-family: var(--mono); font-size: 11px; letter-spacing: 0.06em; color: var(--page-dim); }
-  .info p { line-height: 1.55; margin: 10px 0; color: #C9C9CF; }
-  .info .box { border: 1px solid #30333B; padding: 12px 14px; margin-top: 14px; background: #1B1D22; }
+  .info .kicker { font-size: 12px; color: var(--page-dim); }
+  .info p { line-height: 1.55; margin: 10px 0; color: var(--text-mid); }
+  .info .box { padding: 16px 18px; margin-top: 14px; background: var(--bg1); border-radius: 18px; }
   .info .box h3 { margin: 0 0 6px; font-size: 13px; color: var(--page-text); }
-  .info .box ul { margin: 0; padding-left: 18px; line-height: 1.6; color: #C9C9CF; font-size: 14px; }
+  .info .box ul { margin: 0; padding-left: 18px; line-height: 1.6; color: var(--text-mid); font-size: 14px; }
   .sent { font-family: var(--mono); font-size: 12px; line-height: 1.6; min-height: 92px; color: var(--text-mid); }
   .sent .ignored { color: var(--text-lo); }
   .sent .msg { color: var(--text-hi); }
   .note { font-size: 12px; color: var(--page-dim); margin-top: 14px; line-height: 1.5; }
-  kbd { font-family: var(--mono); font-size: 12px; border: 1px solid #3A3D46; padding: 0 4px; background: #23262D; }
+  kbd { font-family: var(--mono); font-size: 12px; padding: 1px 6px; background: var(--bg2); border-radius: 6px; }
 
   /* ---------- desktop mock-up ---------- */
   .scaler { transform-origin: top left; }
-  .desk { position: relative; width: 1100px; height: 720px; background: var(--desk); overflow: hidden;
-          border: 1px solid #30333B; }
+  .desk { position: relative; width: 1100px; height: 720px; overflow: hidden; border-radius: 12px;
+          background: radial-gradient(900px 600px at 30% 20%, #2a3b5c, transparent 70%), radial-gradient(800px 600px at 90% 90%, #3b2a4a, transparent 70%), var(--desk); }
   .taskbar { position: absolute; left: 0; right: 0; bottom: 0; height: 48px; background: var(--taskbar);
              border-top: 1px solid rgba(255,255,255,0.08); display: flex; align-items: center; justify-content: center; }
   .pins { display: flex; gap: 6px; }
@@ -87,84 +90,90 @@
   .menu hr { border: 0; border-top: 1px solid #454545; margin: 4px 0; }
   /* Sarke's own notification card, top-right like NVIDIA's overlay (client_b/toast.cpp, DESIGN.md 9.3). */
   .toasts { position: absolute; right: 16px; top: 16px; z-index: 20; }
-  .toast { position: relative; width: 380px; min-height: 72px; background: var(--bg1); box-shadow: inset 0 0 0 1px var(--line-strong), 0 12px 32px rgba(0,0,0,0.45);
-           display: flex; align-items: center; gap: 14px; padding: 16px 40px 16px 20px; font-family: var(--mono); animation: toastIn 220ms cubic-bezier(0.33, 1, 0.68, 1); }
-  .toast::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: var(--accent); }
-  .toast .logo { width: 40px; height: 40px; flex: none; box-shadow: inset 0 0 0 1px var(--line); }
+  .toast { position: relative; width: 380px; min-height: 72px; background: var(--bg1); border-radius: 18px; box-shadow: inset 0 0 0 1px var(--line), 0 12px 32px rgba(0,0,0,0.45);
+           display: flex; align-items: center; gap: 14px; padding: 16px 40px 22px 16px; animation: toastIn 220ms cubic-bezier(0.33, 1, 0.68, 1); }
+  .toast .logo { width: 40px; height: 40px; flex: none; }
   .toast .logo svg { width: 40px; height: 40px; display: block; }
   .toast .txt { min-width: 0; flex: 1; }
-  .toast .hdr { display: flex; align-items: center; gap: 8px; font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-lo); }
-  .toast .hdr .sq { width: 8px; height: 8px; flex: none; }
+  .toast .hdr { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-lo); }
+  .toast .hdr .sq { width: 7px; height: 7px; flex: none; border-radius: 50%; }
   .toast .hdr .app { color: var(--text-hi); }
-  .toast .t { margin-top: 4px; font-size: 15px; line-height: 20px; color: var(--text-hi); }
-  .toast .b { font-size: 13px; line-height: 18px; color: var(--text-mid); }
-  .toast .x { position: absolute; top: 14px; right: 16px; color: var(--text-lo); font-size: 12px; }
-  .toast .time { position: absolute; left: 4px; right: 0; bottom: 0; height: 2px; background: var(--accent); opacity: 0.8; transform-origin: left;
+  .toast .t { margin-top: 2px; font-size: 17px; line-height: 22px; font-weight: 600; color: var(--text-hi); }
+  .toast .b { font-size: 14px; line-height: 20px; color: var(--text-mid); }
+  .toast .x { position: absolute; top: 12px; right: 16px; color: var(--text-lo); font-size: 12px; }
+  .toast .time { position: absolute; left: 16px; right: 16px; bottom: 8px; height: 2px; border-radius: 999px; background: var(--accent); opacity: 0.9; transform-origin: left;
                  animation: toastTime 5000ms linear forwards; }
   @keyframes toastIn { from { transform: translateX(32px); opacity: 0; } to { transform: none; opacity: 1; } }
   @keyframes toastTime { to { transform: scaleX(0); } }
   .hidden-note { position: absolute; left: 0; right: 0; top: 260px; text-align: center; color: #C9CBD1; font-size: 14px; line-height: 1.6; }
 
   /* ---------- the Sarke viewer window (docs/DESIGN.md section 4, 100 % scale) ---------- */
-  .win { position: absolute; background: var(--bg0); box-shadow: 0 10px 30px rgba(0,0,0,0.45);
-         font-family: var(--mono); color: var(--text-hi); overflow: hidden; }
-  .strip { position: absolute; left: 0; top: 0; right: 0; height: 32px; background: var(--bg0); display: flex; align-items: center; }
-  .strip::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 1px; background: var(--line); }
-  .sq { width: 8px; height: 8px; margin-left: 12px; flex: none; }
-  .word { margin-left: 8px; font-size: 11px; line-height: 14px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-lo); flex: none; }
-  .wtitle { margin-left: 8px; font-size: 13px; line-height: 18px; color: var(--text-hi); white-space: nowrap; overflow: hidden;
+  .win { position: absolute; background: var(--bg0); box-shadow: 0 16px 40px rgba(0,0,0,0.5); border-radius: 8px;
+         font-family: var(--ui); color: var(--text-hi); overflow: hidden; }
+  .strip { position: absolute; left: 0; top: 0; right: 0; height: 44px; background: var(--bg0); display: flex; align-items: center; }
+  .strip .logo { margin-left: 14px; width: 20px; height: 20px; flex: none; display: block; }
+  .strip .name { margin-left: 8px; font-size: 14px; font-weight: 500; flex: none; }
+  .pill { margin-left: 12px; height: 26px; padding: 0 10px; border-radius: 999px; background: var(--bg1); display: inline-flex; align-items: center; gap: 6px; flex: none; }
+  .sq { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+  .word { font-size: 12px; line-height: 16px; color: var(--text-mid); flex: none; }
+  .wtitle { margin-left: 12px; font-size: 14px; line-height: 20px; color: var(--text-mid); white-space: nowrap; overflow: hidden;
             text-overflow: ellipsis; flex: 1 1 auto; min-width: 0; padding-right: 8px; }
-  .tbtn { width: 40px; height: 32px; border: 0; padding: 0; background: transparent; font-family: var(--mono); font-size: 11px;
-          letter-spacing: 0.06em; color: var(--text-mid); cursor: pointer; flex: none; }
-  .tbtn:hover { background: var(--bg2); color: var(--text-hi); }
-  .tbtn.on { color: var(--accent); }
+  .tbtn { height: 26px; min-width: 48px; padding: 0 10px; border: 0; border-radius: 999px; background: transparent; font-size: 14px; font-weight: 500;
+          color: var(--text-mid); cursor: pointer; flex: none; margin-left: 4px; }
+  .tbtn:hover { background: var(--bg1); color: var(--text-hi); }
+  .tbtn.on { background: var(--bg2); color: var(--text-hi); }
   .gap8 { width: 8px; flex: none; }
-  .cbtn { width: 46px; height: 32px; border: 0; padding: 0; background: transparent; display: flex; align-items: center;
+  .cbtn { width: 46px; height: 44px; border: 0; padding: 0; background: transparent; display: flex; align-items: center;
           justify-content: center; cursor: pointer; flex: none; }
   .cbtn svg { display: block; }
   .cbtn svg * { stroke: var(--text-mid); }
   .cbtn svg rect.fill { fill: var(--text-mid); stroke: none; }
-  .cbtn:hover { background: var(--bg2); }
+  .cbtn:hover { background: var(--bg1); }
   .cbtn:hover svg * { stroke: var(--text-hi); }
   .cbtn:hover svg rect.fill { fill: var(--text-hi); }
-  .cbtn.close:hover { background: var(--err); }
-  .content { position: absolute; left: 0; right: 0; top: 32px; bottom: 0; background: var(--bg0); overflow: hidden; }
-  .block { position: absolute; left: 48px; right: 48px; top: 50%; transform: translateY(-50%); }
-  .lbl { font-size: 11px; line-height: 14px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-lo); }
-  .display { margin-top: 8px; display: flex; align-items: flex-start; gap: 4px; }
-  .display .w { font-size: 28px; line-height: 32px; font-weight: 700; letter-spacing: 0.02em; text-transform: uppercase; }
-  .caret { width: 12px; height: 28px; margin-top: 5px; background: var(--accent); flex: none; }
-  .details { margin-top: 12px; display: flex; flex-direction: column; gap: 4px; }
-  .details div { font-size: 13px; line-height: 18px; color: var(--text-mid); }
-  .footer { position: absolute; left: 48px; bottom: 24px; }
+  .cbtn.close:hover { background: #c42b1c; }
+  .cbtn.close:hover svg * { stroke: #ffffff; }
+  .content { position: absolute; left: 0; right: 0; top: 44px; bottom: 0; overflow: hidden;
+             background: radial-gradient(800px 420px at 50% -8%, var(--halo-1), transparent 70%), radial-gradient(640px 460px at 105% 105%, var(--halo-2), transparent 70%), var(--bg0); }
+  .block { position: absolute; left: 32px; right: 32px; top: 50%; transform: translateY(-50%); text-align: center; }
+  .eyebrow { font-size: 17px; line-height: 22px; font-weight: 600; color: var(--text-mid); }
+  .lbl { font-size: 12px; line-height: 16px; color: var(--text-lo); }
+  .display { margin-top: 8px; }
+  .display .w { font-size: 44px; line-height: 48px; font-weight: 700; letter-spacing: -0.03em; }
+  .caret { display: none; }
+  .details { margin-top: 16px; display: flex; flex-direction: column; gap: 2px; }
+  .details div { font-size: 14px; line-height: 20px; color: var(--text-mid); }
+  .hint { margin-top: 24px; font-size: 14px; color: var(--text-mid); display: flex; align-items: center; justify-content: center; gap: 4px; flex-wrap: wrap; }
+  .hint .cap { font-family: var(--mono); font-size: 12px; color: var(--text-hi); background: var(--bg1); border-radius: 6px; padding: 4px 8px; }
+  .hint .t { margin: 0 4px; }
+  .footer { position: absolute; left: 0; right: 0; bottom: 24px; text-align: center; }
   .blink { animation: blink 1060ms steps(1, end) infinite; }
   @keyframes blink { 0% { opacity: 1; } 50% { opacity: 0; } 100% { opacity: 1; } }
   @media (prefers-reduced-motion: reduce) { .blink { animation: none; } }
-  .hud { position: absolute; top: 12px; right: 12px; width: 176px; padding: 10px 12px; background: rgba(11,11,12,0.88);
-         border: 1px solid var(--line); z-index: 3; }
-  .row { height: 18px; display: flex; align-items: center; justify-content: space-between; }
-  .row .v { font-size: 13px; line-height: 18px; font-weight: 700; color: var(--text-hi); }
-  .row .u { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-lo); margin-left: 7px; font-weight: 400; }
+  .hud { position: absolute; top: 12px; right: 12px; width: 188px; padding: 10px 14px; background: rgba(29,29,31,0.9); border-radius: 12px; z-index: 3; }
+  .row { height: 22px; display: flex; align-items: center; justify-content: space-between; }
+  .row .v { font-family: var(--mono); font-size: 13px; line-height: 18px; font-weight: 500; color: var(--text-hi); }
+  .row .u { font-family: var(--ui); font-size: 12px; color: var(--text-lo); margin-left: 4px; font-weight: 400; }
   .stream { position: absolute; display: block; }
   .stream svg { display: block; width: 100%; height: 100%; }
-  .stalled { position: absolute; inset: 0; background: rgba(11,11,12,0.6); display: flex; flex-direction: column; align-items: center;
-             justify-content: center; gap: 8px; z-index: 2; }
-  .stalled .w { font-size: 28px; line-height: 32px; font-weight: 700; letter-spacing: 0.02em; color: var(--warn); }
-  .stalled .d { font-size: 13px; line-height: 18px; color: var(--text-mid); }
+  .stalled { position: absolute; inset: 0; background: rgba(5,5,6,0.62); display: flex; align-items: center; justify-content: center; z-index: 2; }
+  .stalled .cardlet { background: var(--bg1); border-radius: 18px; padding: 24px 28px; display: flex; flex-direction: column; align-items: center; gap: 4px; }
+  .stalled .w { font-size: 28px; line-height: 32px; font-weight: 700; letter-spacing: -0.02em; color: var(--warn); }
+  .stalled .d { font-size: 14px; line-height: 20px; color: var(--text-mid); }
 
   /* ---------- all-stages grid ---------- */
   .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(430px, 1fr)); gap: 20px; }
-  .card { border: 1px solid #30333B; background: #1B1D22; padding: 12px; }
-  .card .mini { position: relative; width: 403px; height: 252px; overflow: hidden; background: var(--desk); }
+  .card { background: var(--bg1); padding: 14px; border-radius: 22px; }
+  .card .mini { position: relative; width: 403px; height: 252px; overflow: hidden; background: var(--desk); border-radius: 12px; }
   .card .mini .win { transform: scale(0.42); transform-origin: top left; left: 0; top: 0; }
   .card h3 { margin: 10px 0 2px; font-size: 14px; display: flex; align-items: center; gap: 8px; }
-  .card p { margin: 0; font-size: 13px; color: #B9B9C0; line-height: 1.5; }
+  .card p { margin: 0; font-size: 13px; color: var(--text-mid); line-height: 1.5; }
 </style>
 </head>
 <body>
 <header class="top">
   <div class="brand">
-    <svg width="22" height="22" viewBox="0 0 16 16" shape-rendering="crispEdges" aria-hidden="true"><rect width="16" height="16" fill="#0B0B0C"/><rect x="2" y="3" width="2" height="8" fill="#EDEDED"/><rect x="3" y="11" width="6" height="2" fill="#EDEDED"/><rect x="8" y="6" width="2" height="5" fill="#EDEDED"/><rect x="11" y="5" width="3" height="8" fill="#FF5A1F"/></svg>
+    <svg width="22" height="22" viewBox="0 0 100 100" aria-hidden="true"><rect width="100" height="100" rx="22" fill="#050506"/><rect x="17" y="17" width="44" height="44" rx="10" fill="#f5f5f7"/><rect x="42.5" y="42.5" width="40" height="40" rx="8" fill="#050506" stroke="#f5f5f7" stroke-width="7"/></svg>
     Sarke · interface preview
   </div>
   <nav class="tabs" id="tabs" aria-label="Stages"></nav>
@@ -183,8 +192,8 @@
             <button class="ti" aria-label="Other app"><span class="ph"></span></button>
             <button class="ti" aria-label="Other app"><span class="ph"></span></button>
             <button class="ti sarke" id="trayIcon" aria-label="Sarke">
-              <svg width="16" height="16" viewBox="0 0 16 16" shape-rendering="crispEdges" aria-hidden="true"><rect width="16" height="16" fill="#0B0B0C"/><rect x="2" y="3" width="2" height="8" fill="#EDEDED"/><rect x="3" y="11" width="6" height="2" fill="#EDEDED"/><rect x="8" y="6" width="2" height="5" fill="#EDEDED"/><rect x="11" y="5" width="3" height="8" fill="#FF5A1F"/></svg>
-              <span class="tooltip" id="trayTip">Sarke · WAITING</span>
+              <svg width="16" height="16" viewBox="0 0 100 100" aria-hidden="true"><rect width="100" height="100" rx="22" fill="#050506"/><rect x="17" y="17" width="44" height="44" rx="10" fill="#f5f5f7"/><rect x="42.5" y="42.5" width="40" height="40" rx="8" fill="#050506" stroke="#f5f5f7" stroke-width="7"/></svg>
+              <span class="tooltip" id="trayTip">Sarke · Waiting</span>
             </button>
             <button class="ti" aria-label="Other app"><span class="ph"></span></button>
           </div>
@@ -198,7 +207,7 @@
               <span class="pin"><span class="ph"></span></span>
               <span class="pin"><span class="ph"></span></span>
               <button class="pin app active" id="taskApp" aria-label="Sarke window">
-                <svg width="24" height="24" viewBox="0 0 16 16" shape-rendering="crispEdges" aria-hidden="true"><rect width="16" height="16" fill="#0B0B0C"/><rect x="2" y="3" width="2" height="8" fill="#EDEDED"/><rect x="3" y="11" width="6" height="2" fill="#EDEDED"/><rect x="8" y="6" width="2" height="5" fill="#EDEDED"/><rect x="11" y="5" width="3" height="8" fill="#FF5A1F"/></svg>
+                <svg width="24" height="24" viewBox="0 0 100 100" aria-hidden="true"><rect width="100" height="100" rx="22" fill="#050506"/><rect x="17" y="17" width="44" height="44" rx="10" fill="#f5f5f7"/><rect x="42.5" y="42.5" width="40" height="40" rx="8" fill="#050506" stroke="#f5f5f7" stroke-width="7"/></svg>
               </button>
               <span class="pin"><span class="ph"></span></span>
             </div>
@@ -217,7 +226,7 @@
   </div>
 
   <aside class="info" id="info">
-    <div class="kicker" id="infoKicker">STAGE 1 OF 6</div>
+    <div class="kicker" id="infoKicker">Stage 1 of 6</div>
     <h2 id="infoTitle"></h2>
     <p id="infoText"></p>
     <div class="box">
@@ -226,53 +235,53 @@
     </div>
     <div class="box" id="sentBox">
       <h3>What this window sends to the other PC</h3>
-      <div class="sent" id="sent"><span class="ignored">Move the mouse over the shared window in STREAM.</span></div>
+      <div class="sent" id="sent"><span class="ignored">Move the mouse over the shared window in Streaming.</span></div>
     </div>
-    <p class="note">Sample values from today's setup: this viewer runs on <b>tabuladze</b> (1920×1200, 150 %), the other PC is <b>172.20.10.3</b>. Colors, sizes and text follow <code>docs/DESIGN.md</code>; the shared window in STREAM is a stand-in for any app on the other PC.</p>
+    <p class="note">Sample values from today's setup: this viewer runs on <b>tabuladze</b> (1920×1200, 150 %), the other PC is <b>172.20.10.3</b>. Colors, sizes and text follow <code>docs/DESIGN.md</code>; the shared window in Streaming is a stand-in for any app on the other PC.</p>
   </aside>
 </div>
 
 <script>
 // ---------- data ----------
-const C = { lo: '#8A8A92', warn: '#FFC21A', ok: '#3DDC84', accent: '#FF5A1F', err: '#FF4D4D' };
+const C = { lo: '#86868b', warn: '#ff9f0a', ok: '#30d158', accent: '#2997ff', err: '#ff453a' };
 const HOST = '172.20.10.3:50501';
 const FOOTER = 'tabuladze · 1920×1200 · 150%';
 const STREAM_TITLE = 'untitled.png — Sketchpad';
 const STAGES = [
-  { id: 'waiting', tab: 'WAITING', word: 'WAITING', sq: C.lo, display: 'WAITING', details: ['looking for host at ' + HOST],
+  { id: 'waiting', tab: 'Waiting', word: 'Waiting', sq: C.lo, display: 'Waiting for the other PC', details: ['Looking for ' + HOST],
     title: 'Waiting for the other PC',
     text: 'Sarke is running but cannot reach the other PC yet. It keeps trying every second on its own, so you can start the two PCs in any order.',
     can: ['Check that both PCs are on the same Wi-Fi.', 'Start Sarke on the other PC.'] },
-  { id: 'connecting', tab: 'CONNECTING', word: 'CONNECTING', sq: C.warn, sqBlink: true, display: 'CONNECTING', details: ['connecting to ' + HOST],
+  { id: 'connecting', tab: 'Connecting', word: 'Connecting', sq: C.warn, sqBlink: true, display: 'Connecting', details: ['Connecting to ' + HOST],
     title: 'Connecting',
-    text: 'A connection attempt is in progress. The yellow square in the title strip blinks while it lasts (usually well under a second).',
-    can: ['Nothing — it switches to LINKED by itself.'] },
-  { id: 'linked', tab: 'LINKED', word: 'LINKED', sq: C.ok, display: 'LINKED', details: ['rtt 14 ms', 'on the other pc press ctrl+alt+shift+w to send a window'],
+    text: 'A connection attempt is in progress. The amber dot in the title strip blinks while it lasts (usually well under a second).',
+    can: ['Nothing — it switches to Linked by itself.'] },
+  { id: 'linked', tab: 'Linked', word: 'Linked', sq: C.ok, display: 'Linked', details: ['Round trip 14 ms'], hint: true,
     title: 'Linked — no window shared yet',
     text: 'The two PCs are connected (green). Sarke’s own card slides in at the top-right: “Connected to host”. Mouse and keyboard can already cross the screen edge; no window is being shown here yet.',
     can: ['On the other PC press <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>W</kbd>: its front window moves here.', 'Click <b>HUD</b> to hide or show the numbers.'] },
-  { id: 'stream', tab: 'STREAM', word: 'STREAM', sq: C.accent, stream: true,
+  { id: 'stream', tab: 'Streaming', word: 'Streaming', sq: C.accent, stream: true,
     title: 'Stream — the other PC’s window, live',
-    text: 'The window from the other PC appears here live (orange square). The app keeps running over there; this window shows its picture and sends your mouse, wheel and keys back to it. Black bars keep the picture’s shape and ignore clicks.',
-    can: ['Move, click or scroll over the picture — see the right panel.', '<b>FIT</b> switches to 1:1 (pixel-exact, cropped).', '<b>HUD</b> shows link quality: RTT, FPS, latency, bandwidth.', 'The close button (×) gives the window back to the other PC.'] },
-  { id: 'stalled', tab: 'STALLED', word: 'STALLED', sq: C.warn, stream: true, stalled: true,
+    text: 'The window from the other PC appears here live (blue dot). The app keeps running over there; this window shows its picture and sends your mouse, wheel and keys back to it. Black bars keep the picture’s shape and ignore clicks.',
+    can: ['Move, click or scroll over the picture — see the right panel.', '<b>Fit</b> switches to 1:1 (pixel-exact, cropped).', '<b>HUD</b> shows link quality: RTT, FPS, latency, bitrate.', 'The close button (×) gives the window back to the other PC.'] },
+  { id: 'stalled', tab: 'Stalled', word: 'Stalled', sq: C.warn, stream: true, stalled: true,
     title: 'Stalled — no new picture',
     text: 'Still connected, but no new frame for more than a second (e.g. the network hiccups). The last picture stays, darkened, with a timer. It recovers by itself.',
     can: ['Wait a moment, or check the Wi-Fi.'] },
-  { id: 'lost', tab: 'LOST', word: 'LOST', sq: C.err, display: 'CONNECTION LOST', details: ['reconnecting'],
+  { id: 'lost', tab: 'Lost', word: 'Connection lost', sq: C.err, display: 'Connection lost', details: ['Reconnecting by itself.'],
     title: 'Connection lost',
     text: 'The connection dropped (red). Sarke’s card at the top-right says “Connection lost”. Sarke reconnects by itself as soon as the other PC is back.',
     can: ['Make sure Sarke still runs on the other PC.', 'Nothing else — it reconnects automatically.'] },
 ];
 const HUD_ROWS = {
-  waiting: [['RTT', '—'], ['FPS', '—'], ['LAT', '—'], ['MBPS', '—'], ['RES', '—'], ['Q', '75'], ['DROP', '—']],
-  linked: [['RTT', '14', 'ms'], ['FPS', '—'], ['LAT', '—'], ['MBPS', '0.0'], ['RES', '—'], ['Q', '75'], ['DROP', '—']],
-  stream: [['RTT', '14', 'ms'], ['FPS', '30'], ['LAT', '38', 'ms'], ['MBPS', '12.4'], ['RES', '1600×900'], ['Q', '75'], ['DROP', '0']],
-  stalled: [['RTT', '14', 'ms'], ['FPS', '0', '', C.err], ['LAT', '38', 'ms'], ['MBPS', '0.0'], ['RES', '1600×900'], ['Q', '75'], ['DROP', '0']],
+  waiting: [['RTT', '—'], ['FPS', '—'], ['Latency', '—'], ['Bitrate', '—'], ['Resolution', '—'], ['Quality', '75'], ['Dropped', '—']],
+  linked: [['RTT', '14', 'ms'], ['FPS', '—'], ['Latency', '—'], ['Bitrate', '0.0', 'Mbps'], ['Resolution', '—'], ['Quality', '75'], ['Dropped', '—']],
+  stream: [['RTT', '14', 'ms'], ['FPS', '30'], ['Latency', '38', 'ms'], ['Bitrate', '12.4', 'Mbps'], ['Resolution', '1600×900'], ['Quality', '75'], ['Dropped', '0']],
+  stalled: [['RTT', '14', 'ms'], ['FPS', '0', '', C.err], ['Latency', '38', 'ms'], ['Bitrate', '0.0', 'Mbps'], ['Resolution', '1600×900'], ['Quality', '75'], ['Dropped', '0']],
 };
 HUD_ROWS.connecting = HUD_ROWS.waiting; HUD_ROWS.lost = HUD_ROWS.waiting;
 
-const LOGO = '<svg width="16" height="16" viewBox="0 0 16 16" shape-rendering="crispEdges" aria-hidden="true"><rect width="16" height="16" fill="#0B0B0C"/><rect x="2" y="3" width="2" height="8" fill="#EDEDED"/><rect x="3" y="11" width="6" height="2" fill="#EDEDED"/><rect x="8" y="6" width="2" height="5" fill="#EDEDED"/><rect x="11" y="5" width="3" height="8" fill="#FF5A1F"/></svg>';
+const LOGO = '<svg width="16" height="16" viewBox="0 0 100 100" aria-hidden="true"><rect width="100" height="100" rx="22" fill="#050506"/><rect x="17" y="17" width="44" height="44" rx="10" fill="#f5f5f7"/><rect x="42.5" y="42.5" width="40" height="40" rx="8" fill="#050506" stroke="#f5f5f7" stroke-width="7"/></svg>';
 
 // The other PC's window, as captured (a stand-in app at 1600×900).
 const SHARED = `<svg viewBox="0 0 1600 900" xmlns="http://www.w3.org/2000/svg" font-family="Segoe UI, system-ui, sans-serif">
@@ -330,17 +339,18 @@ function imageRect(cw, ch, fit) {
 function windowHTML(id, opts) {
   const s = stageById(id);
   const w = opts.w, h = opts.h;
-  const title = s.stream ? STREAM_TITLE : 'sarke';
-  const ch = h - 32;
+  const title = s.stream ? STREAM_TITLE : '';
+  const ch = h - 44;
   let content = '';
   if (s.stream) {
     const r = imageRect(w, ch, opts.fit);
     content += `<div class="stream" data-img style="left:${r.x}px;top:${r.y}px;width:${r.w}px;height:${r.h}px">${SHARED}</div>`;
-    if (s.stalled) content += `<div class="stalled"><div class="w">STALLED</div><div class="d" data-stall>${opts.stallText || '2.4s without frames'}</div></div>`;
+    if (s.stalled) content += `<div class="stalled"><div class="cardlet"><div class="w">Stalled</div><div class="d" data-stall>${opts.stallText || '2.4 s without frames'}</div></div></div>`;
   } else {
-    content += `<div class="block"><div class="lbl">SARKE</div>
+    content += `<div class="block"><div class="eyebrow">Sarke</div>
       <div class="display"><span class="w">${s.display}</span><span class="caret blink"></span></div>
-      <div class="details">${s.details.map(d => `<div>${d}</div>`).join('')}</div></div>
+      <div class="details">${s.details.map(d => `<div>${d}</div>`).join('')}</div>
+      ${s.hint ? '<div class="hint"><span class="t">On the other PC, press</span><span class="cap">Ctrl</span><span class="cap">Alt</span><span class="cap">Shift</span><span class="cap">W</span><span class="t">to send a window</span></div>' : ''}</div>
       <div class="footer lbl">${FOOTER}</div>`;
   }
   if (opts.hud) content += hudHTML(id);
@@ -349,11 +359,11 @@ function windowHTML(id, opts) {
     : '<svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><rect x="0.5" y="0.5" width="9" height="9" fill="none" stroke-width="1"/></svg>';
   return `<div class="win" style="width:${w}px;height:${h}px;left:${opts.x}px;top:${opts.y}px">
     <div class="strip">
-      <span class="sq ${s.sqBlink ? 'blink' : ''}" style="background:${s.sq}"></span>
-      <span class="word">${s.word}</span>
+      ${LOGO.replace('width="16" height="16"', 'width="20" height="20" class="logo"')}<span class="name">Sarke</span>
+      <span class="pill"><span class="sq ${s.sqBlink ? 'blink' : ''}" style="background:${s.sq}"></span><span class="word">${s.word}</span></span>
       <span class="wtitle">${title}</span>
       <button class="tbtn ${opts.hud ? 'on' : ''}" data-act="hud">HUD</button>
-      <button class="tbtn ${opts.fit ? '' : 'on'}" data-act="fit">${opts.fit ? 'FIT' : '1:1'}</button>
+      <button class="tbtn ${opts.fit ? '' : 'on'}" data-act="fit">${opts.fit ? 'Fit' : '1:1'}</button>
       <span class="gap8"></span>
       <button class="cbtn" data-act="min" aria-label="Minimize"><svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><rect class="fill" x="0" y="5" width="10" height="1"/></svg></button>
       <button class="cbtn" data-act="max" aria-label="${opts.maximized ? 'Restore' : 'Maximize'}">${maxGlyph}</button>
@@ -383,7 +393,7 @@ function renderAll() {
   const all = document.getElementById("overview");
   all.innerHTML = '<div class="grid">' + STAGES.map((s, i) => `<div class="card">
       <div class="mini">${windowHTML(s.id, { x: 0, y: 0, w: WIN_W, h: WIN_H, hud: true, fit: true, maximized: false })}</div>
-      <h3><span class="dot" style="display:inline-block;width:8px;height:8px;background:${s.sq}"></span>${i + 1}. ${s.tab}</h3>
+      <h3><span class="dot" style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${s.sq}"></span>${i + 1}. ${s.tab}</h3>
       <p>${s.text}</p></div>`).join('') + '</div>';
   all.querySelectorAll('.win button').forEach(b => { b.tabIndex = -1; b.disabled = true; b.style.cursor = 'default'; });
 }
@@ -392,7 +402,7 @@ function renderTabs() {
   const tabs = document.getElementById('tabs');
   tabs.innerHTML = STAGES.map((s, i) =>
     `<button class="tab" data-stage="${s.id}" aria-pressed="${state.view === 'single' && state.stage === s.id}"><span class="dot" style="background:${s.sq}"></span>${i + 1} ${s.tab}</button>`).join('') +
-    `<button class="tab" data-stage="all" aria-pressed="${state.view === 'all'}">ALL STAGES</button>`;
+    `<button class="tab" data-stage="all" aria-pressed="${state.view === 'all'}">All stages</button>`;
   tabs.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => {
     stopPlay();
     if (t.dataset.stage === 'all') { state.view = 'all'; } else { state.view = 'single'; setStage(t.dataset.stage); }
@@ -403,7 +413,7 @@ function renderTabs() {
 function renderInfo() {
   const s = stageById(state.stage);
   const i = STAGES.indexOf(s);
-  document.getElementById('infoKicker').textContent = state.view === 'all' ? 'OVERVIEW' : `STAGE ${i + 1} OF ${STAGES.length} · ${s.tab}`;
+  document.getElementById('infoKicker').textContent = state.view === 'all' ? 'Overview' : `Stage ${i + 1} of ${STAGES.length} · ${s.tab}`;
   document.getElementById('infoTitle').textContent = state.view === 'all' ? 'All six stages' : s.title;
   document.getElementById('infoText').textContent = state.view === 'all'
     ? 'Every screen the viewer can show, in the order a session goes through them. Pick a tab above to open one at full size and try it.'
@@ -433,7 +443,7 @@ function setStage(id) {
   if (linkUp(id) && !linkUp(before)) toast('Connected to host', HOST, 'connected');
   if (id === 'lost' && before !== 'lost') toast('Connection lost', 'reconnecting', 'lost');
   setSent(stageById(id).stream ? '<span class="ignored">Move the mouse over the picture.</span>'
-                               : '<span class="ignored">Nothing — input is only sent while a window is shown (STREAM).</span>');
+                               : '<span class="ignored">Nothing — input is only sent while a window is shown (Streaming).</span>');
 }
 
 function stallText() { return ((performance.now() - stalledSince) / 1000).toFixed(1) + 's without frames'; }

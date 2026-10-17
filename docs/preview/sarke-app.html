@@ -3,216 +3,247 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Sarke app redesign</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Noto+Sans+Georgian:wght@400;700&display=swap" rel="stylesheet">
+<title>Sarke app preview</title>
 <style>
-  /* Sarke design system (identical to the website). */
+  /* Sarke design system = the website's (sarke-nine.vercel.app, src/app/globals.css): a neutral
+     black / white / grey base, one blue for actions and links, solid rounded tiles, no borders or
+     glows. Dark and light follow the system; the prototype bar can force one. */
+  @font-face { font-family: "Google Sans Variable"; font-style: normal; font-weight: 400 700; font-display: swap;
+               src: url("https://cdn.jsdelivr.net/npm/@fontsource-variable/google-sans@5.3.2/files/google-sans-latin-wght-normal.woff2") format("woff2"); }
+  @font-face { font-family: "Geist Mono"; font-weight: 400; font-display: swap; src: url("https://cdn.jsdelivr.net/npm/geist@1.8.1/dist/fonts/geist-mono/GeistMono-Regular.woff2") format("woff2"); }
+  @font-face { font-family: "Geist Mono"; font-weight: 500; font-display: swap; src: url("https://cdn.jsdelivr.net/npm/geist@1.8.1/dist/fonts/geist-mono/GeistMono-Medium.woff2") format("woff2"); }
+  :root, :root[data-theme="dark"] {
+    --bg: #050506; --bg-alt: #0b0b0d; --bg-raise: #1d1d1f; --bg-high: #2c2c2e; --bg-higher: #3a3a3c; --seg-on: #545458;
+    --halo-1: rgba(98, 118, 164, 0.17); --halo-2: rgba(72, 84, 116, 0.11);
+    --ink: #f5f5f7; --ink-2: #a1a1a6; --ink-3: #86868b;
+    --line: rgba(255, 255, 255, 0.1); --line-strong: rgba(255, 255, 255, 0.16);
+    --accent: #0071e3; --accent-hover: #0077ed; --accent-ink: #2997ff; --on-accent: #ffffff;
+    --ok: #30d158; --warn: #ff9f0a; --err: #ff453a; --scrim: rgba(5, 5, 6, 0.62);
+    --page: #000000; color-scheme: dark;
+  }
+  :root[data-theme="light"] {
+    --bg: #fbfbfd; --bg-alt: #f5f5f7; --bg-raise: #f5f5f7; --bg-high: #e8e8ed; --bg-higher: #dcdce1; --seg-on: #ffffff;
+    --halo-1: rgba(120, 150, 210, 0.16); --halo-2: rgba(150, 160, 200, 0.1);
+    --ink: #1d1d1f; --ink-2: #424245; --ink-3: #6e6e73;
+    --line: rgba(0, 0, 0, 0.1); --line-strong: rgba(0, 0, 0, 0.16);
+    --accent: #0071e3; --accent-hover: #0077ed; --accent-ink: #0066cc; --on-accent: #ffffff;
+    --ok: #248a3d; --warn: #b25000; --err: #d70015; --scrim: rgba(251, 251, 253, 0.7);
+    --page: #e8e8ed; color-scheme: light;
+  }
   :root {
-    --bg0: #0B0B0C; --bg1: #141416; --bg2: #1C1C1F; --line: #2A2A2E; --line-strong: #3A3A40;
-    --text-hi: #EDEDED; --text-mid: #B4B4BA; --text-lo: #8A8A92;
-    --accent: #FF5A1F; --on-accent: #0B0B0C; --ok: #3DDC84; --warn: #FFC21A; --err: #FF4D4D;
-    --font: 'JetBrains Mono', 'Noto Sans Georgian', Consolas, monospace;
-    --t: 120ms;
-    --page: #18191C;
+    --font: "Google Sans Variable", "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+    --font-code: "Geist Mono", "Cascadia Mono", Consolas, monospace;
+    --r-xs: 6px; --r-sm: 12px; --r-md: 18px; --r-lg: 28px;
+    --t: 180ms; --ease: cubic-bezier(0.25, 0.1, 0.25, 1);
   }
   * { box-sizing: border-box; }
-  html, body { margin: 0; background: var(--page); color: var(--text-mid); font-family: var(--font); }
-  button, input, select { font: inherit; color: inherit; }
+  html, body { margin: 0; background: var(--page); color: var(--ink-2); font-family: var(--font); letter-spacing: -0.01em;
+               -webkit-font-smoothing: antialiased; }
+  button, input, select { font: inherit; color: inherit; letter-spacing: inherit; }
   button { cursor: pointer; }
-  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-  .lbl { font-size: 12px; line-height: 16px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-lo); }
-  .hi { color: var(--text-hi); }
-  .readout { font-size: 14px; font-weight: 700; color: var(--text-hi); font-variant-numeric: tabular-nums; }
+  :focus-visible { outline: 2px solid var(--accent-ink); outline-offset: 2px; }
+  .lbl { font-size: 12px; line-height: 16px; color: var(--ink-3); }
+  .hi { color: var(--ink); }
+  .readout { font-size: 14px; font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; }
+  .mono { font-family: var(--font-code); font-weight: 500; font-size: 13px; letter-spacing: 0; }
   @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
 
   /* ---------- prototype controls (outside the app) ---------- */
-  .proto { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding: 12px 24px; color: var(--text-lo); }
-  .proto .seg { display: flex; gap: 2px; }
-  .proto button { background: #222428; border: 0; padding: 6px 10px; font-size: 11px; letter-spacing: 0.06em; color: var(--text-mid); }
-  .proto button[aria-pressed="true"] { background: #34373E; color: var(--text-hi); }
+  .proto { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding: 14px 24px; color: var(--ink-3); }
+  .proto .seg { display: flex; gap: 2px; background: var(--bg-raise); border-radius: 999px; padding: 3px; margin: 0; }
+  .proto button { background: transparent; border: 0; padding: 5px 12px; font-size: 12px; color: var(--ink-2); border-radius: 999px; white-space: nowrap; }
+  .proto button[aria-pressed="true"] { background: var(--seg-on); color: var(--ink); }
   .stage { padding: 8px 24px 32px; }
   .scaler { transform-origin: top left; }
 
-  /* ---------- the app window: no outline, areas separated by fill ---------- */
-  .app { position: relative; width: 1200px; height: 760px; background: var(--bg0); display: grid;
-         grid-template-columns: 232px 1fr; grid-template-rows: 40px 1fr; box-shadow: 0 16px 48px rgba(0,0,0,0.5); overflow: hidden; }
-  .titlebar { grid-column: 1 / 3; display: flex; align-items: center; background: var(--bg1); }
-  .brand { display: flex; align-items: center; gap: 10px; padding-left: 16px; width: 232px; }
-  .brand .mark { width: 8px; height: 8px; background: var(--accent); }
-  .tb-status { display: flex; align-items: center; gap: 8px; margin-left: 24px; }
-  .tb-status .sq { width: 8px; height: 8px; }
-  .caption { margin-left: auto; display: flex; height: 40px; }
-  .caption button { width: 46px; height: 40px; border: 0; background: transparent; display: flex; align-items: center; justify-content: center;
-                    transition: background var(--t) linear; }
-  .caption button svg * { stroke: var(--text-mid); transition: stroke var(--t) linear; }
-  .caption button:hover { background: var(--bg2); }
-  .caption button:hover svg * { stroke: var(--text-hi); }
-  .caption button.close:hover { background: var(--err); }
+  /* ---------- the app window: Windows 11 corners, no border, areas separated by fill ---------- */
+  .app { position: relative; width: 1200px; height: 760px; background: var(--bg); display: grid; border-radius: 12px;
+         grid-template-columns: 232px 1fr; grid-template-rows: 44px 1fr; box-shadow: 0 24px 64px rgba(0,0,0,0.45); overflow: hidden; }
+  .titlebar { grid-column: 1 / 3; display: flex; align-items: center; background: var(--bg); }
+  .brand { display: flex; align-items: center; gap: 8px; padding-left: 14px; width: 232px; }
+  .brand .name { font-size: 14px; font-weight: 500; color: var(--ink); }
+  .brand .role { font-size: 14px; color: var(--ink-2); }
+  .tb-status { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; border-radius: 999px; background: var(--bg-raise); }
+  .tb-status .sq { width: 7px; height: 7px; border-radius: 50%; }
+  .tb-status .lbl { color: var(--ink-2); }
+  .caption { margin-left: auto; display: flex; height: 44px; }
+  .caption button { width: 46px; height: 44px; border: 0; background: transparent; display: flex; align-items: center; justify-content: center;
+                    transition: background var(--t) var(--ease); }
+  .caption button svg * { stroke: var(--ink-2); }
+  .caption button:hover { background: var(--bg-raise); }
+  .caption button:hover svg * { stroke: var(--ink); }
+  .caption button.close:hover { background: #c42b1c; }
+  .caption button.close:hover svg * { stroke: #ffffff; }
 
-  .nav { background: var(--bg1); display: flex; flex-direction: column; padding: 8px 0 16px; }
-  .nav .item { display: flex; align-items: center; gap: 12px; height: 40px; padding: 0 16px 0 18px; border: 0; background: transparent; position: relative;
-               text-align: left; color: var(--text-mid); font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase;
-               transition: background var(--t) linear, color var(--t) linear; }
+  .nav { background: var(--bg); display: flex; flex-direction: column; gap: 2px; padding: 8px 12px 16px; }
+  .nav .item { display: flex; align-items: center; gap: 12px; height: 38px; padding: 0 12px; border: 0; background: transparent; border-radius: 10px;
+               text-align: left; color: var(--ink-2); font-size: 14px; transition: background var(--t) var(--ease), color var(--t) var(--ease); }
   .nav .item svg * { stroke: currentColor; }
-  .nav .item:hover { background: var(--bg2); color: var(--text-hi); }
-  .nav .item[aria-current="page"] { background: var(--bg2); color: var(--text-hi); }
-  .nav .item[aria-current="page"]::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 2px; background: var(--accent); }
-  .nav .group { padding: 16px 18px 8px; }
-  .peer { margin: auto 12px 0; background: var(--bg0); padding: 12px; display: flex; flex-direction: column; gap: 6px; }
+  .nav .item:hover { background: var(--bg-raise); color: var(--ink); }
+  .nav .item[aria-current="page"] { background: var(--bg-raise); color: var(--ink); font-weight: 500; }
+  .peer { margin: auto 0 0; background: var(--bg-raise); padding: 14px 16px; border-radius: var(--r-md); display: flex; flex-direction: column; gap: 4px; }
   .peer .row1 { display: flex; align-items: center; gap: 8px; }
-  .peer .sq { width: 8px; height: 8px; }
+  .peer .sq { width: 7px; height: 7px; border-radius: 50%; }
 
-  .content { position: relative; overflow: hidden; background: var(--bg0); }
-  .grid-bg { background-image:
-      linear-gradient(to right, rgba(42,42,46,0.4) 1px, transparent 1px),
-      linear-gradient(to bottom, rgba(42,42,46,0.4) 1px, transparent 1px);
-    background-size: 96px 96px; }
+  .content { position: relative; overflow: hidden; background: var(--bg); }
+  .grid-bg { background-image: radial-gradient(1100px 560px at 50% -8%, var(--halo-1), transparent 70%),
+                               radial-gradient(900px 640px at 105% 105%, var(--halo-2), transparent 70%); }
   .page { position: absolute; inset: 0; overflow: auto; }
   .page[hidden] { display: none; }
-  .pad { padding: 48px 48px 32px; }
-  h2 { margin: 0; font-size: 40px; line-height: 1.1; font-weight: 700; text-transform: uppercase; color: var(--text-hi); }
-  h3 { margin: 0; font-size: 18px; font-weight: 700; text-transform: uppercase; color: var(--text-hi); }
-  .body { font-size: 14px; line-height: 1.6; color: var(--text-mid); }
+  .pad { padding: 40px 40px 32px; }
+  h2 { margin: 0; font-size: 40px; line-height: 1.1; font-weight: 700; letter-spacing: -0.025em; color: var(--ink); }
+  h3 { margin: 0; font-size: 19px; font-weight: 600; letter-spacing: -0.015em; color: var(--ink); }
+  .body { font-size: 15px; line-height: 1.5; color: var(--ink-2); }
 
-  /* ---------- stream page: state hero ---------- */
-  .hero { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 48px; align-items: center; height: 100%; padding: 48px; }
-  .hero .disp { margin-top: 12px; display: flex; align-items: flex-start; gap: 8px; }
-  .hero .disp .w { font-size: 64px; line-height: 64px; font-weight: 700; letter-spacing: -0.01em; text-transform: uppercase; color: var(--text-hi); }
-  .caret { width: 8px; height: 46px; margin-top: 9px; background: var(--accent); flex: none; animation: blink 1060ms steps(1, end) infinite; }
-  @keyframes blink { 50% { opacity: 0; } }
-  .hero .details { margin-top: 24px; display: flex; flex-direction: column; gap: 6px; font-size: 14px; color: var(--text-mid); }
-  .hero .details kbd { font-family: var(--font); background: var(--bg2); color: var(--text-hi); padding: 2px 6px; font-size: 12px; }
-  .hero .actions { margin-top: 32px; display: flex; gap: 12px; flex-wrap: wrap; }
-  .btn { height: 44px; padding: 0 20px; border: 0; font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase;
-         display: inline-flex; align-items: center; gap: 10px; transition: background var(--t) linear, color var(--t) linear; text-decoration: none; }
-  .btn.primary { background: var(--accent); color: var(--on-accent); font-weight: 700; }
-  .btn.primary:hover { background: var(--text-hi); }
-  .btn.secondary { background: var(--bg2); color: var(--text-hi); }
-  .btn.secondary:hover { background: var(--line-strong); }
-  .btn.small { height: 32px; padding: 0 14px; }
-  .foot { position: absolute; left: 48px; bottom: 24px; }
+  /* ---------- stream page: state hero, centred like the website's ---------- */
+  .hero { display: flex; flex-direction: column; align-items: center; text-align: center; height: 100%; padding: 56px 48px 72px; }
+  .hero .eyebrow { font-size: 19px; font-weight: 600; color: var(--ink-2); }
+  .hero .disp { margin-top: 6px; }
+  .hero .disp .w { font-size: 56px; line-height: 1.05; font-weight: 700; letter-spacing: -0.035em; color: var(--ink); }
+  .caret { display: none; }
+  .hero .details { margin-top: 14px; display: flex; flex-direction: column; gap: 4px; font-size: 15px; color: var(--ink-2); }
+  .hero .details kbd { font-family: var(--font-code); background: var(--bg-raise); color: var(--ink); padding: 3px 8px; font-size: 12px; border-radius: var(--r-xs); }
+  .hero .actions { margin-top: 22px; display: flex; gap: 16px; flex-wrap: wrap; align-items: center; justify-content: center; }
+  .hero .map { margin-top: 28px; border-radius: var(--r-lg); }
+  .btn { height: 40px; padding: 0 20px; border: 0; font-size: 15px; font-weight: 500; border-radius: 999px;
+         display: inline-flex; align-items: center; gap: 8px; transition: background var(--t) var(--ease), color var(--t) var(--ease); text-decoration: none; }
+  .btn.primary { background: var(--accent); color: var(--on-accent); }
+  .btn.primary:hover { background: var(--accent-hover); }
+  .btn.secondary { background: var(--bg-high); color: var(--ink); }
+  .btn.secondary:hover { background: var(--bg-higher); }
+  .btn.link { background: transparent; color: var(--accent-ink); padding: 0 4px; }
+  .btn.link:hover { text-decoration: underline; }
+  .btn.small { height: 32px; padding: 0 14px; font-size: 14px; }
+  .foot { position: absolute; left: 0; right: 0; bottom: 20px; text-align: center; }
   .blinking { animation: blink 1060ms steps(1, end) infinite; }
+  @keyframes blink { 50% { opacity: 0; } }
 
   /* little arrangement map (hero + displays page) */
   /* No text selection on the map: a selected label would turn the next drag into the browser's own text drag. */
-  .map { position: relative; background-color: var(--bg0); user-select: none; -webkit-user-select: none; }
-  .mon { position: absolute; background: var(--bg2); display: flex; flex-direction: column; justify-content: space-between; padding: 8px 10px; }
-  .mon .num { font-size: 22px; font-weight: 700; color: var(--text-hi); line-height: 1; }
-  .mon.peer-mon { background: var(--bg1); }
-  .mon.peer-mon::before { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 3px; background: var(--accent); }
+  .map { position: relative; background-color: var(--bg-raise); user-select: none; -webkit-user-select: none; }
+  .mon { position: absolute; background: var(--bg-high); display: flex; flex-direction: column; justify-content: space-between; padding: 7px 9px;
+         border-radius: 9px; }
+  .mon .num { font-size: 17px; font-weight: 600; color: var(--ink); line-height: 1; }
+  .mon .lbl { color: var(--ink-2); }
+  .mon.peer-mon { background: var(--bg-high); box-shadow: inset 0 0 0 2px var(--accent-ink); }
+  .mon.peer-mon .num { color: var(--accent-ink); }
   .mon.dim { opacity: 0.35; }
-  .mon.lost::before { background: var(--err); }
-  .mon.dragging { cursor: grabbing; opacity: 0.85; }
-  .drag-group { position: absolute; cursor: grab; touch-action: none; }
-  .glow { position: absolute; pointer-events: none; }
-  .ghost { position: absolute; background: rgba(255,90,31,0.10); pointer-events: none; }
+  .mon.lost { box-shadow: inset 0 0 0 2px var(--err); }
+  .mon.dragging { cursor: grabbing; opacity: 0.92; }
+  .glow { position: absolute; pointer-events: none; border-radius: 999px; }
 
   /* ---------- stream page: live picture ---------- */
-  .cmdbar { position: absolute; left: 0; right: 0; top: 0; height: 40px; display: flex; align-items: center; gap: 2px; padding: 0 12px; background: var(--bg0); z-index: 4; }
-  .cmd { height: 32px; padding: 0 12px; border: 0; background: transparent; font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-mid);
-         transition: background var(--t) linear, color var(--t) linear; display: inline-flex; align-items: center; gap: 8px; }
-  .cmd:hover { background: var(--bg2); color: var(--text-hi); }
-  .cmd.on { color: var(--accent); }
-  .cmdbar .title { margin-left: 12px; font-size: 13px; color: var(--text-hi); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .cmdbar { position: absolute; left: 0; right: 0; top: 0; height: 44px; display: flex; align-items: center; gap: 4px; padding: 0 12px; background: var(--bg); z-index: 4; }
+  .cmd { height: 30px; padding: 0 12px; border: 0; background: transparent; font-size: 14px; font-weight: 500; color: var(--ink-2); border-radius: 999px;
+         transition: background var(--t) var(--ease), color var(--t) var(--ease); display: inline-flex; align-items: center; gap: 8px; }
+  .cmd:hover { background: var(--bg-raise); color: var(--ink); }
+  .cmd.on { background: var(--bg-high); color: var(--ink); }
+  .cmdbar .title { margin-left: 8px; font-size: 14px; color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .cmdbar .spacer { flex: 1; }
-  .picture-area { position: absolute; left: 0; right: 0; top: 40px; bottom: 0; overflow: hidden; background: var(--bg0); }
+  .picture-area { position: absolute; left: 0; right: 0; top: 44px; bottom: 0; overflow: hidden; background: var(--bg); }
   .pic { position: absolute; }
   .pic svg { display: block; width: 100%; height: 100%; }
-  .band { position: absolute; left: 0; right: 0; background-color: var(--bg0); }
-  .hud { position: absolute; top: 12px; right: 12px; width: 192px; background: rgba(20,20,22,0.92); z-index: 3; }
-  .hud .hdr { height: 32px; display: flex; align-items: center; justify-content: space-between; padding: 0 12px; box-shadow: inset 0 -1px 0 var(--line-strong); }
-  .hud .hdr .sq { width: 8px; height: 8px; }
-  .hud .r { height: 24px; display: flex; align-items: center; justify-content: space-between; padding: 0 12px; }
-  .hud .r + .r { box-shadow: inset 0 1px 0 var(--line); }
-  .hud .u { font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-lo); margin-left: 6px; font-weight: 400; }
-  .stall { position: absolute; inset: 0; background: rgba(11,11,12,0.6); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; z-index: 2; }
-  .stall .w { font-size: 40px; font-weight: 700; color: var(--warn); }
+  .band { position: absolute; left: 0; right: 0; background-color: var(--bg); }
+  .hud { position: absolute; top: 12px; right: 12px; width: 196px; background: color-mix(in srgb, var(--bg-raise) 90%, transparent); z-index: 3;
+         border-radius: var(--r-sm); padding: 8px 0; }
+  .hud .hdr { display: none; }
+  .hud .r { height: 22px; display: flex; align-items: center; justify-content: space-between; padding: 0 14px; }
+  .hud .r .readout { font-family: var(--font-code); font-weight: 500; font-size: 13px; letter-spacing: 0; }
+  .hud .u { font-family: var(--font); font-size: 12px; color: var(--ink-3); margin-left: 4px; font-weight: 400; }
+  .stall { position: absolute; inset: 0; background: var(--scrim); display: flex; align-items: center; justify-content: center; z-index: 2; }
+  .stall .cardlet { background: var(--bg-raise); border-radius: var(--r-md); padding: 24px 28px; display: flex; flex-direction: column; align-items: center; gap: 4px; }
+  .stall .w { font-size: 28px; font-weight: 700; letter-spacing: -0.02em; color: var(--warn); }
 
   /* ---------- displays page ---------- */
-  .disp-layout { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 32px; margin-top: 32px; }
-  .card { background: var(--bg1); padding: 16px; }
-  .disp-layout .card + .card { margin-top: 12px; }
-  .seg { display: flex; gap: 2px; margin-top: 8px; }
-  .seg button { flex: 1; height: 32px; border: 0; background: var(--bg2); font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-mid);
-                transition: background var(--t) linear, color var(--t) linear; }
-  .seg button:hover { color: var(--text-hi); }
-  .seg button[aria-pressed="true"] { background: var(--accent); color: var(--on-accent); font-weight: 700; }
-  .kv { display: flex; justify-content: space-between; align-items: baseline; padding: 6px 0; }
+  .disp-layout { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 16px; margin-top: 28px; }
+  .card { background: var(--bg-raise); padding: 20px; border-radius: var(--r-lg); }
+  .disp-layout .card + .card { margin-top: 16px; }
+  .seg { display: flex; gap: 0; margin-top: 8px; background: var(--bg-high); border-radius: 999px; padding: 2px; }
+  .seg button { flex: 1; height: 28px; border: 0; background: transparent; font-size: 14px; font-weight: 500; color: var(--ink-2); border-radius: 999px;
+                transition: background var(--t) var(--ease), color var(--t) var(--ease); }
+  .seg button:hover { color: var(--ink); background: var(--bg-higher); }
+  .seg button[aria-pressed="true"] { background: var(--seg-on); color: var(--ink); }
+  .seg button:disabled { opacity: 0.38; cursor: not-allowed; }
+  .seg button:disabled:hover { color: var(--ink-2); background: transparent; }
+  .kv { display: flex; justify-content: space-between; align-items: center; padding: 7px 0; }
   .kv + .kv { box-shadow: inset 0 1px 0 var(--line); }
   .monlist { margin-top: 32px; }
-  .monrow { display: grid; grid-template-columns: 40px 1fr auto; align-items: center; gap: 12px; padding: 12px 16px; background: var(--bg1); }
-  .monrow + .monrow { margin-top: 2px; }
-  .monrow .n { font-size: 20px; font-weight: 700; color: var(--text-hi); }
-  .tag { font-size: 11px; letter-spacing: 0.08em; padding: 2px 6px; background: var(--bg2); color: var(--text-mid); text-transform: uppercase; }
-  .seg button:disabled { opacity: 0.45; cursor: not-allowed; }
-  .seg button:disabled:hover { color: var(--text-mid); }
+  .monrow { display: grid; grid-template-columns: 40px 1fr auto; align-items: center; gap: 12px; padding: 12px 16px; background: var(--bg-raise); border-radius: var(--r-md); }
+  .monrow + .monrow { margin-top: 8px; }
+  .monrow .n { font-size: 20px; font-weight: 700; color: var(--ink); }
+  .tag { font-size: 12px; padding: 3px 9px; background: var(--bg-high); color: var(--ink-2); border-radius: 999px; font-weight: 500; vertical-align: middle; }
   .note { display: block; margin-top: 8px; }
   .glowset { position: absolute; inset: 0; pointer-events: none; }
-  .zone { position: absolute; box-shadow: inset 0 0 0 1px var(--line-strong); pointer-events: none; }
-  .zone.hot { background: rgba(255,90,31,0.10); box-shadow: inset 0 0 0 1px rgba(255,90,31,0.7); }
-  .ident { position: absolute; display: flex; align-items: center; justify-content: center; font-size: 44px; font-weight: 700; color: var(--text-hi);
-           background: rgba(11,11,12,0.75); box-shadow: inset 0 0 0 3px var(--accent); pointer-events: none; z-index: 3; }
-  .live { position: absolute; left: 12px; top: 12px; display: flex; align-items: center; gap: 8px; pointer-events: none; }
-  .live .sq { width: 8px; height: 8px; background: var(--ok); }
-  .live .sq.sample { background: var(--text-lo); }
-  .msg { margin-top: 16px; font-size: 13px; line-height: 18px; color: var(--text-mid); }
-  .monbtns { display: flex; gap: 8px; flex-wrap: wrap; }
+  .zone { position: absolute; box-shadow: inset 0 0 0 1.5px var(--line-strong); pointer-events: none; border-radius: 9px; }
+  .zone.hot { background: color-mix(in srgb, var(--accent) 16%, transparent); box-shadow: inset 0 0 0 1.5px var(--accent-ink); }
+  .ident { position: absolute; display: flex; align-items: center; justify-content: center; font-size: 44px; font-weight: 700; color: var(--ink);
+           background: color-mix(in srgb, var(--bg-raise) 92%, transparent); box-shadow: inset 0 0 0 2px var(--accent-ink); border-radius: 9px; pointer-events: none; z-index: 3; }
+  .live { position: absolute; left: 20px; top: 18px; display: flex; align-items: center; gap: 8px; pointer-events: none; }
+  .live .sq { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); }
+  .live .sq.sample { background: var(--ink-3); }
+  .msg { margin-top: 14px; font-size: 14px; line-height: 20px; color: var(--ink-2); }
+  .monbtns { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
 
   /* ---------- settings page ---------- */
-  .settings { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 32px; }
+  .settings { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-top: 28px; }
   .setrow { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 12px 0; }
   .setrow + .setrow { box-shadow: inset 0 1px 0 var(--line); }
-  .setrow .t { font-size: 13px; color: var(--text-hi); }
-  .setrow .d { font-size: 12px; color: var(--text-lo); margin-top: 2px; }
-  .switch { width: 40px; height: 22px; border: 0; background: var(--bg2); position: relative; flex: none; transition: background var(--t) linear; }
-  .switch::after { content: ""; position: absolute; top: 4px; left: 4px; width: 14px; height: 14px; background: var(--text-mid); transition: left var(--t) linear, background var(--t) linear; }
-  .switch[aria-checked="true"] { background: var(--accent); }
-  .switch[aria-checked="true"]::after { left: 22px; background: var(--on-accent); }
+  .setrow .t { font-size: 15px; color: var(--ink); }
+  .setrow .d { font-size: 13px; color: var(--ink-3); margin-top: 2px; }
+  .switch { width: 44px; height: 26px; border: 0; background: var(--bg-higher); position: relative; flex: none; border-radius: 999px; transition: background var(--t) var(--ease); }
+  .switch::after { content: ""; position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; border-radius: 50%; background: #ffffff;
+                   box-shadow: 0 1px 3px rgba(0,0,0,0.25); transition: left var(--t) var(--ease); }
+  .switch[aria-checked="true"] { background: var(--ok); }
+  .switch[aria-checked="true"]::after { left: 21px; }
   .switch[disabled] { opacity: 0.6; cursor: not-allowed; }
-  .keycap { font-size: 12px; background: var(--bg2); color: var(--text-hi); padding: 4px 8px; white-space: nowrap; }
-  input[type="text"] { background: var(--bg2); border: 0; padding: 8px 10px; color: var(--text-hi); width: 170px; }
-  input[type="range"] { width: 150px; accent-color: #FF5A1F; }
+  .keycap { font-family: var(--font-code); font-size: 12px; background: var(--bg-high); color: var(--ink); padding: 5px 9px; white-space: nowrap; border-radius: var(--r-xs); letter-spacing: 0; }
+  input[type="range"] { width: 150px; accent-color: var(--accent); }
 
   /* ---------- Sarke notification: a card at the top-right, like NVIDIA's overlay (native: client_b/toast.cpp) ---------- */
-  .toast { position: fixed; top: 16px; right: 16px; width: 380px; min-height: 72px; z-index: 50; background: var(--bg1);
-           box-shadow: inset 0 0 0 1px var(--line-strong), 0 12px 32px rgba(0,0,0,0.45); display: flex; align-items: center; gap: 14px;
-           padding: 16px 40px 16px 20px; cursor: pointer; animation: tin 220ms cubic-bezier(0.33, 1, 0.68, 1); }
-  .toast::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: var(--accent); }
-  .toast .logo { width: 40px; height: 40px; flex: none; box-shadow: inset 0 0 0 1px var(--line); }
+  .toast { position: fixed; top: 16px; right: 16px; width: 380px; min-height: 72px; z-index: 50; background: var(--bg-raise); border-radius: var(--r-md);
+           box-shadow: inset 0 0 0 1px var(--line), 0 12px 32px rgba(0,0,0,0.35); display: flex; align-items: center; gap: 14px;
+           padding: 16px 40px 22px 16px; cursor: pointer; animation: tin 220ms cubic-bezier(0.33, 1, 0.68, 1); }
+  .toast .logo { width: 40px; height: 40px; flex: none; }
   .toast .logo svg { width: 40px; height: 40px; display: block; }
   .toast .txt { min-width: 0; flex: 1; }
-  .toast .hd { display: flex; align-items: center; gap: 8px; }
-  .toast .hd .sq { width: 8px; height: 8px; flex: none; }
-  .toast .t1 { margin-top: 4px; font-size: 15px; line-height: 20px; color: var(--text-hi); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .toast .t2 { font-size: 13px; line-height: 18px; color: var(--text-mid); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .toast .x { position: absolute; top: 8px; right: 8px; width: 24px; height: 24px; border: 0; background: transparent; display: flex; align-items: center; justify-content: center; }
-  .toast .x svg * { stroke: var(--text-lo); }
-  .toast .x:hover { background: var(--bg2); }
-  .toast .x:hover svg * { stroke: var(--text-hi); }
-  .toast .time { position: absolute; left: 4px; right: 0; bottom: 0; height: 2px; background: var(--accent); opacity: 0.8; transform-origin: left;
-                 animation: run linear forwards; }
-  .toast:hover .time { animation-play-state: paused; opacity: 0.35; }
+  .toast .hd { display: flex; align-items: center; gap: 6px; }
+  .toast .hd .sq { width: 7px; height: 7px; flex: none; border-radius: 50%; }
+  .toast .hd .lbl.hi { color: var(--ink); }
+  .toast .t1 { margin-top: 2px; font-size: 17px; line-height: 22px; font-weight: 600; letter-spacing: -0.01em; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .toast .t2 { font-size: 14px; line-height: 20px; color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .toast .x { position: absolute; top: 10px; right: 10px; width: 24px; height: 24px; border: 0; background: transparent; border-radius: 50%;
+              display: flex; align-items: center; justify-content: center; }
+  .toast .x svg * { stroke: var(--ink-3); }
+  .toast .x:hover { background: var(--bg-higher); }
+  .toast .x:hover svg * { stroke: var(--ink); }
+  .toast .time { position: absolute; left: 16px; right: 16px; bottom: 8px; height: 2px; border-radius: 999px; background: var(--accent-ink); opacity: 0.9;
+                 transform-origin: left; animation: run linear forwards; }
+  .toast::after { content: ""; position: absolute; left: 16px; right: 16px; bottom: 8px; height: 2px; border-radius: 999px; background: var(--line); }
+  .toast:hover .time { animation-play-state: paused; opacity: 0.4; }
   .toast.out { animation: tout 180ms ease-in forwards; }
   @keyframes tin { from { transform: translateX(32px); opacity: 0; } }
   @keyframes tout { to { transform: translateX(32px); opacity: 0; } }
   @keyframes run { to { transform: scaleX(0); } }
-  .tray-note { position: fixed; left: 50%; top: 40%; transform: translate(-50%, -50%); background: var(--bg1); padding: 32px;
+  .tray-note { position: fixed; left: 50%; top: 40%; transform: translate(-50%, -50%); background: var(--bg-raise); padding: 28px; border-radius: var(--r-lg);
                display: flex; flex-direction: column; gap: 16px; align-items: flex-start; max-width: 420px; }
   .tray-note[hidden], .stage[hidden] { display: none; }
-  .btn:disabled { opacity: 0.4; cursor: default; }
+  .btn:disabled { opacity: 0.38; cursor: default; }
   .btn.primary:disabled:hover { background: var(--accent); }
-  .btn.secondary:disabled:hover { background: var(--bg2); }
-  .mon.peer-mon:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .btn.secondary:disabled:hover { background: var(--bg-high); }
+  .mon.peer-mon:focus-visible { outline: 2px solid var(--accent-ink); outline-offset: 2px; }
 </style>
 </head>
 <body>
 <div class="proto" aria-label="Prototype controls (not part of the app)">
-  <span class="lbl">PROTOTYPE · CONNECTION</span>
+  <span class="lbl">Prototype · connection</span>
   <div class="seg" id="protoStates"></div>
-  <span class="lbl">THIS PC HAS</span>
+  <span class="lbl">This PC has</span>
   <div class="seg" id="protoMons">
-    <button data-mons="1" aria-pressed="true">1 MONITOR</button><button data-mons="2" aria-pressed="false">2 MONITORS</button>
+    <button data-mons="1" aria-pressed="true">1 monitor</button><button data-mons="2" aria-pressed="false">2 monitors</button>
+  </div>
+  <span class="lbl">Theme</span>
+  <div class="seg" id="protoTheme">
+    <button data-theme="system" aria-pressed="true">System</button><button data-theme="dark" aria-pressed="false">Dark</button><button data-theme="light" aria-pressed="false">Light</button>
   </div>
 </div>
 
@@ -221,8 +252,8 @@
     <div class="app" id="app">
       <header class="titlebar">
         <div class="brand">
-          <svg width="16" height="16" viewBox="0 0 16 16" shape-rendering="crispEdges" aria-hidden="true"><rect width="16" height="16" fill="#0B0B0C"/><rect x="2" y="3" width="2" height="8" fill="#EDEDED"/><rect x="3" y="11" width="6" height="2" fill="#EDEDED"/><rect x="8" y="6" width="2" height="5" fill="#EDEDED"/><rect x="11" y="5" width="3" height="8" fill="#FF5A1F"/></svg>
-          <span class="lbl hi">SARKE</span><span class="lbl">· HOST</span>
+          <svg width="20" height="20" viewBox="0 0 100 100" aria-hidden="true"><rect width="100" height="100" rx="22" fill="#050506"/><rect x="17" y="17" width="44" height="44" rx="10" fill="#f5f5f7"/><rect x="42.5" y="42.5" width="40" height="40" rx="8" fill="#050506" stroke="#f5f5f7" stroke-width="7"/></svg>
+          <span class="name">Sarke</span><span class="role">· Host</span>
         </div>
         <div class="tb-status"><span class="sq" id="tbSq"></span><span class="lbl" id="tbText"></span></div>
         <div class="caption">
@@ -237,7 +268,7 @@
         <button class="item" data-page="displays"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><rect x="0.5" y="4.5" width="7" height="6" stroke-width="1.2"/><rect x="8.5" y="2.5" width="7" height="8" stroke-width="1.2"/><path d="M3 13.5 H6 M10 13.5 H14" stroke-width="1.2"/></svg>Displays</button>
         <button class="item" data-page="settings"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M2 4.5 H14 M2 11.5 H14" stroke-width="1.2"/><rect x="4.5" y="2.5" width="3" height="4" stroke-width="1.2"/><rect x="9.5" y="9.5" width="3" height="4" stroke-width="1.2"/></svg>Settings</button>
         <div class="peer" aria-label="Other PC">
-          <span class="lbl">OTHER PC</span>
+          <span class="lbl">Other PC</span>
           <div class="row1"><span class="sq" id="peerSq"></span><span class="readout" id="peerName">tabuladze</span></div>
           <span class="lbl" id="peerAddr">172.20.10.2 · 1920×1200 · 150%</span>
         </div>
@@ -249,47 +280,46 @@
         <!-- DISPLAYS -->
         <section class="page grid-bg" id="page-displays" hidden>
           <div class="pad">
-            <span class="lbl">SETTINGS · DISPLAYS</span>
+            <span class="lbl">Settings · Displays</span>
             <h2 style="margin-top:8px">Where is the other PC?</h2>
-            <p class="body" style="max-width:680px;margin:12px 0 0">Drag the other PC to the side of your screens where it really stands. The orange edge is where your mouse crosses over. Arrow keys work too.</p>
+            <p class="body" style="max-width:680px;margin:12px 0 0">Drag the other PC to the side of your screens where it really stands. The blue edge is where your mouse crosses over. Arrow keys work too.</p>
             <div class="disp-layout">
               <div>
-                <div class="map grid-bg" id="arrMap" style="height:400px"></div>
+                <div class="map card-map" id="arrMap" style="height:400px;border-radius:28px"></div>
                 <div class="msg" id="dispMsg"></div>
               </div>
               <div>
                 <div class="card">
-                  <span class="lbl">OTHER PC IS</span>
+                  <span class="lbl">Other PC is</span>
                   <div class="seg" id="sideSeg">
-                    <button data-side="left">LEFT</button><button data-side="right">RIGHT</button><button data-side="top">TOP</button><button data-side="bottom">BOTTOM</button>
+                    <button data-side="left">Left</button><button data-side="right">Right</button><button data-side="top">Top</button><button data-side="bottom">Bottom</button>
                   </div>
-                  <span class="lbl note" id="sideNote">TOP / BOTTOM: NEXT HOST UPDATE</span>
-                  <span class="lbl" style="display:block;margin-top:16px">THIS PC IS THE</span>
+                  <span class="lbl note" id="sideNote">Top and bottom: next host update.</span>
+                  <span class="lbl" style="display:block;margin-top:16px">This PC is the</span>
                   <div class="seg" id="roleSeg">
-                    <button data-role="host">HOST</button><button data-role="client">CLIENT</button>
+                    <button data-role="host">Host</button><button data-role="client">Client</button>
                   </div>
                 </div>
                 <div class="card">
-                  <div class="kv"><span class="lbl">MOUSE CROSSES</span><span class="readout" id="rdEdge">RIGHT EDGE</span></div>
-                  <div class="kv"><span class="lbl">CROSSING EDGE</span><span class="readout" id="rdLen">1080 PX</span></div>
-                  <div class="kv"><span class="lbl">CLIENT_SIDE</span><span class="readout" id="rdSide">"right"</span></div>
-                  <div class="kv"><span class="lbl">STATUS</span><span class="readout" id="rdState">SAVED</span></div>
+                  <div class="kv"><span class="lbl">Mouse crosses</span><span class="readout" id="rdEdge">Right edge</span></div>
+                  <div class="kv"><span class="lbl">Crossing edge</span><span class="readout mono" id="rdLen">1080 px</span></div>
+                  <div class="kv"><span class="lbl">client_side</span><span class="readout mono" id="rdSide">"right"</span></div>
+                  <div class="kv"><span class="lbl">Status</span><span class="readout" id="rdState">Saved</span></div>
                 </div>
                 <div style="display:flex;gap:12px;margin-top:16px">
-                  <button class="btn primary" id="applyBtn">APPLY</button>
-                  <button class="btn secondary" id="revertBtn">REVERT</button>
+                  <button class="btn primary" id="applyBtn" style="flex:1;justify-content:center">Apply</button>
+                  <button class="btn secondary" id="revertBtn" style="flex:1;justify-content:center">Revert</button>
                 </div>
               </div>
             </div>
             <div class="monlist">
               <div style="display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap">
-                <div><h3>This PC's monitors <span class="tag" id="monSource">SAMPLE</span></h3>
+                <div><h3>This PC's monitors <span class="tag" id="monSource">Sample</span></h3>
                   <p class="body" style="margin:6px 0 0">As Windows arranges them. Change resolution, scale or order in Windows.</p></div>
                 <div class="monbtns">
-                  <button class="btn secondary small" id="detectBtn">DETECT MY SCREENS</button>
-                  <button class="btn secondary small" id="identifyBtn">IDENTIFY</button>
-                  <a class="btn secondary small" href="ms-settings:display">WINDOWS DISPLAY SETTINGS
-                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true"><path d="M4 1.5 H10.5 V8 M10.5 1.5 L2 10" stroke="currentColor" stroke-width="1.2"/></svg></a>
+                  <button class="btn secondary small" id="detectBtn">Detect my screens</button>
+                  <button class="btn secondary small" id="identifyBtn">Identify</button>
+                  <a class="btn link small" href="ms-settings:display">Windows display settings ›</a>
                 </div>
               </div>
               <div id="monRows" style="margin-top:16px"></div>
@@ -299,15 +329,15 @@
         <!-- SETTINGS -->
         <section class="page grid-bg" id="page-settings" hidden>
           <div class="pad">
-            <span class="lbl">SARKE · SETTINGS</span>
+            <span class="lbl">Sarke · Settings</span>
             <h2 style="margin-top:8px">Settings</h2>
             <div class="settings">
               <div class="card">
                 <h3>Connection</h3>
-                <div class="setrow"><div><div class="t">This PC</div><div class="d">host · waits for the other PC</div></div><span class="readout">HOST</span></div>
+                <div class="setrow"><div><div class="t">This PC</div><div class="d">host · waits for the other PC</div></div><span class="readout">Host</span></div>
                 <div class="setrow"><div><div class="t">This PC's address</div><div class="d">type it on the other PC · ports 50500–50502</div></div><span class="readout" id="setThisIp">172.20.10.3</span></div>
                 <div class="setrow"><div><div class="t">Other PC</div><div class="d" id="setPeerD">tabuladze · reconnects by itself</div></div><span class="readout" id="setPeerIp">172.20.10.2</span></div>
-                <div class="setrow"><div><div class="t">Displays</div><div class="d">where the other PC stands</div></div><button class="btn secondary small" data-goto="displays">ARRANGE</button></div>
+                <div class="setrow"><div><div class="t">Displays</div><div class="d">where the other PC stands</div></div><button class="btn secondary small" data-goto="displays">Arrange</button></div>
               </div>
               <div class="card">
                 <h3>Stream</h3>
@@ -326,7 +356,7 @@
                 <h3>Notifications</h3>
                 <div class="setrow"><div><div class="t">Connected</div><div class="d">when the other PC links up</div></div><button class="switch" role="switch" aria-checked="true" id="setNotifyUp" aria-label="Notify when connected"></button></div>
                 <div class="setrow"><div><div class="t">Connection lost</div><div class="d">when the link drops</div></div><button class="switch" role="switch" aria-checked="true" id="setNotifyLost" aria-label="Notify when connection is lost"></button></div>
-                <div class="setrow"><div><div class="t">About</div><div class="d">Sarke · <span lang="ka">სარკე</span> · protocol v2</div></div><span class="tag">MIRROR</span></div>
+                <div class="setrow"><div><div class="t">About</div><div class="d">Sarke · <span lang="ka">სარკე</span> · protocol v2</div></div><span class="tag">Mirror</span></div>
               </div>
             </div>
           </div>
@@ -336,25 +366,25 @@
   </div>
 </div>
 <div class="tray-note" id="trayNote" hidden>
-  <span class="body">Sarke is still running in the tray (<span lang="ka">ს</span> under ^ in the taskbar).</span>
-  <button class="btn primary small" id="reopen">OPEN SARKE</button>
+  <span class="body">Sarke is still running in the tray (the Sarke mark under ^ in the taskbar).</span>
+  <button class="btn primary small" id="reopen">Open Sarke</button>
 </div>
 
 <script>
 // ---------------- data ----------------
-const COLORS = { lo: '#8A8A92', warn: '#FFC21A', ok: '#3DDC84', accent: '#FF5A1F', err: '#FF4D4D' };
+const COLORS = { lo: 'var(--ink-3)', warn: 'var(--warn)', ok: 'var(--ok)', accent: 'var(--accent-ink)', err: 'var(--err)' };
 const PEER = { name: 'tabuladze', ip: '172.20.10.2', w: 1920, h: 1200, scale: 150 };
 const THIS = { name: 'DESKTOP-7Q0UR7J', ip: '172.20.10.3' };
 const STATES = {
-  waiting:    { word: 'WAITING', sq: COLORS.lo, title: 'WAITING', details: ['looking for the other pc · it can start any time'], status: 'WAITING' },
-  connecting: { word: 'CONNECTING', sq: COLORS.warn, blink: true, title: 'CONNECTING', details: ['connecting to ' + PEER.ip], status: 'CONNECTING' },
-  linked:     { word: 'LINKED', sq: COLORS.ok, title: 'LINKED', details: ['rtt 14 ms · ' + PEER.name + ' is ready'], status: 'LINKED · RTT 14 MS', hint: true },
-  stream:     { word: 'STREAM', sq: COLORS.accent, stream: true, status: 'STREAM · 30 FPS' },
-  stalled:    { word: 'STALLED', sq: COLORS.warn, stream: true, stalled: true, status: 'STALLED' },
-  lost:       { word: 'LOST', sq: COLORS.err, title: 'CONNECTION LOST', details: ['reconnecting by itself'], status: 'CONNECTION LOST' },
+  waiting:    { word: 'Waiting', sq: COLORS.lo, title: 'Waiting for the other PC', details: ['It can start any time.'], status: 'Waiting' },
+  connecting: { word: 'Connecting', sq: COLORS.warn, blink: true, title: 'Connecting', details: ['Connecting to ' + PEER.ip], status: 'Connecting' },
+  linked:     { word: 'Linked', sq: COLORS.ok, title: 'Linked', details: ['Round trip 14 ms · ' + PEER.name + ' is ready'], status: 'Linked · RTT 14 ms', hint: true },
+  stream:     { word: 'Streaming', sq: COLORS.accent, stream: true, status: 'Streaming · 30 fps' },
+  stalled:    { word: 'Stalled', sq: COLORS.warn, stream: true, stalled: true, status: 'Stalled' },
+  lost:       { word: 'Lost', sq: COLORS.err, title: 'Connection lost', details: ['Reconnecting by itself.'], status: 'Connection lost' },
 };
 const ORDER = ['waiting', 'connecting', 'linked', 'stream', 'stalled', 'lost'];
-const LOGO = '<svg width="16" height="16" viewBox="0 0 16 16" shape-rendering="crispEdges" aria-hidden="true"><rect width="16" height="16" fill="#0B0B0C"/><rect x="2" y="3" width="2" height="8" fill="#EDEDED"/><rect x="3" y="11" width="6" height="2" fill="#EDEDED"/><rect x="8" y="6" width="2" height="5" fill="#EDEDED"/><rect x="11" y="5" width="3" height="8" fill="#FF5A1F"/></svg>';
+const LOGO = '<svg width="20" height="20" viewBox="0 0 100 100" aria-hidden="true"><rect width="100" height="100" rx="22" fill="#050506"/><rect x="17" y="17" width="44" height="44" rx="10" fill="#f5f5f7"/><rect x="42.5" y="42.5" width="40" height="40" rx="8" fill="#050506" stroke="#f5f5f7" stroke-width="7"/></svg>';
 const SHARED = `<svg viewBox="0 0 1600 900" xmlns="http://www.w3.org/2000/svg" font-family="Segoe UI, system-ui, sans-serif">
   <rect width="1600" height="900" fill="#F3F3F3"/><rect width="1600" height="40" fill="#FFFFFF"/><text x="20" y="26" font-size="14" fill="#1F1F1F">untitled.png — Sketchpad</text>
   <rect y="40" width="1600" height="32" fill="#F7F7F7"/><g font-size="13" fill="#333"><text x="20" y="61">File</text><text x="64" y="61">Edit</text><text x="108" y="61">Image</text><text x="164" y="61">Layer</text><text x="218" y="61">View</text></g>
@@ -470,32 +500,26 @@ function mapHTML(f, opts) {
   let html = '';
   for (const m of ms) {
     html += `<div class="mon" data-mon="${m.n}" style="left:${X(m.x)}px;top:${Y(m.y)}px;width:${px(m.w) - 4}px;height:${px(m.h) - 4}px">
-      <span class="num">${m.n}</span><span class="lbl">${m.n === 1 ? 'THIS PC ' : ''}${m.w}×${m.h}</span></div>`;
+      <span class="num">${m.n}</span><span class="lbl">${m.n === 1 ? 'This PC · ' : ''}${m.w}×${m.h}</span></div>`;
   }
   const peerCls = opts.peerState === 'lost' ? 'lost' : (opts.peerState === 'waiting' || opts.peerState === 'connecting') ? 'dim' : '';
   const dragAttrs = opts.draggable ? `tabindex="0" role="button" aria-label="Other PC, on the ${opts.side}. Drag it, or use the arrow keys."` : '';
   html += `<div class="mon peer-mon ${peerCls}" data-peer ${dragAttrs} style="left:${X(P.x)}px;top:${Y(P.y)}px;width:${px(P.w) - 4}px;height:${px(P.h) - 4}px">
-      <span class="num">${opts.peerState === 'waiting' ? '?' : 'B'}</span><span class="lbl">${PEER.name} ${PEER.w}×${PEER.h}</span></div>`;
+      <span class="num">${opts.peerState === 'waiting' ? '?' : 'B'}</span><span class="lbl">${PEER.name} · ${PEER.w}×${PEER.h}</span></div>`;
   if (opts.glow) html += glowHTML(opts.side, edgePieces(ms, opts.side), X, Y, px);
   return html;
 }
-// The orange edge sits on this PC's side of each crossing piece: 3 px solid + a fade inward.
+// The blue edge: a rounded bar on this PC's side of each crossing piece (no glow, like the website).
 function glowHTML(side, pieces, X, Y, px) {
-  const thick = 3, fade = 18;
+  const thick = 3;
   let html = '';
   for (const p of pieces) {
     if (!alongX(side)) {
-      const edge = side === 'right' ? X(p.x + 1) - 4 : X(p.x);
-      const y = Y(p.y), h = Math.max(0, px(p.h) - 4);
-      const solid = side === 'right' ? edge - thick : edge, fadeX = side === 'right' ? edge - thick - fade : edge + thick;
-      html += `<div class="glow" style="left:${solid}px;top:${y}px;width:${thick}px;height:${h}px;background:#FF5A1F"></div>
-               <div class="glow" style="left:${fadeX}px;top:${y}px;width:${fade}px;height:${h}px;background:linear-gradient(${side === 'right' ? 'to left' : 'to right'}, rgba(255,90,31,0.35), rgba(255,90,31,0))"></div>`;
+      const edge = side === 'right' ? X(p.x + 1) - 4 - thick - 2 : X(p.x) + 2;
+      html += `<div class="glow" style="left:${edge}px;top:${Y(p.y) + 4}px;width:${thick}px;height:${Math.max(0, px(p.h) - 12)}px;background:var(--accent-ink)"></div>`;
     } else {
-      const edge = side === 'bottom' ? Y(p.y + 1) - 4 : Y(p.y);
-      const x = X(p.x), w = Math.max(0, px(p.w) - 4);
-      const solid = side === 'bottom' ? edge - thick : edge, fadeY = side === 'bottom' ? edge - thick - fade : edge + thick;
-      html += `<div class="glow" style="left:${x}px;top:${solid}px;width:${w}px;height:${thick}px;background:#FF5A1F"></div>
-               <div class="glow" style="left:${x}px;top:${fadeY}px;width:${w}px;height:${fade}px;background:linear-gradient(${side === 'bottom' ? 'to top' : 'to bottom'}, rgba(255,90,31,0.35), rgba(255,90,31,0))"></div>`;
+      const edge = side === 'bottom' ? Y(p.y + 1) - 4 - thick - 2 : Y(p.y) + 2;
+      html += `<div class="glow" style="left:${X(p.x) + 4}px;top:${edge}px;width:${Math.max(0, px(p.w) - 12)}px;height:${thick}px;background:var(--accent-ink)"></div>`;
     }
   }
   return `<div class="glowset" data-glow>${html}</div>`;
@@ -507,28 +531,28 @@ function renderStream() {
   el.classList.toggle('grid-bg', !s.stream);
   if (!s.stream) {
     const side = savedSide();
-    const m = mapHTML(fitFor(380, 300, 24, side), { side, glow: app.state === 'linked', peerState: app.state });
+    const m = mapHTML(fitFor(380, 220, 22, side), { side, glow: app.state === 'linked', peerState: app.state });
     el.innerHTML = `<div class="hero">
       <div>
-        <span class="lbl">SARKE · HOST · ${THIS.name}</span>
+        <span class="eyebrow">Sarke</span>
         <div class="disp"><span class="w" data-word>${s.title}</span><span class="caret"></span></div>
         <div class="details">${s.details.map(d => `<div>${d}</div>`).join('')}
-          ${s.hint ? '<div style="margin-top:12px">send a window from either pc: <kbd>Ctrl+Alt+Shift+W</kbd></div>' : ''}</div>
-        <div class="actions"><button class="btn secondary" data-goto="displays">ARRANGE DISPLAYS</button></div>
+          ${s.hint ? '<div style="margin-top:14px">On the other PC, press <kbd>Ctrl</kbd> <kbd>Alt</kbd> <kbd>Shift</kbd> <kbd>W</kbd> to send a window</div>' : ''}</div>
+        <div class="actions"><button class="btn secondary small" data-goto="displays">Arrange displays</button><a class="btn link small" href="#" data-goto="settings">Settings ›</a></div>
       </div>
-      <div class="map" style="width:380px;height:300px" data-hero-map>${m}</div>
+      <div class="map" style="width:380px;height:220px" data-hero-map>${m}</div>
     </div>
     <div class="foot lbl">${THIS.name} · ${THIS.ip} · 1920×1080 · 100% · protocol v2</div>`;
-    el.querySelectorAll('[data-goto]').forEach(b => b.addEventListener('click', () => go(b.dataset.goto)));
+    el.querySelectorAll('[data-goto]').forEach(b => b.addEventListener('click', e => { e.preventDefault(); go(b.dataset.goto); }));
     return;
   }
   el.innerHTML = `<div class="cmdbar">
-      <span class="lbl">FROM ${PEER.name.toUpperCase()}</span>
+      <span class="lbl">From ${PEER.name}</span>
       <span class="title">untitled.png — Sketchpad</span>
       <span class="spacer"></span>
-      <button class="cmd ${app.fit ? '' : 'on'}" data-cmd="fit">${app.fit ? 'FIT' : '1:1'}</button>
+      <button class="cmd ${app.fit ? '' : 'on'}" data-cmd="fit">${app.fit ? 'Fit' : '1:1'}</button>
       <button class="cmd ${app.hud ? 'on' : ''}" data-cmd="hud" aria-pressed="${app.hud}">HUD</button>
-      <button class="cmd" data-cmd="back"><svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true"><path d="M5 2 L1.5 5.5 L5 9 M1.5 5.5 H9 Q11 5.5 11 8 V10" stroke="currentColor" stroke-width="1.2"/></svg>GIVE BACK</button>
+      <button class="cmd" data-cmd="back"><svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true"><path d="M5 2 L1.5 5.5 L5 9 M1.5 5.5 H9 Q11 5.5 11 8 V10" stroke="currentColor" stroke-width="1.2"/></svg>Give back</button>
     </div>
     <div class="picture-area" id="picArea"></div>`;
   el.querySelectorAll('[data-cmd]').forEach(b => b.addEventListener('click', () => {
@@ -554,11 +578,11 @@ function drawPicture(reveal) {
   const cw = area.clientWidth, ch = area.clientHeight;
   const r = pictureRect(cw, ch);
   let html = `<div class="pic" data-pic style="left:${r.x}px;top:${r.y}px;width:${r.w}px;height:${r.h}px">${SHARED}</div>`;
-  if (s.stalled) html += `<div class="stall"><span class="w">STALLED</span><span class="body" id="stallT">${stallText()}</span></div>`;
+  if (s.stalled) html += `<div class="stall"><div class="cardlet"><span class="w">Stalled</span><span class="body" id="stallT">${stallText()}</span></div></div>`;
   if (app.hud) {
-    const rows = [['RTT', '14', 'ms'], s.stalled ? ['FPS', '0', '', COLORS.err] : ['FPS', '30'], ['LAT', '38', 'ms'],
-                  ['MBPS', s.stalled ? '0.0' : '12.4'], ['RES', '1600×900'], ['Q', '75'], ['DROP', '0']];
-    html += `<div class="hud" data-hud><div class="hdr"><span class="lbl">SARKE · HUD</span><span class="sq" style="background:${s.sq}"></span></div>
+    const rows = [['RTT', '14', 'ms'], s.stalled ? ['FPS', '0', '', COLORS.err] : ['FPS', '30'], ['Latency', '38', 'ms'],
+                  ['Bitrate', s.stalled ? '0.0' : '12.4', 'Mbps'], ['Resolution', '1600×900'], ['Quality', '75'], ['Dropped', '0']];
+    html += `<div class="hud" data-hud><div class="hdr"></div>
       ${rows.map(([l, v, u, c]) => `<div class="r"><span class="lbl">${l}</span><span class="readout" style="${c ? 'color:' + c : ''}">${v}${u ? `<span class="u">${u}</span>` : ''}</span></div>`).join('')}</div>`;
   }
   if (reveal && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
@@ -581,17 +605,17 @@ function renderDisplays() {
   const f = fitFor(map.clientWidth, map.clientHeight, 40, app.arr);
   const ms = hostMonitors(), H = bbox(ms);
   map.innerHTML = mapHTML(f, { side: app.arr, glow: true, peerState: 'linked', draggable: true }) +
-    `<div class="live"><span class="sq ${app.detected ? '' : 'sample'}"></span><span class="lbl">${app.detected ? 'LIVE' : 'SAMPLE'} · ${ms.length} MONITOR${ms.length === 1 ? '' : 'S'} · ${H.w}×${H.h}</span></div>`;
+    `<div class="live"><span class="sq ${app.detected ? '' : 'sample'}"></span><span class="lbl">${app.detected ? 'Live' : 'Sample'} · ${ms.length} monitor${ms.length === 1 ? '' : 's'} · ${H.w}×${H.h}</span></div>`;
   map.dataset.scale = f.scale; map.dataset.ox = f.ox; map.dataset.oy = f.oy;
   const peerEl = map.querySelector('[data-peer]');
   peerEl.style.cursor = 'grab';
   peerEl.addEventListener('pointerdown', startDrag);
   peerEl.addEventListener('keydown', onPeerKey);
   renderPanel(app.arr);
-  document.getElementById('monSource').textContent = app.detected ? app.detectNote : 'SAMPLE';
+  document.getElementById('monSource').textContent = app.detected ? app.detectNote : 'Sample';
   document.getElementById('monRows').innerHTML = ms.map(mn => `<div class="monrow"><span class="n">${mn.n}</span>
       <div><div class="readout">${mn.label || (mn.primary ? 'Main display' : 'Display ' + mn.n)}</div><div class="lbl">${mn.w}×${mn.h} · ${mn.scale}% · at ${mn.x}, ${mn.y}</div></div>
-      ${mn.primary ? '<span class="tag">MAIN</span>' : '<span></span>'}</div>`).join('');
+      ${mn.primary ? '<span class="tag">Main</span>' : '<span></span>'}</div>`).join('');
 }
 // Side buttons, readouts and the status line for `side` (the arrangement, or where a drag would drop).
 function renderPanel(side) {
@@ -601,12 +625,12 @@ function renderPanel(side) {
   });
   document.getElementById('sideNote').hidden = VERTICAL_SIDES_ACCEPTED;
   document.querySelectorAll('#roleSeg button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.role === app.role)));
-  document.getElementById('rdEdge').textContent = side.toUpperCase() + ' EDGE';
-  document.getElementById('rdLen').textContent = edgeLength(side) + ' PX';
+  document.getElementById('rdEdge').textContent = side[0].toUpperCase() + side.slice(1) + ' edge';
+  document.getElementById('rdLen').textContent = edgeLength(side) + ' px';
   document.getElementById('rdSide').textContent = '"' + clientSideFor(side) + '"';
   const dirty = app.arr !== savedSide(), unsaved = dirty || side !== savedSide();
   const st = document.getElementById('rdState');
-  st.textContent = unsaved ? 'NOT SAVED' : 'SAVED';
+  st.textContent = unsaved ? 'Not saved' : 'Saved';
   st.style.color = unsaved ? COLORS.warn : app.justSaved ? COLORS.ok : '';
   document.getElementById('applyBtn').disabled = !dirty;
   document.getElementById('revertBtn').disabled = !dirty;
@@ -713,16 +737,16 @@ async function detectScreens() {
     if (!('getScreenDetails' in window)) throw new Error('no Window Management API');
     const details = await window.getScreenDetails();
     app.detected = toMonitors(details.screens);
-    app.detectNote = 'DETECTED · ' + app.detected.length;
+    app.detectNote = 'Detected · ' + app.detected.length;
     details.addEventListener('screenschange', () => {
       app.detected = toMonitors(details.screens);
-      app.detectNote = 'DETECTED · ' + app.detected.length;
+      app.detectNote = 'Detected · ' + app.detected.length;
       if (app.page === 'displays' || app.page === 'stream') renderPage();
     });
   } catch (err) {
     const sc = window.screen;
     app.detected = toMonitors([{ left: 0, top: 0, width: sc.width, height: sc.height, devicePixelRatio: window.devicePixelRatio, isPrimary: true, label: '' }]);
-    app.detectNote = sc.isExtended ? 'DETECTED · 1 OF MORE (ALLOW WINDOW MANAGEMENT)' : 'DETECTED · 1';
+    app.detectNote = sc.isExtended ? 'Detected · 1 of more (allow window management)' : 'Detected · 1';
   }
   app.arr = savedSide(); app.justSaved = false;
   renderPage();
@@ -809,6 +833,16 @@ document.getElementById('protoMons').addEventListener('click', e => {
   renderPage();
 });
 document.querySelectorAll('.nav .item').forEach(i => i.addEventListener('click', () => go(i.dataset.page)));
+// Theme: like the website, follow the system unless forced (the app follows Windows' app mode).
+function applyTheme(choice) {
+  const dark = choice === 'dark' || (choice === 'system' && !matchMedia('(prefers-color-scheme: light)').matches);
+  document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+  document.querySelectorAll('#protoTheme button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.theme === choice)));
+  app.themeChoice = choice;
+}
+document.getElementById('protoTheme').addEventListener('click', e => { const b = e.target.closest('button'); if (b) applyTheme(b.dataset.theme); });
+matchMedia('(prefers-color-scheme: light)').addEventListener('change', () => { if (app.themeChoice === 'system') applyTheme('system'); });
+applyTheme('system');
 
 // Window buttons: minimize / close keep Sarke running in the tray; maximize fills the page.
 function setHidden(hidden) {
@@ -833,14 +867,14 @@ document.getElementById('capMax').addEventListener('click', () => {
 // One card at a time, top-right, like the app (client_b/toast.cpp): a new one replaces the old.
 // 5 s, held while the pointer is on it; a click opens Sarke, × closes it.
 const TOAST_MS = 5000;
-const LOGO40 = LOGO.replace('width="16" height="16"', 'width="40" height="40"');
+const LOGO40 = LOGO.replace('width="20" height="20"', 'width="40" height="40"');
 function toast(kind, title, body) {
   document.querySelectorAll('.toast').forEach(t => t.remove());
   const t = document.createElement('div');
   t.className = 'toast'; t.setAttribute('role', 'status'); t.dataset.kind = kind;
   const sq = kind === 'connected' ? COLORS.ok : kind === 'lost' ? COLORS.err : COLORS.accent;
   t.innerHTML = `<div class="logo">${LOGO40}</div>
-    <div class="txt"><div class="hd"><span class="sq" style="background:${sq}"></span><span class="lbl hi">SARKE</span><span class="lbl">· LINK</span></div>
+    <div class="txt"><div class="hd"><span class="sq" style="background:${sq}"></span><span class="lbl hi">Sarke</span><span class="lbl">· Link</span></div>
       <div class="t1">${title}</div><div class="t2">${body}</div></div>
     <button class="x" aria-label="Close notification"><svg width="8" height="8" viewBox="0 0 8 8" aria-hidden="true"><path d="M0 0 L8 8 M8 0 L0 8" stroke-width="1"/></svg></button>
     <div class="time" style="animation-duration:${TOAST_MS}ms"></div>`;

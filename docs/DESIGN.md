@@ -1,8 +1,9 @@
-DESIGN PROMPT — KVM + Window Streaming (paste into Claude Code)
+DESIGN — Sarke (KVM + window streaming)
 
-You are implementing the visual design of this project. This document is the single source of truth for every pixel. Follow it exactly. If something is not specified here, do not invent styling — ask.
+This document is the single source of truth for every pixel of the app. Follow it exactly. If something is not specified here, do not invent styling — ask.
 
-Design direction: hardware-instrument aesthetic (Teenage Engineering: monospace, uppercase labels, one loud orange accent, sharp corners, readouts) + command-palette interaction (Raycast: hotkey overlay, type-to-filter, keyboard-first).
+Design direction (v2, 2026-10-18, Sandro: "matching design with sarke-nine.vercel.app"): the app looks like the Sarke website (D:\sarke-web, src/app/globals.css). Apple-like restraint: a neutral black / white / grey base, one blue for actions and links, solid rounded tiles, pill buttons, no borders or glows; Google Sans for text, Geist Mono for numbers. Dark and light themes, following Windows' app mode as the website follows the system. Colour lives only on status dots and the product's content.
+(v1 was a hardware-instrument look: JetBrains Mono, uppercase labels, one orange accent, sharp corners. Surfaces not yet converted — the window picker (3) and the edge glow (5) — map their v1 tokens with the table in 2.2.)
 
 0. Rules before anything else
 Obey CLAUDE.md: file ownership, branch naming, one task at a time, no direct commits to main. Never edit another developer's files. Never edit common/include/kvm/protocol.h unless you are in Luka's session. This design requires zero protocol changes.
@@ -23,70 +24,66 @@ Preview tools	tools/ui_preview_picker.cpp (Temo), tools/ui_preview_viewer.cpp (S
 
 If tokens/draw helpers do not exist yet when you start: create a temporary copy inside your own files (e.g. client_b/ui_tokens_tmp.h), tell the user it must be replaced once Luka's version lands, and continue.
 
-2. Design tokens (tokens.h)
+2. Design tokens (tokens.h; today client_b/ui_tokens_tmp.h + ui_draw_tmp.*)
 2.1 Units
 Every size here is in dp (1 dp = 1/96 inch).
 Convert with int px(float dp, UINT dpi) { return (int)lround(dp * dpi / 96.0); }.
 Hairline = max(1, px(1, dpi)).
 Processes are Per-Monitor-V2 DPI aware (per CLAUDE.md). Create every Direct2D render target with dpiX = dpiY = 96 so 1 D2D unit = 1 physical pixel; scale manually with px(). Re-layout on WM_DPICHANGED and use the suggested rect from lParam.
-2.2 Color (sRGB hex, alpha 0–1 where noted)
-Token	Value	Use
-bg0	
-#0B0B0C	window base, letterbox, HUD base
-bg1	
-#141416	panels (picker)
-bg2	
-#1C1C1F	selected/hover row, button hover
-line	
-#2A2A2E	1px dividers, borders
-lineStrong	
-#3A3A40	panel outer border, scroll indicator
-textHi	
-#EDEDED	primary text, values
-textMid	
-#B4B4BA	secondary text, icon glyphs
-textLo	
-#8A8A92	labels, hints, units
-accent	
-#FF5A1F	the one accent: live state, selection bar, caret, glow
-onAccent	
-#0B0B0C	text on accent fill
-ok	
-#3DDC84	linked / healthy
-warn	
-#FFC21A	degraded / connecting
-err	
-#FF4D4D	lost / error, close-button hover
 
-Contrast (checked, WCAG): textLo on bg0 5.7:1, on bg2 4.9:1. accent on bg0 6.3:1. onAccent on accent 6.3:1. Never put textLo on any color lighter than bg2. Color is never the only signal: every status color is paired with a text word.
+2.2 Color — the website's palette (globals.css), two themes
+Token	Dark	Light	Use (website variable)
+bg	#050506	#FBFBFD	window background (--bg)
+bg_alt	#0B0B0D	#F5F5F7	second background (--bg-alt)
+tile	#1D1D1F	#F5F5F7	raised tiles: cards, panels, HUD, notification, status pill (--bg-raise)
+fill	#2C2C2E	#E8E8ED	fills inside tiles: grey buttons, monitors, segmented track, keycaps (--bg-high)
+fill_hi	#3A3A3C	#DCDCE1	hover inside tiles
+seg_on	#545458	#FFFFFF	the selected segment of a segmented control
+ink	#F5F5F7	#1D1D1F	primary text (--ink)
+ink2	#A1A1A6	#424245	secondary text (--ink-2)
+ink3	#86868B	#6E6E73	captions, labels, units (--ink-3)
+accent	#0071E3	#0071E3	primary button fill (--accent); hover #0077ED
+accent_ink	#2997FF	#0066CC	links, accent text, the crossing edge, selection outline (--accent-ink)
+on_accent	#FFFFFF	#FFFFFF	text on accent
+ok	#30D158	#248A3D	linked / healthy
+warn	#FF9F0A	#B25000	degraded / connecting / unsaved
+err	#FF453A	#D70015	lost / error
+Lines are ink at 10 % (line) or 16 % (line_strong) alpha, never a solid grey. Halos (the website's body::before): two radial gradients, #6276A4 at 17 % from top-centre and #485474 at 11 % from bottom-right (light: #7896D2 16 %, #96A0C8 10 %), fading out at 70 % of the radius — on window backgrounds only.
+Caption close button: Windows 11's own hover red #C42B1C with a white glyph.
+Theme: Windows' app mode (HKCU\...\Themes\Personalize\AppsUseLightTheme); env SARKE_THEME=dark|light forces one. Every window repaints on WM_SETTINGCHANGE "ImmersiveColorSet".
+v1 → v2 names (for surfaces 3 and 5): bg0→bg, bg1→tile, bg2→fill, line→ink 10 %, lineStrong→ink 16 %, textHi→ink, textMid→ink2, textLo→ink3, accent→accent_ink for lines/marks and accent for button fills, onAccent→on_accent.
+Color is never the only signal: every status color is paired with a word.
 
 2.3 Typography
-Font: JetBrains Mono (SIL OFL 1.1), weights Regular (400) and Bold (700). Ship JetBrainsMono-Regular.ttf, JetBrainsMono-Bold.ttf and OFL.txt in assets/fonts/.
-Load privately with DirectWrite custom font set (IDWriteFactory5::CreateInMemoryFontFileLoader or CreateFontSetBuilder + CreateFontCollectionFromFontSet). Embedding as an RC resource keeps "exe + config.json" deployment; if that needs a CMake change, ship the fonts next to the exe and ask Luka. Fallback if loading fails: Consolas, and log it once.
-Non-Latin text (Georgian, Cyrillic, emoji in window titles) must render via DirectWrite system font fallback. Test with a window whose title is Georgian.
-Text antialiasing: ClearType on opaque render targets; grayscale on any layered/transparent surface.
-Style	Size / line height	Weight	Case	Letter spacing
-label	11 / 14 dp	Regular	UPPERCASE	+0.06 em (IDWriteTextLayout1::SetCharacterSpacing)
-body	13 / 18 dp	Regular	as written	0
-title	15 / 20 dp	Regular	as written	0
-readout	13 / 18 dp	Bold	—	0
-display	28 / 32 dp	Bold	UPPERCASE	+0.02 em
-
-Truncation: single line, ellipsis trimming (CreateEllipsisTrimmingSign). Never wrap titles. Never clip glyphs vertically.
+Fonts (SIL OFL 1.1), bundled in assets/fonts/ with their licences, loaded privately with a DirectWrite font set (IDWriteFactory5::CreateFontSetBuilder + CreateFontCollectionFromFontSet), searched from the exe's folder upwards: GoogleSans-Regular/Medium/SemiBold/Bold.ttf (static instances of the website's Google Sans variable font, Latin + Latin Extended) and GeistMono-Regular/Medium/SemiBold.ttf. Fallbacks: Segoe UI Variable Text → Segoe UI; Cascadia Mono → Consolas (logged once).
+Non-Latin text (Georgian, emoji in window titles) renders via DirectWrite system font fallback.
+Text antialiasing: ClearType on opaque render targets; grayscale on layered/transparent surfaces.
+Style	Size / line height	Weight	Font	Tracking
+caption	12 / 16 dp	400	Google Sans	0
+body	14 / 20 dp	400	Google Sans	-0.005 em
+body_strong	14 / 20 dp	500	Google Sans	-0.005 em
+title	17 / 22 dp	600	Google Sans	-0.01 em
+headline	28 / 32 dp	700	Google Sans	-0.02 em
+display	44 / 48 dp	700	Google Sans	-0.03 em
+mono	12 / 16 dp	400	Geist Mono	0
+mono_strong	13 / 18 dp	500	Geist Mono	0
+Sentence case everywhere (no uppercase labels). Numbers, addresses, config values and keycaps use the mono styles.
+Truncation: single line, ellipsis trimming. Never wrap titles. Never clip glyphs vertically.
 
 2.4 Spacing, shape, motion
-Spacing scale: 4, 8, 12, 16, 24, 32, 48 dp. Nothing else.
-Corners: 0 everywhere. Set DWMWA_WINDOW_CORNER_PREFERENCE = DWMWCP_DONOTROUND on every window (Windows 11; harmless no-op on Windows 10).
-Borders: drawn as filled hairline rectangles at integer pixel coordinates. Never use DrawRectangle/DrawLine for axis-aligned lines (they blur on half pixels).
-Motion is minimal and crisp. Allowed animations only: caret blink, connecting-status blink, edge glow. Everything else (hover, selection, open/close) is instant.
-Blink period = GetCaretBlinkTime() (if it returns INFINITE, do not blink).
-Reduced motion: if SystemParametersInfo(SPI_GETCLIENTAREAANIMATION) returns FALSE → no blinking, edge glow shows static for 600 ms without fades.
-Easing for glow fades: ease-out cubic 1 - (1-t)^3 on fade-in, ease-in cubic t^3 on fade-out.
+Spacing scale: 4, 8, 12, 16, 24, 32, 48 dp.
+Radii (the website's --r-*): xs 6 (monitors, keycaps, small chips), sm 12 (HUD), md 18 (cards, notification, stalled card), lg 28 (big tiles: map, panel, Identify). Buttons, toggles, status pills and segmented controls are pills (radius = height / 2).
+Windows: Windows 11 rounded corners (DWMWA_WINDOW_CORNER_PREFERENCE = DWMWCP_ROUND), no 1 px system border (DWMWA_BORDER_COLOR = DWMWA_COLOR_NONE), DWMWA_USE_IMMERSIVE_DARK_MODE per theme. Popups with their own shape (notification, Identify) are WS_EX_LAYERED with per-pixel alpha (UpdateLayeredWindow) so their rounded corners are really transparent.
+No borders around tiles; tiles are separated by fill only (the notification card alone has a 10 % ink hairline and a soft shadow because it floats over any app).
+Buttons: primary = accent pill, on_accent text (body_strong); secondary = fill pill, ink text; link = accent_ink text with "›"; disabled = 38 % alpha. Segmented control = fill pill track (2 dp inset) with pill segments; selected segment = seg_on, ink text; others ink2, hover fill_hi.
+Motion: the website's easing (0.25, 0.1, 0.25, 1) at 180 ms where something moves. Allowed: connecting-dot blink, the notification card's slide + fade (9.3), the edge glow (5). Hover and selection are instant. Reduced motion (SPI_GETCLIENTAREAANIMATION FALSE): no blinking; the card only fades.
+
 2.5 Copy rules
-Labels UPPERCASE. Detail lines lowercase sentence style, no trailing period.
-Separator: · (space, U+00B7, space). Dimensions: 1920×1080 (U+00D7, no spaces).
-Numbers integers unless stated. Unit after value, separated by one space, unit drawn in textLo + label style.
-No arrow glyphs in UI copy; use words (UP/DOWN, ENTER, ESC).
+Sentence case; short, plain words, like the website ("Where is the other PC?", "Connection lost", "Reconnecting by itself.").
+Separator: · (space, U+00B7, space). Dimensions: 1920×1080 (U+00D7). Units after the value with one space: 14 ms, 12.4 Mbps, 1080 px.
+Links end with › (U+203A). Hotkeys are drawn as keycaps (mono on fill, radius xs): Ctrl Alt Shift W.
+Unknown values are — (U+2014). Never fake data.
+
 3. Surface 1 — Window picker overlay (host A) — Temo
 
 Trigger: global hotkey Ctrl+Alt+Shift+S via RegisterHotKey(MOD_CONTROL|MOD_ALT|MOD_SHIFT|MOD_NOREPEAT, 'S'). The keyboard hook must pass this combo through when control is on A. Ctrl+Alt+Shift+Q (emergency) is never touched.
@@ -131,62 +128,49 @@ Right edge at width−16: KVM HOST, label, textLo.
 
 Up/Down move selection (clamped, no wrap), PageUp/PageDown ±8, Home/End, Enter = stream, Esc = close. Mouse hover = selection, click = stream, wheel = 1 row per notch.
 
-4. Surface 2 — Viewer window (client B) — Sandro
+4. Surface 2 — Viewer window (both PCs) — Sandro
 4.1 Renderer
-
-The whole client area is rendered by one ID2D1HwndRenderTarget (dpi 96). Each decoded BGRA frame is uploaded with ID2D1Bitmap::CopyFromMemory into a persistent bitmap (recreate only on size change). This replaces StretchDIBits from the v1 plan — confirm with Sandro before switching; mixing GDI and D2D in one window is not allowed (flicker).
-
+The whole client area is rendered by one ID2D1HwndRenderTarget (dpi 96). Each decoded BGRA frame is uploaded with ID2D1Bitmap::CopyFromMemory into a persistent bitmap (recreated only on size change). No GDI in the window.
 Interpolation: if the drawn image size equals the frame size → NEAREST_NEIGHBOR (pixel-exact). Otherwise → LINEAR.
 
 4.2 Frame chrome (custom title strip)
-Window style WS_OVERLAPPEDWINDOW; remove the standard frame by handling WM_NCCALCSIZE (return 0 when wParam == TRUE) so DWM shadow, Snap and resize keep working. When maximized, inset the client rect by GetSystemMetricsForDpi(SM_CXFRAME) + SM_CXPADDEDBORDER (and Y equivalents) so content is not cut off.
-WM_NCHITTEST: 6 dp resize borders on all sides → HTLEFT/HTTOPRIGHT/etc.; title strip (except buttons) → HTCAPTION.
-Title strip: height 32, fill bg0, hairline line at its bottom.
-Status square 8×8 at x=12, vertically centered, color by state (4.4).
-At x=28: state word in label, textLo (e.g. STREAM), then 8 dp gap, then title in body, textHi, ellipsis (stream title, or sarke when not streaming).
-Right side, right to left: close, maximize/restore, minimize — each 46×32 dp. Then 8 dp gap, then text buttons FIT and HUD, each 40×32 dp, label style.
-Caption glyphs, 10×10 dp, centered, textMid: minimize = 10×1 filled rect; maximize = hairline square; restore = two hairline squares offset 2 dp; close = two diagonals (antialiased, hairline stroke).
-Hover: fill bg2, glyph textHi. Close hover: fill err, glyph textHi. Pressed: same as hover.
-Text buttons: inactive textMid, active accent. HUD toggles the HUD. FIT toggles fit ↔ 1:1 (label changes to 1:1 when in 1:1 mode). In 1:1 the frame is centered and cropped, no scrolling.
+Window style WS_OVERLAPPEDWINDOW; the standard frame is removed in WM_NCCALCSIZE (return 0 when wParam == TRUE) so DWM shadow, Snap and resize keep working; when maximized the client rect is inset by SM_CXFRAME + SM_CXPADDEDBORDER. style_window(): rounded corners, no system border, theme-matched non-client parts.
+WM_NCHITTEST: 6 dp resize borders → HTLEFT/HTTOPRIGHT/etc.; title strip (except buttons) → HTCAPTION.
+Title strip: height 44 dp, fill bg, no line under it.
+Left: the Sarke mark 20 dp at x = 14, centred; 8 dp; "Sarke" (body_strong, ink); 12 dp; status pill (26 dp, tile): 7 dp dot in the state color + state word (caption, ink2) with 10 dp padding; 12 dp; the stream's window title (body, ink2, ellipsis) when streaming.
+Right, right to left: close, maximize/restore, minimize — 46×44 dp each, Windows 11 glyphs (10 dp, hairline; restore and maximize squares softly rounded 2 dp). Hover fill tile, glyph ink; close hover #C42B1C with a white glyph. Then 8 dp, then the toggles Fit and HUD: pills 26 dp high, as wide as the widest label ("HUD", "Fit", "1:1") + 2 × 10 dp, 4 dp apart; on = fill + ink, off = ink2 text only, hover = tile.
+HUD toggles the HUD. Fit toggles fit ↔ 1:1 (label "1:1" while in 1:1). In 1:1 the frame is centred and cropped, no scrolling.
+
 4.3 Content area
-Fill bg0. Fit mode: frame scaled to fit preserving aspect, centered; letterbox bars are bg0.
-Input mapping: normalized coordinates are computed against the drawn image rect, not the client area. Mouse events over the letterbox are ignored and not sent. (Also agree with Temo whether the captured frame includes the title bar; mapping on A must match what is captured.)
-Initial size before any stream: client 960×600 dp. On stream_start: frame size scaled to fit 80% of B's work area, + 32 dp strip, centered. Minimum client size 480×320 dp.
-4.4 Connection states (no live frames)
-State	Status square	Display word	Detail line (body, textMid)
-Waiting (not connected)	textLo	WAITING	looking for host at {ip}:{port}
-Connecting	warn, blinking	CONNECTING	connecting to {ip}:{port}
-Linked, no stream	ok	LINKED	rtt {n} ms + second line: on the other pc press ctrl+alt+shift+w to send a window (hotkey from ARTEFACT "გადაწყვეტილებები 2", #5)
-Streaming	accent	— (frames shown)	—
-Stalled (streaming, no frame > 1000 ms)	warn	overlay STALLED	{t}s without frames (t with 1 decimal)
-Lost (socket closed)	err	CONNECTION LOST	only if reconnect exists: reconnecting — otherwise restart the client
+Fill bg. Fit mode: frame scaled to fit preserving aspect, centred; letterbox bars are bg.
+Input mapping: normalized coordinates are computed against the drawn image rect. Mouse events over the letterbox are ignored and not sent.
+Initial size before any stream: client 960×600 dp. On stream_start: frame size scaled to fit 80 % of the work area, + 44 dp strip, centred. Minimum client size 480×320 dp.
 
-Layout of the state block (Waiting / Connecting / Linked / Lost), left-aligned at x=48, vertically centered in the content area:
-
-SARKE (the app name) — label, textLo.
-8 dp gap.
-Display word — display, textHi, followed by 4 dp gap and a 12×28 dp accent block caret (blinking), top-aligned with the cap height area of the display line.
-12 dp gap.
-Detail line(s) — body, textMid, 4 dp between lines.
-
-Footer inside content, x=48, bottom edge 24 dp above content bottom: {hostname} · {W}×{H} · {scale}% (B's own info from hello data), label, textLo.
-
-Stalled: keep the last frame, draw bg0 at 60% alpha over the image, then centered STALLED (display, warn) and the detail line below (8 dp gap).
+4.4 Connection states (no live frames) — centred like the website's hero
+State	Dot	Pill word	Headline	Detail (body, ink2)
+Waiting	ink3	Waiting	Waiting for the other PC	Looking for {ip}:{port} (or "It can start any time.")
+Connecting	warn, blinking	Connecting	Connecting	Connecting to {ip}:{port}
+Linked, no stream	ok	Linked	Linked	Round trip {n} ms + the hint row below
+Streaming	accent_ink	Streaming	— (frames shown)	—
+Stalled (no frame > 1000 ms)	warn	Stalled	card "Stalled" (headline, warn)	{t} s without frames (1 decimal)
+Lost	err	Connection lost	Connection lost	Reconnecting by itself. (only if reconnect exists; else "Restart Sarke on this PC.")
+Layout, centred horizontally and vertically over the halo background: "Sarke" (title, ink2); 8 dp; headline in display (or headline style if display doesn't fit the width), ink; 16 dp; detail line(s).
+Linked hint, 24 dp below: "On the other PC, press" [Ctrl] [Alt] [Shift] [W] "to send a window" — keycaps 26 dp high, mono on tile, radius xs, 8 dp padding, 4 dp apart. If it doesn't fit, one plain line instead.
+Footer, centred, 24 dp above the bottom: {hostname} · {W}×{H} · {scale}% (caption, ink3).
+Stalled: keep the last frame, bg at 62 % over it, then a centred tile (radius md, 24 dp padding) with "Stalled" (headline, warn) and the detail line.
 
 4.5 HUD (overlay on content, top-right)
-Visible by default. Position: top = strip bottom + 12 dp, right = 12 dp from client right edge.
-Fixed width 176 dp (never resizes with values). Padding 10 dp vertical, 12 dp horizontal. Row height 18 dp. Fill bg0 at 88% alpha, hairline line border.
-Rows (label left in label/textLo; value right-aligned in readout/textHi, unit in label/textLo after one space):
+Visible by default. top = strip bottom + 12 dp, right = 12 dp. Fixed width 188 dp; 10 dp vertical / 14 dp horizontal padding; rows 22 dp. Tile at 90 % alpha, radius sm, no border.
+Rows: label left (caption, ink3); value right (mono_strong, ink), unit after it (caption, ink3).
 Label	Value	Warn	Err
 RTT	{n} ms from ping/pong	> 20	> 50
 FPS	displayed frames/s, 1 s window	< 24	< 12
-LAT	capture → display in ms using clock offset; — until offset known	> 80	> 150
-MBPS	video payload, 1 decimal	—	—
-RES	{W}×{H}	—	—
-Q	JPEG quality from config	—	—
-DROP	frames skipped (seq gaps) since stream start	—	—
-Value color becomes warn/err per thresholds; otherwise textHi.
-Update the HUD text at 4 Hz (every 250 ms), not every frame.
+Latency	capture → display in ms using the clock offset; — until known	> 80	> 150
+Bitrate	video payload, 1 decimal, Mbps	—	—
+Resolution	{W}×{H}	—	—
+Quality	JPEG quality from config	—	—
+Dropped	frames skipped since stream start	—	—
+Value color becomes warn/err per thresholds; otherwise ink. Updated at 4 Hz.
 5. Surface 3 — Edge glow (A and B) — Demetre
 
 Shown on the destination machine when control crosses: on B when focus_enter arrives, on A when control returns.
@@ -218,40 +202,41 @@ Test reduced motion (Settings → Accessibility → Visual effects → Animation
 Test WM_DPICHANGED: drag the viewer between monitors with different scale.
 After the change: explain to the user (in Georgian, per CLAUDE.md) what was done and how to run the preview tool.
 8. Do not
-Do not add rounded corners, gradients (except the edge glow), shadows drawn by hand, glass/acrylic, or a second accent color.
+Do not add borders around tiles, glows (except the edge glow), glass/acrylic, gradients other than the halos, or a second accent color.
+Do not use uppercase labels or the v1 orange.
 Do not use GDI for text or shapes anywhere UI is drawn.
 Do not use system EDIT/BUTTON controls in styled surfaces.
 Do not animate anything not listed in 2.4.
 Do not hardcode colors/sizes outside tokens.h.
 Do not touch another developer's files; if your surface needs something from theirs, tell the user who to ask.
 
-Future design changes will be made by editing docs/DESIGN.md and tokens.h only.
+Future design changes will be made by editing docs/DESIGN.md and tokens.h only — and the website (D:\sarke-web) stays the reference: when its globals.css changes, change tokens.h to match.
 
-9. App logo, tray icon and notifications (added 2026-10-17; logo chosen by Sandro: Sarke concept C "ს caret", replacing the earlier KVM "K caret")
-App name (Sandro, 2026-10-17): Sarke — Georgian სარკე, "mirror". Written "Sarke" (window title, tray, notifications), "SARKE" in label style (it uppercases), "sarke" as the viewer strip title when nothing streams. One place in code: tokens (kAppName, kAppNameIdle).
-Mark: the Georgian letter ს (first letter of სარკე) in pixels, followed by a block caret, on a 16×16 grid, square tile, no rounding. The caret is the same accent block that blinks on the viewer's state screens.
-Tile fill bg0. ს in textHi: tall left stem (2,3) 2×8; bowl (3,11) 6×2; short right stem (8,6) 2×5 — the open corner cells (2,11), (2,12), (9,11), (9,12) keep the bowl round. Caret in accent: (11,5) 3×8. Coordinates are (x,y) w×h in grid units; the grid lives in tokens.h (logo::cells). Traced from the letter in a real Georgian font (Sylfaen / Segoe UI): the left stem rises above the right one.
-Wordmark (outside the app's UI, e.g. slides, README): სარკე in a bold Georgian sans followed by the accent caret, with "SARKE" in label style next to it. Inside the app the name stays Latin (the UI font has no Georgian glyphs).
-Rendering: drawn in code at the exact pixel size Windows asks for (SM_CXSMICON / SM_CXICON for the current DPI); grid cell edges are rounded to whole pixels (no antialiasing, no scaling of a bitmap). Exact at 100 % (16 px) and 200 % (32 px); at 150 % (24 px) every stroke is 3 px; at 125 % (20 px) strokes are 2–3 px. Check with tools/ui_preview_logo.exe. No .ico/.rc file is needed, so CMake does not change.
-Uses: window icon of the viewer (small and big), tray icon, notification icon.
-Tray icon: in the notification area ("show hidden icons"). Tooltip: {APP} · {STATE WORD}, e.g. Sarke · LINKED. Left click or double click opens the viewer; right click shows a menu: Show viewer, Quit.
-Notifications: Sarke's own card (9.3), not the Windows toast; the Windows one is only the fallback if the card can't be drawn. Connected: title "Connected to host", text "{ip}:{port}". Lost: title "Connection lost", text "reconnecting" (only if reconnect exists, otherwise "restart the client"). No notification for WAITING/CONNECTING.
+9. App logo, tray icon and notifications
+App name: Sarke — Georgian სარკე, "mirror". Written "Sarke" everywhere (window title, tray, notifications, strip). One place in code: tokens (kAppName).
+Mark (v2, 2026-10-18 — the website's src/app/icon.tsx; replaces the v1 "ს caret"): one desktop mirrored into the next. A rounded tile (#050506, radius 22 % of its size); a solid #F5F5F7 rounded square top-left (44 % of the tile, inset 17 %, radius 10 %); an outlined square of the same size bottom-right (inset 17 %, stroke 7 %, filled #050506) overlapping it. The same colours in both themes. Fractions live in tokens.h (logo::).
+Rendering: drawn with Direct2D (antialiased) at the exact pixel size Windows asks for (SM_CXSMICON / SM_CXICON for the current DPI) into a premultiplied canvas, transparent outside the rounded tile, converted to a 32-bpp icon. In windows it is Painter::logo(). Check with tools/ui_preview_logo.exe; docs/brand/sarke.ico (16–256 px) is generated from it (ui_preview_logo --ico).
+Uses: window icons, tray icon, title strips, notification card, Identify.
+Tray icon: in the notification area ("show hidden icons"). Tooltip: Sarke · {state}. Left click or double click opens the viewer; right click: Show viewer, Display arrangement... (when the app provides it), Quit.
+Notifications: Sarke's own card (9.3), not the Windows toast; the Windows one is only the fallback if the card can't be drawn. Connected: title "Connected to host", text "{ip}:{port}". Lost: title "Connection lost", text "reconnecting" (only if reconnect exists, otherwise "restart the client"). No notification for Waiting/Connecting.
 
-9.3 Notification card (added 2026-10-18, Sandro: "like NVIDIA's, top-right, our own design"). Code: client_b/toast.* (kvm::Toast), preview: tools/ui_preview_toast.exe.
-Where: top-right of the main screen's work area, 16 dp from the top and right. One card at a time: a new one replaces the text of the one showing and restarts its time. Topmost, never takes focus, not in the taskbar or Alt+Tab.
-Card: 380 dp wide, height = 16 + max(40, label + 4 + title + body) + 16 dp. Fill bg1, 1 px lineStrong frame, square corners. Brand bar: accent, 4 dp, full height on the left.
-Logo tile: 40 dp, 16 dp after the bar, centred vertically, the logo cells on bg0 with a 1 px line frame.
-Text, 14 dp after the tile: row 1 = 8 dp status square (ok = connected, err = lost, accent = anything else) + "SARKE" (label, textHi) + " · {TAG}" (label, textLo); 4 dp; title (title style, textHi); text (body, textMid). Both single-line with ellipsis.
-Close: × 8 dp glyph in a 24 dp box, 8 dp from the top-right corner; hover fill bg2, glyph textHi.
-Time line: 2 dp accent at the bottom (from the bar to the right edge), shrinks to nothing over the hold time (5 s); while hovered it stops and dims to 35 %.
-Motion (an allowed exception to section 3, asked for by Sandro): in = slide 32 dp from the right + fade, 220 ms ease-out; out = the reverse, 180 ms ease-in. The slide is short so the card never shows on a monitor to the right. With Windows' animation effects off: fade only, no slide.
+9.3 Notification card (2026-10-18, Sandro: "like NVIDIA's, top-right, our own design"; v2 = the website's tiles). Code: client_b/toast.* (kvm::Toast), preview: tools/ui_preview_toast.exe.
+Where: top-right of the main screen's work area, 16 dp from the top and right. One card at a time: a new one replaces the text of the one showing and restarts its time. Topmost, never takes focus, not in the taskbar or Alt+Tab. WS_EX_LAYERED with per-pixel alpha: the rounded corners and the shadow are transparent.
+Card: 380 dp wide, height = 16 + max(40, caption + 2 + title + body) + 8 + 16 dp; tile fill, radius md, a 10 % ink hairline, soft shadow (14 dp of faint black rings, offset down).
+Logo: the mark at 40 dp, 16 dp from the left, centred.
+Text, 14 dp after the logo: row 1 = 7 dp dot (ok = connected, err = lost, accent_ink = anything else) + "Sarke" (caption, ink) + " · {tag}" (caption, ink3); 2 dp; title (title, ink); text (body, ink2). Single-line with ellipsis.
+Close: × 8 dp glyph in a 24 dp circle, 10 dp from the top-right corner; ink3, hover fill_hi circle + ink.
+Time line: a 2 dp pill 8 dp above the bottom edge, 16 dp in from both sides: track ink 10 %, run accent_ink, shrinking over the hold time (5 s); while hovered it stops and dims to 40 %.
+Motion: in = slide 32 dp from the right + fade, 220 ms ease-out; out = the reverse, 180 ms ease-in; short so it never shows on a monitor to the right. With Windows' animation effects off: fade only.
 Behaviour: hover holds it; click anywhere but × = open (e.g. show the viewer) and close; × = close.
 
-10. Display arrangement window (added 2026-10-18, Sandro). Code: client_b/display_layout.* (logic, tested by tools/display_layout_test.exe) + client_b/display_settings.* (window); standalone: tools/sarke_displays.exe. Browser preview: docs/preview/sarke-app.html, Displays.
+10. Display arrangement window (2026-10-18, Sandro). Code: client_b/display_layout.* (logic, tested by tools/display_layout_test.exe) + client_b/display_settings.* (window); standalone: tools/sarke_displays.exe. Browser preview: docs/preview/sarke-app.html, Displays.
 What it sets: config.json client_side, the only arrangement the apps use. The KVM maps this PC's whole outer edge on that side onto the other PC's edge (kvm::display::OuterEdge), so there is no offset or alignment to choose. On the host client_side = the side the other PC is on; on the client it is the opposite. Each PC has its own config.json, so the status line says what the other PC must say.
-Window: frameless, 960×680 dp (min 800×620), title strip 32 dp with the logo, "SARKE · DISPLAYS", minimize and close. Header: label "Settings · Displays", display "Where is the other PC?", two body lines.
-Map (bg1 with a 32 dp grid at line 55 %): this PC's real monitors (kvm::display::monitors() minus the Virtual Display Driver), each bg2 with its number (display), resolution and scale; the other PC at its hello size (or the last one seen, %LOCALAPPDATA%\Sarke\peer.json) right outside the desktop, centred on the crossing edge, bg2 with a 2 dp accent frame. The crossing edge = the same pieces the KVM hook uses: 3 dp accent bar on the edge + a glow into this PC's screens (32/18/9/4 %, 3 dp steps). Top-left: green square + "LIVE · n MONITORS · W×H". One scale for this PC plus the other PC on every allowed side, so nothing jumps while dragging.
-Drag the other PC: it follows the pointer (centre kept on the map), the allowed drop zones show as 1 px frames and the nearest one lights up (accent 10 % fill), the edge and the panel preview the drop. Arrow keys pick a side. Enter = Apply, Esc = cancel drag / revert / close.
-Panel (288 dp, bg1): OTHER PC IS [LEFT][RIGHT][TOP][BOTTOM] (top / bottom disabled with "Top / bottom: next host update" until host_a/main.cpp and client_b/main.cpp accept them; then flip kVerticalSidesAccepted); THIS PC IS THE [HOST][CLIENT] (guessed from host_ip, switchable; locked when the app passes its role); readouts MOUSE CROSSES, CROSSING EDGE (px), CLIENT_SIDE (exactly what Apply writes), STATUS (SAVED / NOT SAVED in warn / SAVED in ok just after Apply / ERROR in err); APPLY (accent) and REVERT, both disabled while nothing changed.
-Footer: the status line (body), then "config: {path}" and IDENTIFY (the monitor number, big, on each real monitor for 2.5 s) and WINDOWS DISPLAY SETTINGS (ms-settings:display).
-Live: re-reads the monitors on WM_DISPLAYCHANGE, DPI and setting changes and every 2 s; re-reads config.json and peer.json when the window is activated (unless there are unsaved changes). Apply keeps every other key of config.json and its order and never overwrites a file it can't parse.
+Window: frameless, rounded, 980×700 dp (min 820×640), bg with the halos. Title strip 44 dp: the mark 20 dp, "Sarke" (body_strong, ink), "›  Displays" (body, ink2); minimize and close (as 4.2).
+Header (40 dp side padding): caption "Settings · Displays" (ink3); headline "Where is the other PC?" (ink); two body lines (ink2).
+Map (tile, radius lg, 20 dp padding): top-left a green 7 dp dot + "Live · n monitors · W×H" (caption, ink3). This PC's real monitors (kvm::display::monitors() minus the Virtual Display Driver), fill with radius ≤ 9 dp, number (title), resolution (caption, ink2), scale (+ " · Main", caption, ink3). The other PC at its hello size (or the last one seen, %LOCALAPPDATA%\Sarke\peer.json) right outside the desktop, centred on the crossing edge: fill (fill_hi on hover/drag) with a 2 dp accent_ink outline, "Other PC" (caption, accent_ink), hostname (body_strong), size · scale (caption, ink2), Connected (ok) / Last seen / Not connected yet (caption, ink3). The crossing edge = the same pieces the KVM hook uses: a 3 dp accent_ink pill on this PC's side of each piece, no glow. One scale for this PC plus the other PC on every allowed side, so nothing jumps while dragging.
+Drag the other PC: it follows the pointer (centre kept on the map), the allowed drop zones show as 1.5 dp ink 16 % outlines (radius xs) and the nearest one lights up (accent 16 % fill + accent_ink outline); the edge and the panel preview the drop. Arrow keys pick a side. Enter = Apply, Esc = cancel drag / revert / close.
+Panel (300 dp tile, radius lg, 20 dp padding): caption "Other PC is" + segmented [Left][Right][Top][Bottom] (Top / Bottom disabled with "Top and bottom: next host update." until host_a/main.cpp and client_b/main.cpp accept them; then flip kVerticalSidesAccepted); caption "This PC is the" (+ " (guessed)") + segmented [Host][Client] (guessed from the running app, then host_ip; locked when the app passes its role); readout rows (30 dp, ink 10 % separators): Mouse crosses ("Right edge", body_strong), Crossing edge ("1080 px", mono_strong), client_side (exactly what Apply writes, mono_strong), Status (Saved / Not saved in warn / Saved in ok just after Apply / Default / Error in err); Apply (primary pill) and Revert (secondary pill), 36 dp, disabled while nothing changed.
+Footer: the status line (body; warn / ok / err / ink2), then the config path (mono, ink3), Identify (secondary pill) and "Windows display settings ›" (link, opens ms-settings:display).
+Identify: on each real monitor, 48 dp from its bottom-left corner, a 200 dp rounded tile (radius lg, layered) with the number (96 dp, bold), the mark + "Sarke" and "W×H · scale"; 2.5 s, click to hide.
+Live: re-reads the monitors on WM_DISPLAYCHANGE, DPI and setting changes and every 2 s; re-reads config.json and peer.json when the window is activated (unless there are unsaved changes); repaints on a theme change. Apply keeps every other key of config.json and its order and never overwrites a file it can't parse.

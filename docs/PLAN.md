@@ -171,6 +171,7 @@ Claude წაიკითხავს ამ ფაილს, იპოვის
 - [x] ეკრანების განლაგება (Displays, `docs/DESIGN.md` 10): `client_b/display_layout.*` + `display_settings.*`, `tools/sarke_displays.exe` — რეალური მონიტორები (live), მეორე PC drag-ით, Apply → `config.json` `client_side` (host/client), Identify; ტესტი `tools/display_layout_test.exe` (62). top/bottom — ლუკას `main.cpp`-ების შემდეგ (`ARTEFACT/ეკრანების განლაგება და Sarke-ის შეტყობინება`)
 - [x] Sarke-ის შეტყობინება ზედა მარჯვნივ, NVIDIA-ს მსგავსად (`client_b/toast.*`, `docs/DESIGN.md` 9.3, `tools/ui_preview_toast.exe`); tray-ში „Display arrangement...“
 - [x] ბრაუზერის პროტოტიპი `docs/preview/sarke-app.html` (+ `sarke-ui.html`): იგივე side-only მოდელი, ბრაუზერის რეალური ეკრანები, ახალი ბარათი; 95 ტესტი (`test_sarke_app.py`)
+- [x] დიზაინი v2 = საიტის სტილი (sarke-nine.vercel.app): პალიტრა, ბნელი/ნათელი თემა, Google Sans + Geist Mono (`assets/fonts`), მომრგვალებული ფილები, საიტის ლოგო — viewer, Displays, ბარათი, პრევიუები (`docs/DESIGN.md` v2, `ARTEFACT/დიზაინი v2 — საიტის სტილი`)
 - [ ] ლუკა: tray + Displays + peer-ის დამახსოვრება `main.cpp`-ებში, top/bottom-ის დაშვება (იხ. იგივე ARTEFACT)
 - [ ] დიზაინის შემოწმება DPI 125 / 150 / 200%-ზე და ორ მონიტორს შორის (`docs/DESIGN.md` 7)
 - [x] M1b (ლუკა): ფანჯარა A ⇄ B `main.cpp`-ში — viewer-ის მხარე მზადაა (ჩართო თემომ, `host_a/window_link.*`)
