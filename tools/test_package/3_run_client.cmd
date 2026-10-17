@@ -9,6 +9,6 @@ if "%HOST_IP%"=="" (
     exit /b 1
 )
 echo.
-kvm_client.exe --host %HOST_IP% --log kvm_client.log
+"%~dp0kvm_client.exe" --host %HOST_IP% --log "%~dp0kvm_client.log"
 echo.
 pause

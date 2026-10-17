@@ -7,6 +7,6 @@ powershell -NoProfile -Command ^
   "Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.IPAddress -notlike '127.*' -and $_.IPAddress -notlike '169.254.*' } | ForEach-Object { Write-Host ('   ' + $_.IPAddress + '   (' + $_.InterfaceAlias + ')') }"
 echo ============================================================
 echo.
-kvm_host.exe --log kvm_host.log
+"%~dp0kvm_host.exe" --log "%~dp0kvm_host.log"
 echo.
 pause
