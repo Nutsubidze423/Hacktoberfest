@@ -110,9 +110,9 @@ Claude წაიკითხავს ამ ფაილს, იპოვის
 ## პროგრესი
 
 ### ლუკა — Core / Net / ინტეგრაცია
-- [ ] M0: CMake + presets + vcpkg, ცარიელი `kvm_host` / `kvm_client`, `.gitignore` (build/)
-- [ ] M0: `protocol.h` — ყველა შეტყობინება, გუნდთან ერთად გაყინული
-- [ ] `queue.h` (`BlockingQueue`, `LatestSlot`), `log.h`, `config.h`
+- [x] M0: CMake + presets + vcpkg, ცარიელი `kvm_host` / `kvm_client`, `.gitignore` (build/), `tools/setup_env.ps1`
+- [ ] M0: `protocol.h` — ყველა შეტყობინება, გუნდთან ერთად გაყინული (დაწერილია + `tools/protocol_test.cpp`; რჩება გუნდის review)
+- [ ] `queue.h` (`BlockingQueue`, `LatestSlot`) — (`log.h`, `config.h` მზადაა)
 - [ ] `net.*`: `Connection`, `Server`, `Client` + ხელახალი დაკავშირება
 - [ ] `hello`, `ping`/`pong` + clock offset
 - [ ] `tools/ping_test.cpp`; Python ფაილების (`ping_test.py`, `requirements.txt`) წაშლა

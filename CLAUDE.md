@@ -99,13 +99,14 @@ tools/
 შეტყობინებები (`type` ველით):
 | type | მიმართულება | ველები |
 |---|---|---|
-| `hello` | B→A | `screen_w`, `screen_h`, `dpi_scale`, `hostname` |
+| `hello` | B→A | `protocol_version`, `screen_w`, `screen_h`, `dpi_scale`, `hostname` |
 | `focus_enter` / `focus_leave` | A→B | `y_norm` (კურსორის შესვლის წერტილი) |
 | `mouse_move` | A→B | `dx`, `dy` (relative) |
-| `mouse_button` | ორივე | `button`, `down` (+ B→A-ზე `x_norm`, `y_norm`) |
+| `mouse_button` | ორივე | `button` (`left`/`right`/`middle`/`x1`/`x2`), `down` (+ B→A-ზე `x_norm`, `y_norm`) |
 | `mouse_wheel` | ორივე | `delta`, `horizontal` |
 | `key` | ორივე | `vk`, `scan`, `down`, `extended` |
-| `stream_start` / `stream_stop` | A→B | `hwnd`, `title`, `width`, `height` |
+| `stream_start` | A→B | `hwnd`, `title`, `width`, `height` |
+| `stream_stop` | A→B | `hwnd` |
 | `remote_mouse_move` | B→A | `x_norm`, `y_norm` (სტრიმულ ფანჯარაში, 0..1) |
 | `ping` / `pong` | ორივე | `t` (+ `pong`-ში `t_peer` — clock offset-ისთვის) |
 | `frame` (50501 header) | A→B | `seq`, `t_capture_us`, `width`, `height`, `codec` |
@@ -121,6 +122,10 @@ tools/
 - RAII Win32/COM რესურსებისთვის (`winrt::com_ptr`, `wil`-ის მსგავსი wrapper-ები ან საკუთარი `unique_handle`). raw `new`/`delete` არა.
 
 ## Build და გაშვება
+გარემოს დაყენება (ერთხელ): `powershell -ExecutionPolicy Bypass -File tools\setup_env.ps1` (VS 2022 + C++ + CMake + Ninja + vcpkg). Firewall-ისთვის ადმინით: იგივე `-Firewall`-ით.
+
+ახალი `.cpp` ფაილის დამატებისას CMakeLists-ის შეცვლა **არ არის საჭირო** — `common/src/`, `host_a/`, `client_b/` ფაილები ავტომატურად ერთვება (glob); თითოეული `tools/<name>.cpp` ხდება ცალკე `<name>.exe`. CMakeLists-ს ფლობს ლუკა.
+
 „Developer PowerShell for VS 2022“-ში:
 ```
 cmake --preset x64-release
