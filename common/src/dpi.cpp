@@ -48,16 +48,19 @@ bool along_x(Side s) {
     return s == Side::Top || s == Side::Bottom;
 }
 
-// One piece of an outer edge: `fixed` is the edge pixel's x (Left / Right) or
-// y (Top / Bottom), and [from, to) runs along the edge.
-struct Segment {
-    int fixed;
-    int from;
-    int to;
-};
+char lower(char c) {
+    return c >= 'A' && c <= 'Z' ? static_cast<char>(c - 'A' + 'a') : c;
+}
 
-std::vector<Segment> outer_segments(const std::vector<Monitor>& mons, Side side) {
-    std::vector<Segment> out;
+bool iequals(std::string_view a, std::string_view b) {
+    return a.size() == b.size() && std::equal(a.begin(), a.end(), b.begin(),
+                                              [](char x, char y) { return lower(x) == lower(y); });
+}
+
+}  // namespace
+
+OuterEdge::OuterEdge(const std::vector<Monitor>& mons, Side side) : side_(side) {
+    std::vector<Segment>& out = segments_;
     for (const Monitor& m : mons) {
         const Rect& r = m.rect;
         if (r.width() <= 0 || r.height() <= 0) continue;
@@ -99,25 +102,39 @@ std::vector<Segment> outer_segments(const std::vector<Monitor>& mons, Side side)
     std::sort(out.begin(), out.end(), [](const Segment& a, const Segment& b) {
         return a.from != b.from ? a.from < b.from : a.fixed < b.fixed;
     });
-    return out;
+    for (const Segment& s : out) total_ += s.to - s.from;
 }
 
-long long total_length(const std::vector<Segment>& segs) {
-    long long total = 0;
-    for (const Segment& s : segs) total += s.to - s.from;
-    return total;
+std::optional<double> OuterEdge::position(Point p) const {
+    if (total_ == 0) return std::nullopt;
+    const int fixed = along_x(side_) ? p.y : p.x;
+    const int along = along_x(side_) ? p.x : p.y;
+    long long offset = 0;
+    for (const Segment& s : segments_) {
+        if (s.fixed == fixed && along >= s.from && along < s.to) {
+            // Pixel centre, so point() maps it back to the same pixel.
+            return (static_cast<double>(offset + (along - s.from)) + 0.5) / static_cast<double>(total_);
+        }
+        offset += s.to - s.from;
+    }
+    return std::nullopt;
 }
 
-char lower(char c) {
-    return c >= 'A' && c <= 'Z' ? static_cast<char>(c - 'A' + 'a') : c;
+Point OuterEdge::point(double t) const {
+    if (total_ == 0) return {};
+    if (!(t >= 0.0)) t = 0.0;  // also catches NaN
+    long long k = std::min(static_cast<long long>(std::min(t, 1.0) * static_cast<double>(total_)), total_ - 1);
+    for (const Segment& s : segments_) {
+        const long long len = s.to - s.from;
+        if (k < len) {
+            const int along = s.from + static_cast<int>(k);
+            return along_x(side_) ? Point{along, s.fixed} : Point{s.fixed, along};
+        }
+        k -= len;
+    }
+    const Segment& last = segments_.back();
+    return along_x(side_) ? Point{last.to - 1, last.fixed} : Point{last.fixed, last.to - 1};
 }
-
-bool iequals(std::string_view a, std::string_view b) {
-    return a.size() == b.size() && std::equal(a.begin(), a.end(), b.begin(),
-                                              [](char x, char y) { return lower(x) == lower(y); });
-}
-
-}  // namespace
 
 std::optional<Side> parse_side(std::string_view s) {
     for (Side side : {Side::Left, Side::Right, Side::Top, Side::Bottom}) {
@@ -190,40 +207,11 @@ Rect virtual_desktop(const std::vector<Monitor>& mons) {
 }
 
 std::optional<double> outer_edge_position(const std::vector<Monitor>& mons, Point p, Side side) {
-    const std::vector<Segment> segs = outer_segments(mons, side);
-    const long long total = total_length(segs);
-    if (total == 0) return std::nullopt;
-
-    const int fixed = along_x(side) ? p.y : p.x;
-    const int along = along_x(side) ? p.x : p.y;
-    long long offset = 0;
-    for (const Segment& s : segs) {
-        if (s.fixed == fixed && along >= s.from && along < s.to) {
-            // Pixel centre, so point_on_outer_edge maps it back to the same pixel.
-            return (static_cast<double>(offset + (along - s.from)) + 0.5) / static_cast<double>(total);
-        }
-        offset += s.to - s.from;
-    }
-    return std::nullopt;
+    return OuterEdge(mons, side).position(p);
 }
 
 Point point_on_outer_edge(const std::vector<Monitor>& mons, Side side, double t) {
-    const std::vector<Segment> segs = outer_segments(mons, side);
-    const long long total = total_length(segs);
-    if (total == 0) return {};
-
-    if (!(t >= 0.0)) t = 0.0;  // also catches NaN
-    long long k = std::min(static_cast<long long>(std::min(t, 1.0) * static_cast<double>(total)), total - 1);
-    for (const Segment& s : segs) {
-        const long long len = s.to - s.from;
-        if (k < len) {
-            const int along = s.from + static_cast<int>(k);
-            return along_x(side) ? Point{along, s.fixed} : Point{s.fixed, along};
-        }
-        k -= len;
-    }
-    const Segment& last = segs.back();
-    return along_x(side) ? Point{last.to - 1, last.fixed} : Point{last.fixed, last.to - 1};
+    return OuterEdge(mons, side).point(t);
 }
 
 }  // namespace kvm::display

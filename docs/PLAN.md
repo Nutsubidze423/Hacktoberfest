@@ -124,9 +124,9 @@ Claude წაიკითხავს ამ ფაილს, იპოვის
 ### დემეტრე — KVM ინფუთი
 - [x] `win32_input.*` (SendInput wrappers) — **სანდროს სჭირდება, პირველ რიგში**
 - [x] `dpi.*`: DPI awareness, მონიტორები, ვირტუალური დესკტოპის კიდეები (+ `tools/dpi_test.cpp`)
-- [ ] `input_capture.*`: hooks thread + `Ctrl+Alt+Shift+Q`
-- [ ] edge detection + suppress + Raw Input deltas; `--local-test` რეჟიმი
-- [ ] `input_inject.*` (B): მოძრაობა, ღილაკები, `focus_enter` / `focus_leave`
+- [x] `input_capture.*`: hooks thread + `Ctrl+Alt+Shift+Q` (+ `tools/input_capture_test.cpp`)
+- [x] edge detection + suppress + Raw Input deltas; local test = `tools/kvm_local_test.exe` (`kvm_host.exe`-ს არ ეხება)
+- [x] `input_inject.*` (B): მოძრაობა, ღილაკები, `focus_enter` / `focus_leave` (+ `tools/input_inject_test.cpp`)
 - [ ] M1: მაუსი + კლავიატურა A → B ქსელით
 - [ ] ფაზა 2: სქროლი (ჰორიზ. ჩათვლით), extended კლავიშები, გაჭედილი კლავიშების გასუფთავება
 

@@ -74,12 +74,49 @@ Rect virtual_desktop(const std::vector<Monitor>& mons);
 // right (Top / Bottom). With monitors of different sizes it can consist of
 // several pieces; positions are measured along all of them joined together.
 
-// If p is on the outer edge on `side`, returns its position along that edge in
-// (0, 1); otherwise nullopt. A uses this for focus_enter.y_norm.
-std::optional<double> outer_edge_position(const std::vector<Monitor>& mons, Point p, Side side);
+// The outer edge on one side, precomputed so lookups don't allocate (safe to
+// use inside a low-level hook callback). Rebuild after the monitors change.
+class OuterEdge {
+public:
+    OuterEdge() = default;
+    OuterEdge(const std::vector<Monitor>& mons, Side side);
 
-// Inverse: the pixel on the outer edge on `side` at position t (clamped to 0..1).
-// B uses this to place the cursor on focus_enter. Returns {0, 0} if mons is empty.
+    Side side() const { return side_; }
+    bool empty() const { return total_ == 0; }
+
+    // If p is on this edge, its position along it in (0, 1); otherwise nullopt.
+    std::optional<double> position(Point p) const;
+
+    // The edge pixel at position t (clamped to 0..1). {0, 0} if empty().
+    Point point(double t) const;
+
+private:
+    // `fixed` is the edge pixel's x (Left / Right) or y (Top / Bottom);
+    // [from, to) runs along the edge.
+    struct Segment {
+        int fixed;
+        int from;
+        int to;
+    };
+
+    Side side_ = Side::Right;
+    std::vector<Segment> segments_;
+    long long total_ = 0;
+};
+
+// One-off versions of OuterEdge::position / point.
+// A uses the position for focus_enter.y_norm, B the point to place the cursor.
+std::optional<double> outer_edge_position(const std::vector<Monitor>& mons, Point p, Side side);
 Point point_on_outer_edge(const std::vector<Monitor>& mons, Side side, double t);
+
+// p moved `px` pixels away from the `side` edge, towards the desktop interior.
+constexpr Point inward(Point p, Side side, int px) {
+    switch (side) {
+        case Side::Left: return {p.x + px, p.y};
+        case Side::Right: return {p.x - px, p.y};
+        case Side::Top: return {p.x, p.y + px};
+        default: return {p.x, p.y - px};
+    }
+}
 
 }  // namespace kvm::display
