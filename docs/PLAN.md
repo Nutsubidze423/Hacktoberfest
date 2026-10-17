@@ -131,7 +131,7 @@ Claude წაიკითხავს ამ ფაილს, იპოვის
 - [ ] ფაზა 2: სქროლი (ჰორიზ. ჩათვლით), extended კლავიშები, გაჭედილი კლავიშების გასუფთავება
 
 ### თემო — ვიდეო A მხარეს
-- [ ] `window_picker.*`: ფანჯრების სია და არჩევა
+- [x] `window_picker.*`: ფანჯრების სია და არჩევა (`capture_test.exe` ჯერ მხოლოდ ირჩევს ფანჯარას)
 - [ ] `capture.*`: WGC → D3D11 staging → BGRA
 - [ ] `tools/capture_test.cpp`: 10 ფრეიმი → `captures/*.jpg`
 - [ ] `jpeg_encoder.*`: TurboJPEG + დროის გაზომვა
