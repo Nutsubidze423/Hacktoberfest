@@ -15,6 +15,7 @@
 // pressed here is released when control leaves (either way) or the connection
 // drops, so nothing stays stuck.
 
+#include <atomic>
 #include <chrono>
 #include <functional>
 #include <set>
@@ -67,7 +68,7 @@ private:
     std::chrono::milliseconds leave_cooldown_;
     std::chrono::steady_clock::time_point entered_at_{};
     display::OuterEdge edge_;
-    bool active_ = false;
+    std::atomic<bool> active_{false};  // read from other threads (KvmLink::controlled_by_peer)
     bool warned_blocked_ = false;
     struct {
         int moves = 0, buttons = 0, wheels = 0, keys = 0;

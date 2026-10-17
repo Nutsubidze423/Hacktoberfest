@@ -6,11 +6,15 @@
 // Usage: clipboard_test.exe   (exit code 0 = all passed)
 
 #include <windows.h>
+#include <shellapi.h>
+#include <shlobj.h>
 
 #include <atomic>
 #include <chrono>
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
 #include <functional>
 #include <map>
 #include <mutex>
@@ -150,6 +154,41 @@ void set_image(const std::vector<std::uint8_t>& dib) {
     EmptyClipboard();
     SetClipboardData(CF_DIB, global_copy(dib.data(), dib.size()));
     CloseClipboard();
+}
+
+void set_files(const std::vector<std::filesystem::path>& paths) {
+    std::wstring list;
+    for (const auto& p : paths) list += p.wstring() + L'\0';
+    list += L'\0';
+    std::vector<std::uint8_t> buf(sizeof(DROPFILES) + list.size() * sizeof(wchar_t));
+    DROPFILES df{};
+    df.pFiles = sizeof(DROPFILES);
+    df.fWide = TRUE;
+    std::memcpy(buf.data(), &df, sizeof(df));
+    std::memcpy(buf.data() + sizeof(df), list.data(), list.size() * sizeof(wchar_t));
+    if (!open_clip()) return;
+    EmptyClipboard();
+    SetClipboardData(CF_HDROP, global_copy(buf.data(), buf.size()));
+    CloseClipboard();
+}
+
+std::vector<std::filesystem::path> get_files() {
+    std::vector<std::filesystem::path> out;
+    if (!open_clip()) return out;
+    if (HANDLE h = GetClipboardData(CF_HDROP)) {
+        auto* drop = static_cast<HDROP>(GlobalLock(h));
+        if (drop) {
+            const UINT n = DragQueryFileW(static_cast<HDROP>(h), 0xFFFFFFFF, nullptr, 0);
+            for (UINT i = 0; i < n; ++i) {
+                wchar_t path[MAX_PATH * 4];
+                DragQueryFileW(static_cast<HDROP>(h), i, path, static_cast<UINT>(std::size(path)));
+                out.emplace_back(path);
+            }
+            GlobalUnlock(h);
+        }
+    }
+    CloseClipboard();
+    return out;
 }
 
 std::optional<std::wstring> get_text() {
@@ -324,6 +363,52 @@ int main() {
         Sleep(200);
         check(get_text() == L"newer copy", "malformed pieces from the peer are ignored");
 
+        // -- copied files: announced to the peer, then handed to the file channel
+        namespace fs = std::filesystem;
+        const fs::path dir = fs::temp_directory_path() / "kvm_clipboard_test";
+        fs::remove_all(dir);
+        fs::create_directories(dir / "folder");
+        std::ofstream(dir / "a.txt") << "hello";
+        std::ofstream(dir / "folder" / "b.txt") << "abc";
+        std::vector<fs::path> handed;
+        sync.set_on_files_copied([&](std::vector<fs::path> p) {
+            std::lock_guard l(g_mu);
+            handed = std::move(p);
+        });
+        set_files({dir / "a.txt", dir / "folder"});
+        const auto announced = wait_content();
+        check(announced && announced->kind == "files" && announced->bytes == bytes_of("a.txt\nfolder\n"),
+              "copied files are announced to the peer (names)");
+        check(wait_until([&] {
+                  std::lock_guard l(g_mu);
+                  return handed.size() == 2 && handed[0] == dir / "a.txt" && handed[1] == dir / "folder";
+              }),
+              "...and handed to the file channel");
+
+        // -- the peer copied files: when they arrive they go on this clipboard
+        for (const auto& c : clip::split(2001, "files", bytes_of("x.txt\n"))) sync.receive(c);
+        check(sync.files_received({dir / "a.txt"}), "announced files from the peer are claimed");
+        check(wait_until([&] { return get_files() == std::vector<fs::path>{dir / "a.txt"}; }),
+              "...and are on this clipboard as files (Ctrl+V in Explorer)");
+        const auto effect = get_format(RegisterClipboardFormatW(L"Preferred DropEffect"));
+        check(effect && effect->size() >= 4 && (*effect)[0] == DROPEFFECT_COPY, "...as a copy, never a move");
+        Sleep(400);
+        check(take_sent().empty(), "...and are not echoed back");
+
+        // -- files the peer dragged (no announcement) stay off the clipboard
+        set_text(L"marker");
+        wait_content();
+        check(!sync.files_received({dir / "folder"}), "dragged files are not claimed");
+        Sleep(200);
+        check(get_text() == L"marker", "...and the clipboard is unchanged");
+
+        // -- ...unless their announcement comes right after them
+        for (const auto& c : clip::split(2002, "files", bytes_of("folder\n"))) sync.receive(c);
+        check(wait_until([&] { return get_files() == std::vector<fs::path>{dir / "folder"}; }),
+              "files that arrive before their announcement are still claimed");
+        Sleep(300);
+        take_sent();
+
         // -- detached: nothing is sent
         sync.detach();
         set_text(L"not for anyone");
@@ -333,15 +418,30 @@ int main() {
 
     // -- size limit
     {
-        clip::ClipboardSync small({.max_bytes = 1024});
-        check(small.start(), "start with max_bytes = 1 KB");
-        small.attach(sink);
+        clip::ClipboardSync limited({.max_bytes = 1024});
+        check(limited.start(), "start with max_bytes = 1 KB");
+        limited.attach(sink);
         set_text(std::wstring(2000, L'y'));
         Sleep(600);
         check(take_sent().empty(), "copy over the limit is not sent");
         set_text(L"small enough");
         const auto ok = wait_content();
         check(ok && ok->bytes == bytes_of("small enough"), "copy under the limit is sent");
+    }
+
+    // -- file limit
+    {
+        namespace fs = std::filesystem;
+        const fs::path dir = fs::temp_directory_path() / "kvm_clipboard_test";
+        clip::ClipboardSync limited({.max_file_bytes = 4});
+        check(limited.start(), "start with max_file_bytes = 4");
+        limited.attach(sink);
+        bool handed = false;
+        limited.set_on_files_copied([&](std::vector<fs::path>) { handed = true; });
+        set_files({dir / "a.txt"});  // 5 bytes
+        Sleep(600);
+        check(take_sent().empty() && !handed, "copied files over the limit are not shared");
+        fs::remove_all(dir);
     }
 
     if (saved) set_text(*saved);

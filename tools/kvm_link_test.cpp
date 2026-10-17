@@ -86,6 +86,15 @@ void abs_move(display::Point p) {
     SendInput(1, &in, sizeof(in));
 }
 
+void rel_move(int dx, int dy) {
+    INPUT in{};
+    in.type = INPUT_MOUSE;
+    in.mi.dx = dx;
+    in.mi.dy = dy;
+    in.mi.dwFlags = MOUSEEVENTF_MOVE;
+    SendInput(1, &in, sizeof(in));
+}
+
 bool wait_until(const std::function<bool()>& cond, int ms = 1500) {
     for (int i = 0; i < ms / 5; ++i) {
         if (cond()) return true;
@@ -151,10 +160,11 @@ int main() {
         const auto entry = display::inward(right.point(0.5), display::Side::Right, 2);
         check(wait_until([&] { return cursor_at(entry); }), "cursor placed 2 px inside the edge facing the peer");
 
-        // -- guard: our own edge can't hand our input over meanwhile
-        abs_move(inside); Sleep(60);
-        abs_move(right.point(0.5)); Sleep(120);
-        check(!kvm.controlling_peer(), "while controlled: this PC's edge does not switch");
+        // -- guard: the peer's cursor reaching our edge never makes us hand over our input
+        kvm.handle(proto::MouseMove{.dx = 100000, .dy = 0});
+        wait_until([&] { return right.position(cursor()).has_value(); });
+        Sleep(120);
+        check(!kvm.controlling_peer() && kvm.controlled_by_peer(), "while controlled: this PC's edge does not switch");
         check(count<proto::FocusEnter>(take_sent()) == 0, "...and no focus_enter is sent");
 
         // -- the peer's input is injected here
@@ -202,6 +212,24 @@ int main() {
         abs_move(right.point(0.5));
         check(wait_until([&] { return kvm.controlling_peer(); }), "...and our edge works again");
         take_sent();
+
+        // -- whoever moves wins: our own mouse moving while the peer controls us takes the PC back
+        kvm.handle(proto::FocusLeave{.y_norm = 0.5});
+        wait_until([&] { return !kvm.controlling_peer(); });
+        take_sent();
+        kvm.handle(proto::FocusEnter{.y_norm = 0.5});
+        Sleep(60);
+        rel_move(1, 0); Sleep(30); rel_move(-1, 1); Sleep(30); rel_move(1, -1); Sleep(120);
+        check(kvm.controlled_by_peer() && count<proto::FocusLeave>(take_sent()) == 0,
+              "a few pixels of our own jitter: the peer keeps control");
+        rel_move(12, 0); Sleep(20); rel_move(12, 0); Sleep(20); rel_move(12, 0);
+        check(wait_until([&] { return !kvm.controlled_by_peer(); }), "our own mouse moves -> PC taken back from the peer");
+        Sleep(60);
+        check(count<proto::FocusLeave>(take_sent()) == 1, "...the peer is told (focus_leave) so its cursor goes home");
+        abs_move(inside); Sleep(60);
+        abs_move(right.point(0.5));
+        check(wait_until([&] { return kvm.controlling_peer(); }), "...and our edge works right away");
+        take_sent();  // still controlling the peer, as the next check expects
 
         // -- both cross at once, this PC is the host: it keeps control
         check(kvm.handle(proto::FocusEnter{.y_norm = 0.5}), "peer's focus_enter while we control it");

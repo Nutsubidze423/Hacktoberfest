@@ -90,6 +90,11 @@ public:
     using DragAtEdge = std::function<void(double y_norm, display::Point at)>;
     void set_on_drag_at_edge(DragAtEdge callback);
 
+    // Called (worker thread) when this PC's own mouse moves while suspended, i.e.
+    // its user wants the PC back from the peer. Once per suspension.
+    using LocalActivity = std::function<void()>;
+    void set_on_local_activity(LocalActivity callback);
+
     // Control is currently on the peer.
     bool remote() const { return remote_; }
     // The emergency exit was used; the hooks are gone.
@@ -104,6 +109,7 @@ private:
         bool emergency = false;      // FocusLeave caused by Ctrl+Alt+Shift+Q
         const char* note = nullptr;  // log line only, msg is ignored
         std::optional<input::Point> drag_at;  // drag reached the edge here (msg = FocusEnter with its y_norm)
+        bool local_activity = false;          // own mouse moved while suspended
     };
 
     void hook_thread_main();
@@ -121,7 +127,8 @@ private:
     BlockingQueue<Event> events_{4096};
     std::mutex sink_mutex_;
     Sink sink_;
-    DragAtEdge on_drag_at_edge_;  // guarded by sink_mutex_
+    DragAtEdge on_drag_at_edge_;        // guarded by sink_mutex_
+    LocalActivity on_local_activity_;   // guarded by sink_mutex_
 
     std::thread hook_thread_;
     std::thread worker_;

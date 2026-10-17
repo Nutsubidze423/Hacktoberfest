@@ -1,5 +1,8 @@
 #include "kvm/kvm_link.h"
 
+#include <windows.h>
+
+#include <algorithm>
 #include <utility>
 #include <variant>
 
@@ -35,6 +38,7 @@ bool KvmLink::start() {
     if (!options_.send_input || capture_) return true;
     capture_.emplace(capture_options(options_));
     if (on_drag_at_edge_) capture_->set_on_drag_at_edge(on_drag_at_edge_);
+    capture_->set_on_local_activity([this] { take_back(); });
     if (capture_->start()) return true;
     capture_.reset();
     log::error("kvm: input hooks failed - the other PC can still control this one, but not the other way round");
@@ -68,9 +72,28 @@ void KvmLink::detach() {
         capture_->set_client(nullptr);  // control back here; blocks until the capture stops sending
         capture_->set_suspended(false);
     }
-    inject_.release_all();
+    {
+        std::lock_guard lock(inject_mutex_);
+        inject_.release_all();
+    }
     std::lock_guard lock(sink_mutex_);
     sink_ = nullptr;
+}
+
+void KvmLink::take_back() {
+    {
+        std::lock_guard lock(inject_mutex_);
+        if (!inject_.active()) return;
+        inject_.release_all();
+    }
+    // The peer's cursor goes home at the height ours is at now.
+    const auto vd = display::virtual_desktop();
+    POINT pt{};
+    GetCursorPos(&pt);
+    const double y_norm = vd.height() > 0 ? std::clamp((pt.y - vd.top + 0.5) / vd.height(), 0.0, 1.0) : 0.5;
+    log::info("kvm: this PC's own mouse moved - taking it back from the other PC");
+    send(proto::FocusLeave{.y_norm = y_norm});
+    if (capture_) capture_->set_suspended(false);
 }
 
 bool KvmLink::send(const proto::Message& msg) {
@@ -79,6 +102,7 @@ bool KvmLink::send(const proto::Message& msg) {
 }
 
 bool KvmLink::handle(const proto::Message& msg) {
+    std::lock_guard lock(inject_mutex_);
     if (std::holds_alternative<proto::FocusEnter>(msg)) {
         if (controlling_peer()) {
             if (options_.is_host) {
