@@ -3,7 +3,7 @@
 // logo, a title and a text. UI thread only.
 //
 //   kvm::TrayIcon tray;
-//   tray.create(L"KVM client", {.open = [&] { viewer.bring_to_front(); }, .quit = [&] { ... }});
+//   tray.create(kvm::ui::kAppName, {.open = [&] { viewer.bring_to_front(); }, .quit = [&] { ... }});
 //   viewer.set_link_listener([&](auto before, auto now) { tray.on_link_change(before, now, endpoint, true); });
 #pragma once
 
@@ -33,7 +33,7 @@ public:
 
     bool create(std::wstring app_name, Actions actions);
 
-    // Tooltip "{app} · {state word}", e.g. "KVM client · LINKED".
+    // Tooltip "{app} · {state word}", e.g. "Sarke · LINKED".
     void set_state_word(std::wstring_view word);
 
     // Shows a Windows notification (bottom-right) with the logo.

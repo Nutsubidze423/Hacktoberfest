@@ -143,7 +143,7 @@ Window style WS_OVERLAPPEDWINDOW; remove the standard frame by handling WM_NCCAL
 WM_NCHITTEST: 6 dp resize borders on all sides → HTLEFT/HTTOPRIGHT/etc.; title strip (except buttons) → HTCAPTION.
 Title strip: height 32, fill bg0, hairline line at its bottom.
 Status square 8×8 at x=12, vertically centered, color by state (4.4).
-At x=28: state word in label, textLo (e.g. STREAM), then 8 dp gap, then title in body, textHi, ellipsis (stream title, or kvm client when not streaming).
+At x=28: state word in label, textLo (e.g. STREAM), then 8 dp gap, then title in body, textHi, ellipsis (stream title, or sarke when not streaming).
 Right side, right to left: close, maximize/restore, minimize — each 46×32 dp. Then 8 dp gap, then text buttons FIT and HUD, each 40×32 dp, label style.
 Caption glyphs, 10×10 dp, centered, textMid: minimize = 10×1 filled rect; maximize = hairline square; restore = two hairline squares offset 2 dp; close = two diagonals (antialiased, hairline stroke).
 Hover: fill bg2, glyph textHi. Close hover: fill err, glyph textHi. Pressed: same as hover.
@@ -156,14 +156,14 @@ Initial size before any stream: client 960×600 dp. On stream_start: frame size 
 State	Status square	Display word	Detail line (body, textMid)
 Waiting (not connected)	textLo	WAITING	looking for host at {ip}:{port}
 Connecting	warn, blinking	CONNECTING	connecting to {ip}:{port}
-Linked, no stream	ok	LINKED	rtt {n} ms + second line: on host press ctrl+alt+shift+s to pick a window
+Linked, no stream	ok	LINKED	rtt {n} ms + second line: on the other pc press ctrl+alt+shift+w to send a window (hotkey from ARTEFACT "გადაწყვეტილებები 2", #5)
 Streaming	accent	— (frames shown)	—
 Stalled (streaming, no frame > 1000 ms)	warn	overlay STALLED	{t}s without frames (t with 1 decimal)
 Lost (socket closed)	err	CONNECTION LOST	only if reconnect exists: reconnecting — otherwise restart the client
 
 Layout of the state block (Waiting / Connecting / Linked / Lost), left-aligned at x=48, vertically centered in the content area:
 
-KVM CLIENT — label, textLo.
+SARKE (the app name) — label, textLo.
 8 dp gap.
 Display word — display, textHi, followed by 4 dp gap and a 12×28 dp accent block caret (blinking), top-aligned with the cap height area of the display line.
 12 dp gap.
@@ -228,9 +228,10 @@ Do not touch another developer's files; if your surface needs something from the
 Future design changes will be made by editing docs/DESIGN.md and tokens.h only.
 
 9. App logo, tray icon and notifications (added 2026-10-17, chosen by Sandro: concept C "Caret")
+App name (Sandro, 2026-10-17): Sarke — Georgian სარკე, "mirror". Written "Sarke" (window title, tray, notifications), "SARKE" in label style (it uppercases), "sarke" as the viewer strip title when nothing streams. One place in code: tokens (kAppName, kAppNameIdle). The K mark below is from the KVM name and is being replaced; see the Sarke concepts.
 Mark: a pixel letter K followed by a block caret, on a 16×16 grid, square tile, no rounding.
 Tile fill bg0. K in textHi: stem (2,3) 2×10; joint (4,7) 2×2; upper arm (6,5) 2×2 and (8,3) 2×2; lower leg (6,9) 2×2 and (8,11) 2×2. Caret in accent: (11,5) 3×8. Coordinates are (x,y) w×h in grid units; the grid lives in tokens.h (logo::cells).
 Rendering: drawn in code at the exact pixel size Windows asks for (SM_CXSMICON / SM_CXICON for the current DPI); grid cell edges are rounded to whole pixels (no antialiasing, no scaling of a bitmap). No .ico/.rc file is needed, so CMake does not change.
 Uses: window icon of the viewer (small and big), tray icon, notification icon.
-Tray icon: in the notification area ("show hidden icons"). Tooltip: {APP} · {STATE WORD}, e.g. KVM client · LINKED. Left click or double click opens the viewer; right click shows a menu: Show viewer, Quit.
+Tray icon: in the notification area ("show hidden icons"). Tooltip: {APP} · {STATE WORD}, e.g. Sarke · LINKED. Left click or double click opens the viewer; right click shows a menu: Show viewer, Quit.
 Notifications: Windows draws them (bottom-right); we only provide icon, title and text. Connected: title "Connected to host", text "{ip}:{port}". Lost: title "Connection lost", text "reconnecting" (only if reconnect exists, otherwise "restart the client"). No notification for WAITING/CONNECTING.

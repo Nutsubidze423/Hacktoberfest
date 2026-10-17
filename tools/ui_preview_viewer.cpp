@@ -243,7 +243,7 @@ int wmain(int argc, wchar_t** argv) {
     const std::string fake_host = kFakeHost;  // ASCII, so a plain widening copy is exact
     const std::wstring endpoint = std::format(L"{}:{}", std::wstring(fake_host.begin(), fake_host.end()), kFakePort);
     kvm::TrayIcon tray;
-    tray.create(L"KVM client", {.open = [&] { viewer.bring_to_front(); },
+    tray.create(kvm::ui::kAppName, {.open = [&] { viewer.bring_to_front(); },
                                 .quit = [&] { PostMessageW(viewer.hwnd(), WM_CLOSE, 0, 0); }});
     viewer.set_link_listener(
         [&](kvm::LinkState before, kvm::LinkState now) { tray.on_link_change(before, now, endpoint, true); });

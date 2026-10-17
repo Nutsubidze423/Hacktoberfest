@@ -28,7 +28,6 @@ using ui::px;
 using ui::TextStyle;
 
 constexpr wchar_t kClassName[] = L"KvmViewerWindow";
-constexpr wchar_t kDefaultTitle[] = L"kvm client";
 constexpr UINT kMsgStreamStart = WM_APP + 1;  // wParam = width, lParam = height
 constexpr UINT kMsgLinkChanged = WM_APP + 2;  // wParam = LinkState before, lParam = LinkState now
 constexpr UINT_PTR kHudTimer = 1;
@@ -115,7 +114,7 @@ bool ViewerWindow::create(bool visible) {
     reduced_motion_ = reduced_motion();
 
     const UINT system_dpi = GetDpiForSystem();
-    const HWND hwnd = CreateWindowExW(0, kClassName, kDefaultTitle, WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT,
+    const HWND hwnd = CreateWindowExW(0, kClassName, ui::kAppName, WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT,
                                       px(vt::initial_client_w, system_dpi), px(vt::initial_client_h, system_dpi),
                                       nullptr, nullptr, GetModuleHandleW(nullptr), this);
     if (!hwnd) {
@@ -759,7 +758,7 @@ void ViewerWindow::render() {
         stream_title = shared_.stream_title;
     }
     const bool streaming = view == View::Streaming || view == View::Stalled;
-    const std::wstring title = streaming && !stream_title.empty() ? stream_title : std::wstring(kDefaultTitle);
+    const std::wstring title = streaming && !stream_title.empty() ? stream_title : std::wstring(ui::kAppNameIdle);
 
     rt_->BeginDraw();
     rt_->SetTransform(D2D1::Matrix3x2F::Identity());
@@ -816,7 +815,7 @@ void ViewerWindow::render() {
         InvalidateRect(hwnd_, nullptr, FALSE);
     }
 
-    const std::wstring window_text = title == kDefaultTitle ? L"KVM client" : title;
+    const std::wstring window_text = title == ui::kAppNameIdle ? std::wstring(ui::kAppName) : title;
     if (window_text != window_text_) {
         window_text_ = window_text;
         SetWindowTextW(hwnd_, window_text_.c_str());  // taskbar / Alt+Tab
@@ -899,7 +898,7 @@ void ViewerWindow::draw_state_block(ui::Painter& p, View view, const D2D1_RECT_F
     case View::Linked:
         word = L"LINKED";
         details.push_back(rtt ? std::format(L"rtt {} ms", *rtt) : std::format(L"rtt {}", ui::kUnknown));
-        details.push_back(L"on host press ctrl+alt+shift+s to pick a window");
+        details.push_back(L"on the other pc press ctrl+alt+shift+w to send a window");
         break;
     case View::Lost:
         word = L"CONNECTION LOST";
@@ -923,7 +922,7 @@ void ViewerWindow::draw_state_block(ui::Painter& p, View view, const D2D1_RECT_F
     const float max_w = content.right - 2 * x;
     float y = std::floor(content.top + (content.bottom - content.top - total) / 2);
 
-    p.text(TextStyle::Label, L"KVM CLIENT", x, y, max_w, color::text_lo);
+    p.text(TextStyle::Label, ui::kAppName, x, y, max_w, color::text_lo);  // label style: "SARKE"
     y += label_h + gap8;
 
     const float word_w = std::round(p.text(TextStyle::Display, word, x, y, max_w, color::text_hi));

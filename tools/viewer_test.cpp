@@ -179,7 +179,7 @@ int run_connect(int argc, wchar_t** argv) {
     // Tray icon + "Connected to host" / "Connection lost" notifications.
     const std::wstring endpoint = std::format(L"{}:{}", argv[2], port);
     kvm::TrayIcon tray;
-    tray.create(L"KVM client", {.open = [&] { viewer.bring_to_front(); },
+    tray.create(kvm::ui::kAppName, {.open = [&] { viewer.bring_to_front(); },
                                 .quit = [&] { PostMessageW(viewer.hwnd(), WM_CLOSE, 0, 0); }});
     viewer.set_link_listener(
         [&](kvm::LinkState before, kvm::LinkState now) { tray.on_link_change(before, now, endpoint, true); });

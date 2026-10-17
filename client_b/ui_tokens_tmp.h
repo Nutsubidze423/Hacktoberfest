@@ -81,6 +81,9 @@ inline constexpr float s48 = 48;
 }  // namespace space
 
 // --- 2.5 Copy.
+// App name (docs/DESIGN.md section 9): Sarke, Georgian სარკე, "mirror". Label styles uppercase it.
+inline constexpr wchar_t kAppName[] = L"Sarke";        // window, tray, notifications, labels
+inline constexpr wchar_t kAppNameIdle[] = L"sarke";    // viewer strip title when nothing streams
 inline constexpr wchar_t kSeparator[] = L" · ";  // " · "
 inline constexpr wchar_t kTimes[] = L"×";        // "×"
 inline constexpr wchar_t kUnknown[] = L"—";      // "—"
