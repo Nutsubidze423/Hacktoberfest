@@ -33,6 +33,7 @@
 #include "kvm/net.h"
 #include "kvm/protocol.h"
 #include "kvm/video.h"
+#include "virtual_display.h"
 
 namespace {
 
@@ -179,8 +180,14 @@ std::optional<proto::Hello> handshake(kvm::net::Connection& conn) {
     return *hello;
 }
 
+// Windows may put the VDD back on at the driver's 800x600: give it the other PC's real size, on the
+// other PC's side, so the cursor crosses a same-sized screen instead of catching on a tiny one.
+void match_vdd_to_peer(int width, int height, kvm::display::Side side) {
+    if (auto vdd = kvm::VirtualDisplay::find(); vdd && vdd->attached()) vdd->match_peer(width, height, side);
+}
+
 void run_session(kvm::net::Connection& conn, kvm::KvmLink* kvm, kvm::clip::ClipboardSync* clip, VideoSlot& video,
-                 const Options& opt) {
+                 const Options& opt, kvm::display::Side client_side) {
     const auto hello = handshake(conn);
     if (!hello) {
         return;
@@ -188,6 +195,7 @@ void run_session(kvm::net::Connection& conn, kvm::KvmLink* kvm, kvm::clip::Clipb
     kvm::log::info("client '{}' connected from {}: screen {}x{}, dpi scale {:.2f}", hello->hostname, conn.peer(),
                    hello->screen_w, hello->screen_h, hello->dpi_scale);
     conn.send(make_hello());
+    match_vdd_to_peer(hello->screen_w, hello->screen_h, client_side);
 
     // KVM + clipboard use conn while the session lasts. detach() blocks until they
     // stop using it, so it must run before conn goes away (struct dtor).
@@ -327,7 +335,8 @@ int wmain(int argc, wchar_t** argv) {
             if (!conn) {
                 continue;  // stop() or a transient accept error
             }
-            run_session(*conn, kvm_link ? &*kvm_link : nullptr, clip_on ? &clip : nullptr, video, opt);
+            run_session(*conn, kvm_link ? &*kvm_link : nullptr, clip_on ? &clip : nullptr, video, opt,
+                        side.value_or(kvm::display::Side::Right));
         }
         hotkeys.stop();
         file_server.stop();

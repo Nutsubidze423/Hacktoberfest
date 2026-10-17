@@ -2,6 +2,8 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstdlib>
+#include <format>
 #include <string_view>
 #include <thread>
 #include <vector>
@@ -159,6 +161,36 @@ bool VirtualDisplay::set_mode(int width, int height, int hz) {
     });
 }
 
+SIZE VirtualDisplay::best_mode(int width, int height) const {
+    std::vector<SIZE> modes;
+    DEVMODEW dm{};
+    dm.dmSize = sizeof(dm);
+    for (DWORD i = 0; EnumDisplaySettingsW(device_.c_str(), i, &dm); ++i) {
+        modes.push_back({static_cast<LONG>(dm.dmPelsWidth), static_cast<LONG>(dm.dmPelsHeight)});
+    }
+    if (modes.empty()) return {width, height};
+    const auto distance = [&](const SIZE& m) {
+        // Same width first (the edge the cursor crosses keeps its length), then nearest height.
+        return (m.cx == width ? 0LL : 1'000'000LL) + std::llabs(static_cast<long long>(m.cx) - width) +
+               std::llabs(static_cast<long long>(m.cy) - height);
+    };
+    return *std::min_element(modes.begin(), modes.end(),
+                             [&](const SIZE& a, const SIZE& b) { return distance(a) < distance(b); });
+}
+
+bool VirtualDisplay::match_peer(int width, int height, display::Side side) {
+    if (!attached()) return false;
+    const SIZE mode = best_mode(width, height);
+    const auto r = rect();
+    const bool same_size = r && r->rect.right - r->rect.left == mode.cx && r->rect.bottom - r->rect.top == mode.cy;
+    if (!same_size && !set_mode(mode.cx, mode.cy, 60)) return false;
+    const bool placed = place(side);
+    log::info("vdd: {} matched to the other PC: {}x{}{} on the {}", utf8(device_), mode.cx, mode.cy,
+              mode.cx == width && mode.cy == height ? "" : std::format(" (closest mode to {}x{})", width, height),
+              display::to_string(side));
+    return placed;
+}
+
 bool VirtualDisplay::place(display::Side side) {
     DEVMODEW dm{};
     dm.dmSize = sizeof(dm);
@@ -178,7 +210,13 @@ bool VirtualDisplay::place(display::Side side) {
     });
 }
 
-bool VirtualDisplay::attach(int width, int height, int hz, display::Side side) {
+bool VirtualDisplay::attach(int requested_width, int requested_height, int hz, display::Side side) {
+    // The other PC's screen may not be one of the driver's modes (e.g. 1920x1200): take the closest.
+    const SIZE mode = best_mode(requested_width, requested_height);
+    const int width = mode.cx, height = mode.cy;
+    if (width != requested_width || height != requested_height) {
+        log::info("vdd: {}x{} isn't a VDD mode, using {}x{}", requested_width, requested_height, width, height);
+    }
     auto others = attached_monitors();
     std::erase_if(others, [&](const AttachedMonitor& m) { return m.device == device_; });
     const POINT pos = position_for(side, width, height, others);

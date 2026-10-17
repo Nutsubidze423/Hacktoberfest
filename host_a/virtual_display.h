@@ -49,6 +49,15 @@ public:
     // C:\VirtualDisplayDriver\vdd_settings.xml (1920x1080 and other common modes are).
     bool set_mode(int width, int height, int hz);
 
+    // The driver's mode closest to width x height: exactly that if it's listed, else the same width
+    // with the nearest height, else the nearest size. {width, height} if the driver lists nothing.
+    SIZE best_mode(int width, int height) const;
+
+    // On connection: if the VDD is attached (e.g. Windows put it back at the driver's 800x600), give
+    // it the other PC's real resolution (or the closest mode) and put it on `side`, so the cursor
+    // crosses a same-sized screen instead of catching on a tiny one. False if not attached.
+    bool match_peer(int width, int height, display::Side side);
+
     // Moves the attached monitor next to the other attached monitors. The primary stays at (0, 0).
     bool place(display::Side side);
 

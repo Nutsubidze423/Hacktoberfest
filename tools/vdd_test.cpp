@@ -139,7 +139,16 @@ int main(int argc, char** argv) {
     check(vdd->attach(width, height, hz, side), "attach again");
     check(has_size(*vdd, width, height) && is_on_side(*vdd, side), std::format("{} on the {} again", mode, side_name));
 
+    // What happens on connection when Windows had put the VDD back at the driver's small default.
+    check(vdd->set_mode(800, 600, 60), "VDD at 800x600 (like Windows' default)");
+    check(vdd->match_peer(1920, 1200, side) && has_size(*vdd, 1920, 1080) && is_on_side(*vdd, side),
+          "match_peer(1920x1200): closest mode 1920x1080, on the side");
+    check(vdd->match_peer(1920, 1080, side) && has_size(*vdd, 1920, 1080), "match_peer(1920x1080): exact");
+    const SIZE best = vdd->best_mode(2560, 1600);
+    check(best.cx == 2560 && best.cy == 1440, std::format("best_mode(2560x1600) = {}x{}", best.cx, best.cy));
+
     check(vdd->detach(), "final detach");
+    check(!vdd->match_peer(1920, 1080, side), "match_peer leaves a detached VDD alone");
     print_displays("after");
 
     if (check.failed) {

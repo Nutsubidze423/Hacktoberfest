@@ -27,11 +27,18 @@
 #include "kvm/net.h"
 #include "kvm/protocol.h"
 #include "kvm/video.h"
+#include "virtual_display.h"
 
 namespace {
 
 using namespace std::chrono_literals;
 namespace proto = kvm::proto;
+
+// Windows may put the VDD back on at the driver's 800x600: give it the other PC's real size, on the
+// other PC's side, so the cursor crosses a same-sized screen instead of catching on a tiny one.
+void match_vdd_to_peer(int width, int height, kvm::display::Side side) {
+    if (auto vdd = kvm::VirtualDisplay::find(); vdd && vdd->attached()) vdd->match_peer(width, height, side);
+}
 
 constexpr auto kReconnectDelay = 1s;
 constexpr auto kStatsInterval = 5s;
@@ -159,6 +166,11 @@ void run_session(kvm::net::Connection& conn, const kvm::Config& cfg, kvm::KvmLin
                 // KVM: A controls B, or A's cursor came back
             } else if (const auto* c = std::get_if<proto::Clipboard>(&*msg); c && clip) {
                 clip->receive(to_chunk(*c));
+            } else if (const auto* h = std::get_if<proto::Hello>(&*msg)) {
+                kvm::log::info("host '{}': screen {}x{}, dpi scale {:.2f}", h->hostname, h->screen_w, h->screen_h,
+                               h->dpi_scale);
+                const auto client_side = kvm::display::parse_side(cfg.client_side).value_or(kvm::display::Side::Right);
+                match_vdd_to_peer(h->screen_w, h->screen_h, kvm::display::opposite(client_side));
             } else {
                 // TODO(luka): route to viewer (sandro) once it exists.
                 kvm::log::info("from host: {}", proto::encode(*msg).dump());
