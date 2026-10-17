@@ -1,0 +1,8 @@
+{
+  "host_ip": "192.168.1.10",
+  "control_port": 50500,
+  "video_port": 50501,
+  "client_side": "right",
+  "jpeg_quality": 75,
+  "max_fps": 30
+}
