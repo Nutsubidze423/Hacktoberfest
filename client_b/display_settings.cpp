@@ -659,8 +659,7 @@ void DisplaySettings::activate(Hit hit) {
     case Hit::SideRight: set_pending(Side::Right); break;
     case Hit::SideTop: set_pending(Side::Top); break;
     case Hit::SideBottom: set_pending(Side::Bottom); break;
-    case Hit::RoleHost: set_role(Role::Host); break;
-    case Hit::RoleClient: set_role(Role::Client); break;
+    case Hit::Connect: set_role(role_ == Role::Host ? Role::Client : Role::Host); break;
     case Hit::Apply: apply(); break;
     case Hit::Revert: revert(); break;
     case Hit::Identify: identify(); break;
@@ -731,10 +730,10 @@ DisplaySettings::Layout DisplaySettings::compute_layout() const {
     py += caption_h + P(ui::space::s16);
     l.role_label_top = py;
     py += caption_h + P(ui::space::s8);
-    const float half = std::floor((pr - pl - 2 * inset) / 2);
-    l.roles[0] = {pl + inset, py + inset, pl + inset + half, py + P(kSegmentH) - inset};
-    l.roles[1] = {pl + inset + half, py + inset, pr - inset, py + P(kSegmentH) - inset};
-    py += P(kSegmentH) + P(ui::space::s16);
+    // One Connect / Disconnect button (full width), instead of a Host / Client toggle.
+    l.roles[0] = {pl, py, pr, py + P(kButtonH)};
+    l.roles[1] = l.roles[0];
+    py += P(kButtonH) + P(ui::space::s16);
     l.rows_top = py;
     const float bt = l.panel.bottom - P(kTilePad) - P(kButtonH);
     const float bhalf = std::floor((pr - pl - P(ui::space::s8)) / 2);
@@ -785,8 +784,7 @@ DisplaySettings::Hit DisplaySettings::hit_test(POINT client) const {
     for (int i = 0; i < 4; ++i) {
         if (contains(l.sides[i], x, y)) return kSideHits[i];
     }
-    if (contains(l.roles[0], x, y)) return Hit::RoleHost;
-    if (contains(l.roles[1], x, y)) return Hit::RoleClient;
+    if (contains(l.roles[0], x, y)) return Hit::Connect;
     if (contains(l.apply, x, y)) return Hit::Apply;
     if (contains(l.revert, x, y)) return Hit::Revert;
     if (contains(l.identify, x, y)) return Hit::Identify;
@@ -803,8 +801,7 @@ bool DisplaySettings::hit_enabled(Hit hit) const {
     case Hit::SideLeft:
     case Hit::SideRight:
     case Hit::Peer: return !mons_.empty();
-    case Hit::RoleHost:
-    case Hit::RoleClient: return !options_.role.has_value() || static_cast<bool>(on_role_change_);
+    case Hit::Connect: return !options_.role.has_value() || static_cast<bool>(on_role_change_);
     case Hit::Apply: return dirty() && !mons_.empty();
     case Hit::Revert: return dirty() && saved_valid_;
     case Hit::Identify: return !mons_.empty();
@@ -1061,11 +1058,14 @@ void DisplaySettings::draw_panel(ui::Painter& p, const Layout& l) {
         p.text(TextStyle::Caption, L"Top and bottom: next host update.", pl, l.side_note_top, pr - pl, c.ink3);
     }
 
-    p.text(TextStyle::Caption, options_.role ? L"This PC is the" : L"This PC is the (guessed)", pl, l.role_label_top,
-           pr - pl, c.ink3);
-    track(l.roles[0], l.roles[1]);
-    draw_button(p, l.roles[0], L"Host", Hit::RoleHost, false, role_ == Role::Host);
-    draw_button(p, l.roles[1], L"Client", Hit::RoleClient, false, role_ == Role::Client);
+    // Connection: who this PC is linked to, and one button to connect or disconnect.
+    const bool connected = peer_live_ && peer_.known();
+    const std::wstring conn_status = connected  ? L"Connected to " + widen(peer_.hostname)
+                                     : role_ == Role::Client ? std::wstring(L"Looking for the other PC…")
+                                                             : std::wstring(L"Waiting for the other PC to connect");
+    p.text(TextStyle::Caption, conn_status, pl, l.role_label_top, pr - pl, connected ? c.ok : c.ink3);
+    draw_button(p, l.roles[0], role_ == Role::Host ? L"Connect to the other PC" : L"Disconnect", Hit::Connect,
+                /*primary=*/role_ == Role::Host, /*selected=*/false);
 
     // Readouts, as many as fit above the buttons.
     std::wstring state;

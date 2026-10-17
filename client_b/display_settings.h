@@ -73,7 +73,7 @@ public:
     enum class Hit {
         None, Minimize, Close, Peer,
         SideLeft, SideRight, SideTop, SideBottom,
-        RoleHost, RoleClient, Apply, Revert, Identify, WindowsSettings,
+        RoleHost, RoleClient, Connect, Apply, Revert, Identify, WindowsSettings,
     };
 
 private:
