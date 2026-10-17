@@ -23,6 +23,7 @@
 #include "ui_draw_tmp.h"
 #include "viewer_chrome.h"
 #include "viewer_hud.h"
+#include "viewer_input.h"
 
 namespace kvm {
 
@@ -65,7 +66,12 @@ public:
 
     // --- UI thread -----------------------------------------------------------------------
     // Client point -> 0..1 over the drawn image. nullopt over the strip, letterbox or no frame.
-    std::optional<D2D1_POINT_2F> to_normalized(POINT client) const;
+    // With clamp, a point outside the visible image snaps to its edge (drags that leave the image).
+    std::optional<D2D1_POINT_2F> to_normalized(POINT client, bool clamp = false) const;
+
+    // Mouse/keyboard on the streamed image become messages for A (remote_mouse_move, mouse_button,
+    // mouse_wheel, key), handed to `sink` on the UI thread — e.g. Connection::send_json.
+    void set_input_sink(ViewerInput::Sink sink) { input_.set_sink(std::move(sink)); }
 
     // Called on the UI thread after every link state change (e.g. for the tray icon).
     using LinkListener = std::function<void(LinkState before, LinkState now)>;
@@ -91,6 +97,8 @@ private:
     void on_blink_tick();
     void apply_dpi(UINT dpi);
     void update_icons();
+    bool input_active() const;
+    void on_mouse_button(proto::MouseButton button, bool down, LPARAM lp);
     void resize_for_stream(int width, int height);
     void on_strip_click(viewer::StripButton button);
     LRESULT hit_test_nc(POINT screen) const;
@@ -152,6 +160,7 @@ private:
     std::wstring footer_;
     std::wstring window_text_;
     LinkListener link_listener_;
+    ViewerInput input_;
     ui::unique_icon small_icon_;
     ui::unique_icon big_icon_;
 };

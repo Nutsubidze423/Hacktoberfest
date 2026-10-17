@@ -7,6 +7,7 @@
 //       Live stream over the network via VideoReceiver (from tools/fake_streamer.exe, later from A).
 //
 // Check: the image looks right, keeps its aspect ratio when resized, and the HUD shows FPS etc.
+// Mouse/keys on the image are logged as the messages that would go to A ("to A: {...}").
 
 #include <algorithm>
 #include <chrono>
@@ -66,6 +67,11 @@ std::vector<fs::path> collect_inputs(const fs::path& input) {
     return files;
 }
 
+// No control connection here: viewer input that would go to A is logged instead.
+void log_input(const kvm::proto::Message& msg) {
+    kvm::log::info("to A: {}", kvm::proto::encode(msg).dump());
+}
+
 std::vector<uint8_t> read_file(const fs::path& path) {
     std::ifstream in(path, std::ios::binary);
     return {std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
@@ -115,6 +121,7 @@ int run_connect(int argc, wchar_t** argv) {
         return 1;
     }
     viewer.set_jpeg_quality(cfg.jpeg_quality);
+    viewer.set_input_sink(log_input);
 
     // Tray icon + "Connected to host" / "Connection lost" notifications.
     const std::wstring endpoint = std::format(L"{}:{}", argv[2], port);
@@ -175,6 +182,7 @@ int run_local(const fs::path& input, int fps) {
         kvm::log::error("could not create the viewer window (error {})", GetLastError());
         return 1;
     }
+    viewer.set_input_sink(log_input);
     // Local playback stands in for a linked host streaming the folder.
     viewer.set_link_state(kvm::LinkState::Linked);
     viewer.start_stream(input.filename().wstring(), first.width, first.height);

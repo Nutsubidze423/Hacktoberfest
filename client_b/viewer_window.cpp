@@ -222,7 +222,7 @@ void ViewerWindow::present(BgraImage& frame, const FrameInfo& info) {
 // ---------------------------------------------------------------------------------------------
 // UI thread
 
-std::optional<D2D1_POINT_2F> ViewerWindow::to_normalized(POINT client) const {
+std::optional<D2D1_POINT_2F> ViewerWindow::to_normalized(POINT client, bool clamp) const {
     const D2D1_RECT_F& r = image_rect_;
     if (!have_frame_ || r.right <= r.left || r.bottom <= r.top) {
         return std::nullopt;
@@ -230,14 +230,57 @@ std::optional<D2D1_POINT_2F> ViewerWindow::to_normalized(POINT client) const {
     RECT rc;
     GetClientRect(hwnd_, &rc);
     const auto strip_bottom = static_cast<float>(px(vt::strip_h, dpi_));
-    const float x = static_cast<float>(client.x) + 0.5f;  // pixel center
-    const float y = static_cast<float>(client.y) + 0.5f;
     // Visible part of the image only: never the strip, the letterbox or a cropped (1:1) edge.
-    if (x < std::max(r.left, 0.0f) || x >= std::min(r.right, static_cast<float>(rc.right)) ||
-        y < std::max(r.top, strip_bottom) || y >= std::min(r.bottom, static_cast<float>(rc.bottom))) {
+    const float left = std::max(r.left, 0.0f);
+    const float right = std::min(r.right, static_cast<float>(rc.right));
+    const float top = std::max(r.top, strip_bottom);
+    const float bottom = std::min(r.bottom, static_cast<float>(rc.bottom));
+    if (right <= left || bottom <= top) {
+        return std::nullopt;
+    }
+    float x = static_cast<float>(client.x) + 0.5f;  // pixel center
+    float y = static_cast<float>(client.y) + 0.5f;
+    if (clamp) {
+        x = std::clamp(x, left + 0.5f, right - 0.5f);
+        y = std::clamp(y, top + 0.5f, bottom - 0.5f);
+    } else if (x < left || x >= right || y < top || y >= bottom) {
         return std::nullopt;
     }
     return D2D1::Point2F((x - r.left) / (r.right - r.left), (y - r.top) / (r.bottom - r.top));
+}
+
+bool ViewerWindow::input_active() const {
+    const View view = current_view();
+    return view == View::Streaming || view == View::Stalled;
+}
+
+void ViewerWindow::on_mouse_button(proto::MouseButton button, bool down, LPARAM lp) {
+    const POINT pt{GET_X_LPARAM(lp), GET_Y_LPARAM(lp)};
+    if (down) {
+        if (!input_active()) {
+            return;
+        }
+        const auto p = to_normalized(pt);
+        if (!p) {
+            return;  // letterbox: ignored, not sent
+        }
+        if (!input_.any_button_held()) {
+            SetCapture(hwnd_);  // keep getting the drag when it leaves the image or the window
+        }
+        input_.mouse_button(button, true, {p->x, p->y});
+        return;
+    }
+    if (!input_.button_held(button)) {
+        return;
+    }
+    if (const auto p = to_normalized(pt, true)) {
+        input_.mouse_button(button, false, {p->x, p->y});
+    } else {
+        input_.release_all();  // the image went away mid-drag
+    }
+    if (!input_.any_button_held()) {
+        ReleaseCapture();
+    }
 }
 
 LRESULT CALLBACK ViewerWindow::wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
@@ -323,20 +366,71 @@ LRESULT ViewerWindow::handle_message(UINT msg, WPARAM wp, LPARAM lp) {
         InvalidateRect(hwnd, nullptr, FALSE);
         return 0;
     case WM_MOUSEMOVE: {
-        RECT rc;
-        GetClientRect(hwnd, &rc);
-        const auto button = viewer::hit_test(viewer::layout_strip(static_cast<float>(rc.right), dpi_),
-                                             static_cast<float>(GET_X_LPARAM(lp)), static_cast<float>(GET_Y_LPARAM(lp)));
+        const POINT pt{GET_X_LPARAM(lp), GET_Y_LPARAM(lp)};
         if (!tracking_mouse_) {
             TRACKMOUSEEVENT tme{sizeof(tme), TME_LEAVE, hwnd, 0};
             tracking_mouse_ = TrackMouseEvent(&tme) != FALSE;
         }
+        if (input_.any_button_held()) {
+            // Dragging on A: follow the pointer even outside the image (clamped to its edge).
+            if (const auto p = to_normalized(pt, true)) {
+                input_.mouse_move({p->x, p->y});
+            }
+            return 0;
+        }
+        RECT rc;
+        GetClientRect(hwnd, &rc);
+        const auto button = viewer::hit_test(viewer::layout_strip(static_cast<float>(rc.right), dpi_),
+                                             static_cast<float>(pt.x), static_cast<float>(pt.y));
         if (button != hover_) {
             hover_ = button;
             InvalidateRect(hwnd, nullptr, FALSE);
         }
+        if (button == viewer::StripButton::None && pressed_ == viewer::StripButton::None && input_active()) {
+            if (const auto p = to_normalized(pt)) {
+                input_.mouse_move({p->x, p->y});
+            }
+        }
         return 0;
     }
+    case WM_RBUTTONDOWN:
+    case WM_RBUTTONUP:
+        on_mouse_button(proto::MouseButton::Right, msg == WM_RBUTTONDOWN, lp);
+        return 0;
+    case WM_MBUTTONDOWN:
+    case WM_MBUTTONUP:
+        on_mouse_button(proto::MouseButton::Middle, msg == WM_MBUTTONDOWN, lp);
+        return 0;
+    case WM_XBUTTONDOWN:
+    case WM_XBUTTONUP:
+        on_mouse_button(GET_XBUTTON_WPARAM(wp) == XBUTTON1 ? proto::MouseButton::X1 : proto::MouseButton::X2,
+                        msg == WM_XBUTTONDOWN, lp);
+        return TRUE;
+    case WM_MOUSEWHEEL:
+    case WM_MOUSEHWHEEL: {
+        POINT pt{GET_X_LPARAM(lp), GET_Y_LPARAM(lp)};  // screen coordinates for wheel messages
+        ScreenToClient(hwnd, &pt);
+        if (input_active() && to_normalized(pt)) {
+            input_.wheel(GET_WHEEL_DELTA_WPARAM(wp), msg == WM_MOUSEHWHEEL);
+            return 0;
+        }
+        break;
+    }
+    case WM_KEYDOWN:
+    case WM_KEYUP:
+    case WM_SYSKEYDOWN:
+    case WM_SYSKEYUP: {
+        // Alt+F4 stays local (closes the viewer) so it can never close the window on A by accident.
+        const bool alt_f4 = wp == VK_F4 && (lp & (1 << 29)) != 0;
+        if (input_active() && !alt_f4) {
+            input_.key(wp, lp, msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN);
+            return 0;  // consumed: Alt must not open the system menu here
+        }
+        break;
+    }
+    case WM_KILLFOCUS:
+        input_.release_all();  // nothing stays pressed on A when the viewer loses focus
+        break;
     case WM_MOUSELEAVE:
         tracking_mouse_ = false;
         if (hover_ != viewer::StripButton::None) {
@@ -349,10 +443,14 @@ LRESULT ViewerWindow::handle_message(UINT msg, WPARAM wp, LPARAM lp) {
             pressed_ = hover_;
             SetCapture(hwnd);
             InvalidateRect(hwnd, nullptr, FALSE);
+        } else {
+            on_mouse_button(proto::MouseButton::Left, true, lp);
         }
         return 0;
     case WM_LBUTTONUP:
-        if (pressed_ != viewer::StripButton::None) {
+        if (pressed_ == viewer::StripButton::None) {
+            on_mouse_button(proto::MouseButton::Left, false, lp);
+        } else {
             RECT rc;
             GetClientRect(hwnd, &rc);
             const auto released_on = viewer::hit_test(viewer::layout_strip(static_cast<float>(rc.right), dpi_),
@@ -504,6 +602,7 @@ void ViewerWindow::take_pending_frame() {
     }
     if (generation != seen_generation_) {
         // New stream (or the old one ended): per-stream state starts over.
+        input_.release_all();
         seen_generation_ = generation;
         have_frame_ = false;
         stream_sized_ = false;

@@ -158,9 +158,9 @@ Claude წაიკითხავს ამ ფაილს, იპოვის
 - [x] `viewer_window.*`: Win32 + `StretchDIBits`, aspect ratio, FPS/latency overlay (latency-ს მნიშვნელობა ჩაჯდება net-ის ინტეგრაციისას `set_status()`-ით)
 - [x] `tools/fake_streamer.cpp` (+ `viewer_test.exe --connect <host>`)
 - [x] `video_receiver.*`: ქსელი → decode → ჩვენება (LatestSlot, reconnect; 1080p 30 fps / ~10 ms ლოკალურად). ლუკას `connect_video` + `recv_frame`-ზეა (`video.h`), `fake_streamer` — `VideoServer`-ზე. `kvm_client`-ში ჩართვა: ლუკა, M1b
-- [ ] viewer-ის ინფუთი → `remote_mouse_move`, `mouse_button`, `mouse_wheel`, `key`
+- [x] viewer-ის ინფუთი → `remote_mouse_move`, `mouse_button`, `mouse_wheel`, `key` (`viewer_input.*`; მხოლოდ გამოსახულებაზე, drag-ისას კიდეზე clamp, ფოკუსის დაკარგვისას ყველაფერი up, Alt+F4 ლოკალურია). გაგზავნა: `ViewerWindow::set_input_sink` → `kvm_client`-ში `conn.send_json` (ლუკა)
 - [ ] M1: რეალური სტრიმი B-ზე
-- [ ] ფაზა 2: `host_a/remote_input.*` — client area-ზე გადათვლა, ფოკუსი, კლავიატურა
+- [ ] ფაზა 2: `host_a/remote_input.*` — სანდრო თანახმაა, რომ თემომ აიღოს (`temo/remote-input`); ელოდება ლუკას პასუხს
 
 ## რისკები
 | რისკი | რა ვქნათ |
