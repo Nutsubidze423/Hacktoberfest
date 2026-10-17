@@ -19,7 +19,23 @@ constexpr wchar_t kClassName[] = L"KvmFileDragSource";
 constexpr UINT kStartMessage = WM_APP + 1;
 constexpr UINT_PTR kArmTimer = 1;
 constexpr UINT kArmTimeoutMs = 700;  // our button press must reach the window by then
-constexpr int kSize = 8;             // px; the window only has to be under the cursor
+constexpr int kSize = 48;            // px; the window only has to be under the cursor
+
+// Moves the cursor to (x, y) and presses the left button there in one input event, so the press
+// lands on our window even while the user (or the KVM) keeps moving the cursor: a separate move and
+// press let other moves slip in between, and the press then hit whatever was under the cursor.
+bool press_left_at(POINT p) {
+    const int vx = GetSystemMetrics(SM_XVIRTUALSCREEN), vy = GetSystemMetrics(SM_YVIRTUALSCREEN);
+    const int vw = GetSystemMetrics(SM_CXVIRTUALSCREEN), vh = GetSystemMetrics(SM_CYVIRTUALSCREEN);
+    if (vw <= 0 || vh <= 0) return input::send_mouse_button(input::MouseButton::Left, true);
+    INPUT in{};
+    in.type = INPUT_MOUSE;
+    in.mi.dx = static_cast<LONG>((2LL * (p.x - vx) + 1) * 32768 / vw);  // pixel centre, 0..65535
+    in.mi.dy = static_cast<LONG>((2LL * (p.y - vy) + 1) * 32768 / vh);
+    in.mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK | MOUSEEVENTF_LEFTDOWN;
+    in.mi.dwExtraInfo = input::kInjectedMarker;  // our own: the KVM hooks let it through untouched
+    return SendInput(1, &in, sizeof(in)) == 1;
+}
 
 // Drop when the left button goes up, cancel on Esc. Hides the helper window once the drag runs so
 // it can't be the drop target itself.
@@ -148,7 +164,7 @@ void FileDragSource::on_start(HWND hwnd) {
     armed_ = true;
     SetTimer(hwnd, kArmTimer, kArmTimeoutMs, nullptr);
     // The press must be ours: only then may this thread capture the mouse for DoDragDrop.
-    input::send_mouse_button(input::MouseButton::Left, true);
+    press_left_at(cursor);
 }
 
 void FileDragSource::on_button_down(HWND hwnd) {

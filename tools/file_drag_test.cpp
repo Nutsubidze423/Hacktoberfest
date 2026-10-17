@@ -9,6 +9,7 @@
 #include <ole2.h>
 #include <winsock2.h>
 
+#include <atomic>
 #include <chrono>
 #include <filesystem>
 #include <format>
@@ -136,6 +137,47 @@ int main() {
         check(same, std::format("the catcher got both paths ({} item(s))", dropped.size()));
     }
     check(!drag.dragging(), "the drag is over");
+
+    // 1b) The user keeps moving the mouse while the files arrive (as in the two-PC test): the press
+    // that starts the drag must still land on the drag window, not on whatever the cursor passes.
+    {
+        {
+            std::lock_guard lock(mutex);
+            dropped.clear();
+        }
+        catcher.show_at(target, 10s);
+        kvm::input::move_cursor_abs(center.x, center.y);
+        std::this_thread::sleep_for(200ms);
+        std::atomic<bool> wiggle{true};
+        std::thread mover([&] {
+            for (int i = 0; wiggle; ++i) {
+                kvm::input::move_cursor_abs(center.x + (i % 2 ? 25 : -25), center.y + (i % 3 - 1) * 25);
+                std::this_thread::sleep_for(3ms);
+            }
+        });
+        std::promise<DWORD> moving_done;
+        auto moving_result = moving_done.get_future();
+        check(drag.start(files, [&](DWORD effect) { moving_done.set_value(effect); }), "drag started while moving");
+        std::this_thread::sleep_for(400ms);
+        wiggle = false;
+        mover.join();
+        check(drag.dragging(), "the drag runs although the cursor moved during the start");
+        for (int i = 1; i <= 10; ++i) {
+            kvm::input::move_cursor_abs(center.x + 30 * i, center.y);
+            std::this_thread::sleep_for(30ms);
+        }
+        std::this_thread::sleep_for(300ms);
+        kvm::input::send_mouse_button(kvm::input::MouseButton::Left, false);
+        if (moving_result.wait_for(3s) != std::future_status::ready) {
+            press_escape();
+            kvm::input::send_mouse_button(kvm::input::MouseButton::Left, false);
+        }
+        const DWORD moving_effect =
+            moving_result.wait_for(2s) == std::future_status::ready ? moving_result.get() : DROPEFFECT_NONE;
+        check(moving_effect != DROPEFFECT_NONE, std::format("dropped after a moving start (effect {})", moving_effect));
+        kvm::input::move_cursor_abs(cursor_before.x, cursor_before.y);
+        std::this_thread::sleep_for(200ms);
+    }
 
     kvm::log::info("2) the whole cross-PC drag on one PC (A and B over 127.0.0.1, no KVM)");
     {
