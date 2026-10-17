@@ -4,10 +4,13 @@
 //       Local playback: decodes the JPEG(s) (logs a decode benchmark) and plays them in a loop from
 //       a background thread, like the real video receiver. No network.
 //   viewer_test.exe --connect <host> [--port 50501]
-//       Live stream over the network via VideoReceiver (from tools/fake_streamer.exe, later from A).
+//       Live stream over the network: does what main.cpp does for the video channel (connect,
+//       reconnect every second, link state) and hands the channel to a VideoReceiver. Works with
+//       tools/fake_streamer.exe (JPEG) and with kvm_host.exe --no-kvm --test-video (codec "test":
+//       not shown, but counted in the HUD's MBPS).
 //
 // Check: the image looks right, keeps its aspect ratio when resized, and the HUD shows FPS etc.
-// Mouse/keys on the image are logged as the messages that would go to A ("to A: {...}").
+// Messages that would go to the window owner (input, stream_stop) are logged as "to owner: {...}".
 
 #include <algorithm>
 #include <chrono>
@@ -67,9 +70,57 @@ std::vector<fs::path> collect_inputs(const fs::path& input) {
     return files;
 }
 
-// No control connection here: viewer input that would go to A is logged instead.
-void log_input(const kvm::proto::Message& msg) {
-    kvm::log::info("to A: {}", kvm::proto::encode(msg).dump());
+constexpr auto kConnectTimeout = std::chrono::seconds(2);
+constexpr auto kReconnectDelay = std::chrono::seconds(1);
+constexpr auto kPollInterval = std::chrono::milliseconds(50);
+
+// No control connection here: messages for the window owner are logged instead.
+bool log_to_owner(const kvm::proto::Message& msg) {
+    kvm::log::info("to owner: {}", kvm::proto::encode(msg).dump());
+    return true;
+}
+
+void sleep_unless_stopped(std::stop_token& stop, std::chrono::milliseconds duration) {
+    const auto until = Clock::now() + duration;
+    while (!stop.stop_requested() && Clock::now() < until) {
+        std::this_thread::sleep_for(kPollInterval);
+    }
+}
+
+// Stands in for main.cpp's video side: it owns the channel, reconnects and sets the link state;
+// the VideoReceiver only reads from the channel it is given.
+void video_link_loop(std::stop_token stop, const std::string& host, std::uint16_t port, kvm::ViewerWindow& viewer) {
+    const bool same_machine = host == "127.0.0.1" || host == "localhost";
+    bool lost = false;  // after a drop, the viewer keeps showing LOST until the link is back
+    while (!stop.stop_requested()) {
+        if (!lost) {
+            viewer.set_link_state(kvm::LinkState::Connecting);
+        }
+        auto channel = kvm::net::connect_video(host, port, kConnectTimeout);
+        if (!channel) {
+            if (!lost) {
+                viewer.set_link_state(kvm::LinkState::Waiting);
+            }
+            sleep_unless_stopped(stop, kReconnectDelay);
+            continue;
+        }
+        viewer.set_link_state(kvm::LinkState::Linked);
+        lost = false;
+        {
+            kvm::VideoReceiver receiver(*channel, viewer);
+            if (same_machine) {
+                receiver.set_clock_offset_us(0);  // same machine, same clock: latency is exact
+            }
+            while (!stop.stop_requested() && receiver.running()) {
+                std::this_thread::sleep_for(kPollInterval);
+            }
+        }  // the receiver closes the channel and joins before `channel` is destroyed
+        if (!stop.stop_requested()) {
+            kvm::log::warn("video: connection lost, reconnecting");
+            viewer.set_link_state(kvm::LinkState::Lost);
+            lost = true;
+        }
+    }
 }
 
 std::vector<uint8_t> read_file(const fs::path& path) {
@@ -121,7 +172,9 @@ int run_connect(int argc, wchar_t** argv) {
         return 1;
     }
     viewer.set_jpeg_quality(cfg.jpeg_quality);
-    viewer.set_input_sink(log_input);
+    viewer.set_endpoint(host, port);
+    viewer.set_reconnects(true);
+    viewer.set_message_sink(log_to_owner);
 
     // Tray icon + "Connected to host" / "Connection lost" notifications.
     const std::wstring endpoint = std::format(L"{}:{}", argv[2], port);
@@ -131,10 +184,8 @@ int run_connect(int argc, wchar_t** argv) {
     viewer.set_link_listener(
         [&](kvm::LinkState before, kvm::LinkState now) { tray.on_link_change(before, now, endpoint, true); });
 
-    kvm::VideoReceiver receiver(host, port, viewer);  // declared after viewer: its threads stop first
-    if (host == "127.0.0.1" || host == "localhost") {
-        receiver.set_clock_offset_us(0);  // same machine, same clock: latency is exact
-    }
+    // Declared after viewer and tray: stopped and joined first.
+    std::jthread video(video_link_loop, host, port, std::ref(viewer));
     pump_messages();
     return 0;
 }
@@ -182,10 +233,12 @@ int run_local(const fs::path& input, int fps) {
         kvm::log::error("could not create the viewer window (error {})", GetLastError());
         return 1;
     }
-    viewer.set_input_sink(log_input);
-    // Local playback stands in for a linked host streaming the folder.
+    viewer.set_message_sink(log_to_owner);
+    // Local playback stands in for a linked owner streaming the folder. hwnd 0 is a placeholder:
+    // closing the window logs the stream_stop that would give the window back.
     viewer.set_link_state(kvm::LinkState::Linked);
-    viewer.start_stream(input.filename().wstring(), first.width, first.height);
+    viewer.start_stream({.hwnd = 0, .title = utf8(input.filename().wstring()), .width = first.width,
+                         .height = first.height});
 
     kvm::log::info("playing at {} fps; close the window to quit", fps);
     std::jthread player(play_loop, std::cref(jpegs), fps, std::ref(viewer));  // stops before viewer dies

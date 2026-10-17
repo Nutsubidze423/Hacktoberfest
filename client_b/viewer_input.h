@@ -23,7 +23,8 @@ struct NormPoint {
 
 class ViewerInput {
 public:
-    using Sink = std::function<void(const proto::Message&)>;
+    // Sends one message to the window owner; false = not sent (e.g. connection closed).
+    using Sink = std::function<bool(const proto::Message&)>;
 
     void set_sink(Sink sink) { sink_ = std::move(sink); }
 
@@ -42,7 +43,7 @@ public:
     void release_all();
 
 private:
-    void send(const proto::Message& msg);
+    bool send(const proto::Message& msg);
     static std::size_t index(proto::MouseButton b) { return static_cast<std::size_t>(b); }
 
     struct HeldKey {

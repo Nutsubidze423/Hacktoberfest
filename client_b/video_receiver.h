@@ -1,20 +1,25 @@
-// B side of the video channel (port 50501): connect to A, receive JPEG frames, decode, show.
+// Reads window-stream frames from the video channel, decodes the newest one and shows it in the
+// viewer (ARTEFACT "გადაწყვეტილებები 2", S1).
 //
-//   kvm::ViewerWindow viewer;  viewer.create();
-//   kvm::VideoReceiver receiver(cfg.host_ip, cfg.video_port, viewer);   // runs until destroyed
-//   receiver.set_clock_offset_us(conn->stats().clock_offset_us);        // optional, for latency
+// main.cpp owns the channel: one FrameChannel carries frames both ways (A's window to B and B's
+// window to A), and connecting / reconnecting is main.cpp's job. The receiver only reads from it:
 //
-// Transport is Luka's kvm::net::FrameChannel (kvm/video.h). Threads: the receive thread reads
-// frames into a LatestSlot; the decode thread takes the newest one, decodes it and presents it.
-// If decoding falls behind, older frames are overwritten (dropped) instead of queueing up.
+//   auto video = kvm::net::connect_video(ip, cfg.video_port);    // A: VideoServer::accept()
+//   kvm::VideoReceiver receiver(*video, viewer);                 // declare AFTER `video`
+//   receiver.set_clock_offset_us(conn.stats().clock_offset_us);  // once rtt_us >= 0 (HUD's LAT)
+//
+// Destroying the receiver close()s the channel — the only way to wake recv_frame() — and joins its
+// threads, so `video` can be destroyed right after. The receiver lives as long as the channel.
+//
+// Threads: the read thread is the channel's only recv_frame() caller and puts frames into a
+// LatestSlot; the decode thread decodes the newest one and presents it. A slow decoder drops old
+// frames instead of queueing them. Frames whose codec is not "jpeg" (e.g. kvm_host --test-video)
+// count toward the HUD's MBPS but are not shown.
 #pragma once
 
 #include <atomic>
 #include <cstdint>
-#include <memory>
-#include <mutex>
 #include <stop_token>
-#include <string>
 #include <thread>
 
 #include "kvm/queue.h"
@@ -25,36 +30,35 @@ namespace kvm {
 
 class VideoReceiver {
 public:
-    // Starts connecting right away; reconnects every second while A is not reachable.
-    VideoReceiver(std::string host, std::uint16_t port, ViewerWindow& viewer);
+    VideoReceiver(net::FrameChannel& channel, ViewerWindow& viewer);
     ~VideoReceiver();
 
     VideoReceiver(const VideoReceiver&) = delete;
     VideoReceiver& operator=(const VideoReceiver&) = delete;
 
-    // A's clock minus B's clock (net::LinkStats::clock_offset_us). Until this is called the viewer
-    // shows latency as unknown; 0 is exact when A and B are the same machine.
+    // The window owner's clock minus ours (net::LinkStats::clock_offset_us), any thread. Until it is
+    // set the viewer shows latency as unknown; 0 is exact when both ends are the same machine.
     void set_clock_offset_us(std::int64_t offset) {
         clock_offset_us_ = offset;
         has_clock_offset_ = true;
     }
 
-private:
-    void receive_loop(std::stop_token stop);
-    void decode_loop(std::stop_token stop);
+    // False once the channel has closed (peer gone, or close() called).
+    bool running() const { return running_; }
 
-    std::string host_;
-    std::uint16_t port_;
+private:
+    void read_loop();
+    void decode_loop();
+
+    net::FrameChannel& channel_;
     ViewerWindow& viewer_;
     std::atomic<std::int64_t> clock_offset_us_{0};
     std::atomic<bool> has_clock_offset_{false};
-
-    std::mutex channel_mutex_;  // the destructor close()s the channel to unblock recv_frame()
-    std::unique_ptr<net::FrameChannel> channel_;
+    std::atomic<bool> running_{true};
     LatestSlot<net::Frame> latest_;
 
     // Declared last: joined first on destruction, while everything above is still alive.
-    std::jthread receive_thread_;
+    std::jthread read_thread_;
     std::jthread decode_thread_;
 };
 

@@ -92,7 +92,7 @@ ViewerWindow::~ViewerWindow() {
     }
 }
 
-bool ViewerWindow::create() {
+bool ViewerWindow::create(bool visible) {
     try {
         ui::Graphics::get();
     } catch (const std::exception& e) {
@@ -136,7 +136,9 @@ bool ViewerWindow::create() {
     if (!reduced_motion_ && blink_ms != 0 && blink_ms != INFINITE) {
         SetTimer(hwnd, kBlinkTimer, blink_ms, nullptr);
     }
-    ShowWindow(hwnd, SW_SHOW);
+    if (visible) {
+        ShowWindow(hwnd, SW_SHOW);
+    }
     return true;
 }
 
@@ -164,6 +166,7 @@ void ViewerWindow::set_link_state(LinkState state) {
         ++shared_.generation;  // the stream ends with the link
         shared_.has_pending = false;
         shared_.stream_title.clear();
+        shared_.stream_hwnd.reset();
     }
     const LinkState before = shared_.link;
     shared_.link = state;
@@ -195,12 +198,15 @@ void ViewerWindow::set_jpeg_quality(std::optional<int> quality) {
     shared_.jpeg_quality = quality;
 }
 
-void ViewerWindow::start_stream(std::wstring title, int width, int height) {
+void ViewerWindow::start_stream(const proto::StreamStart& start) {
     std::lock_guard lock(mutex_);
     ++shared_.generation;
     shared_.has_pending = false;
-    shared_.stream_title = std::move(title);
-    if (hwnd_) PostMessageW(hwnd_, kMsgStreamStart, static_cast<WPARAM>(width), static_cast<LPARAM>(height));
+    shared_.stream_title = widen(start.title);  // UTF-8 on the wire
+    shared_.stream_hwnd = start.hwnd;
+    if (hwnd_) {
+        PostMessageW(hwnd_, kMsgStreamStart, static_cast<WPARAM>(start.width), static_cast<LPARAM>(start.height));
+    }
 }
 
 void ViewerWindow::stop_stream() {
@@ -208,7 +214,24 @@ void ViewerWindow::stop_stream() {
     ++shared_.generation;
     shared_.has_pending = false;
     shared_.stream_title.clear();
+    shared_.stream_hwnd.reset();
     if (hwnd_) InvalidateRect(hwnd_, nullptr, FALSE);
+}
+
+void ViewerWindow::give_back_stream() {
+    std::optional<std::uint64_t> owner_hwnd;
+    {
+        std::lock_guard lock(mutex_);
+        owner_hwnd = shared_.stream_hwnd;
+    }
+    if (!owner_hwnd) {
+        return;  // nothing is being streamed to us
+    }
+    input_.release_all();  // nothing stays pressed in the owner's window
+    if (!sink_ || !sink_(proto::StreamStop{.hwnd = *owner_hwnd})) {
+        log::warn("viewer: could not send stream_stop (give the window back)");
+    }
+    stop_stream();  // the owner confirms with its own stream_stop
 }
 
 void ViewerWindow::present(BgraImage& frame, const FrameInfo& info) {
@@ -363,8 +386,18 @@ LRESULT ViewerWindow::handle_message(UINT msg, WPARAM wp, LPARAM lp) {
         take_pending_frame();  // syncs the new stream generation first
         stream_sized_ = true;
         resize_for_stream(static_cast<int>(wp), static_cast<int>(lp));
+        if (!IsWindowVisible(hwnd)) {
+            ShowWindow(hwnd, SW_SHOWNOACTIVATE);  // a hidden viewer appears without stealing focus
+        }
         InvalidateRect(hwnd, nullptr, FALSE);
         return 0;
+    case WM_CLOSE:
+        give_back_stream();
+        if (close_handler_) {
+            close_handler_();
+            return 0;
+        }
+        break;  // DefWindowProc destroys the window -> WM_DESTROY -> WM_QUIT
     case WM_MOUSEMOVE: {
         const POINT pt{GET_X_LPARAM(lp), GET_Y_LPARAM(lp)};
         if (!tracking_mouse_) {
@@ -681,18 +714,22 @@ void ViewerWindow::on_hud_tick() {
         hud_.jpeg_quality = shared_.jpeg_quality;
     }
     const View view = current_view();
-    if (view == View::Streaming || view == View::Stalled) {
-        // The buckets cover exactly the last second.
-        hud_.fps = static_cast<int>(std::accumulate(frame_buckets_.begin(), frame_buckets_.end(), std::uint64_t{0}));
+    // MBPS is real whenever the link is up (frames may arrive without being shown, e.g. a codec
+    // we do not display); the buckets cover exactly the last second.
+    if (view == View::Linked || view == View::Streaming || view == View::Stalled) {
         hud_.mbps = static_cast<double>(std::accumulate(byte_buckets_.begin(), byte_buckets_.end(), std::uint64_t{0})) *
                     8.0 / 1e6;
+    } else {
+        hud_.mbps.reset();
+    }
+    if (view == View::Streaming || view == View::Stalled) {
+        hud_.fps = static_cast<int>(std::accumulate(frame_buckets_.begin(), frame_buckets_.end(), std::uint64_t{0}));
         hud_.latency_ms = latency_ms_;
         hud_.width = displayed_.width;
         hud_.height = displayed_.height;
         hud_.dropped = dropped_;
     } else {
         hud_.fps.reset();
-        hud_.mbps.reset();
         hud_.latency_ms.reset();
         hud_.width.reset();
         hud_.height.reset();

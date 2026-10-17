@@ -47,8 +47,9 @@ public:
     ViewerWindow(const ViewerWindow&) = delete;
     ViewerWindow& operator=(const ViewerWindow&) = delete;
 
-    // Creates and shows the window (client 960x600 dp). Closing it posts WM_QUIT.
-    bool create();
+    // Creates the window (client 960x600 dp). A hidden viewer (visible = false) appears by itself
+    // when a stream starts. Closing it gives the stream back (stream_stop, see set_close_handler).
+    bool create(bool visible = true);
     HWND hwnd() const { return hwnd_; }
 
     // --- Thread-safe ---------------------------------------------------------------------
@@ -57,8 +58,8 @@ public:
     void set_link_state(LinkState state);  // leaving Linked ends the current stream
     void set_rtt_ms(std::optional<int> rtt_ms);
     void set_jpeg_quality(std::optional<int> quality);
-    void start_stream(std::wstring title, int width, int height);  // stream_start from A
-    void stop_stream();                                             // stream_stop from A
+    void start_stream(const proto::StreamStart& start);  // stream_start from the window owner
+    void stop_stream();                                   // stream_stop from the window owner
     // Swaps `frame` with the pending one; on return `frame` is a spare buffer to decode into.
     // An unpainted pending frame is dropped, so the window always shows the newest frame.
     void present(BgraImage& frame, const FrameInfo& info);
@@ -69,9 +70,18 @@ public:
     // With clamp, a point outside the visible image snaps to its edge (drags that leave the image).
     std::optional<D2D1_POINT_2F> to_normalized(POINT client, bool clamp = false) const;
 
-    // Mouse/keyboard on the streamed image become messages for A (remote_mouse_move, mouse_button,
-    // mouse_wheel, key), handed to `sink` on the UI thread — e.g. Connection::send_json.
-    void set_input_sink(ViewerInput::Sink sink) { input_.set_sink(std::move(sink)); }
+    // Messages from the viewer to the window owner, called on the UI thread — wire it to
+    // Connection::send_json. Input on the streamed image: remote_mouse_move, mouse_button,
+    // mouse_wheel, key. Closing the viewer during a stream: stream_stop {hwnd} ("give it back").
+    using MessageSink = ViewerInput::Sink;
+    void set_message_sink(MessageSink sink) {
+        sink_ = sink;
+        input_.set_sink(std::move(sink));
+    }
+
+    // What closing the viewer does after the stream was given back. Without a handler the window
+    // is destroyed and its thread gets WM_QUIT (test tools); main.cpp would rather hide it.
+    void set_close_handler(std::function<void()> handler) { close_handler_ = std::move(handler); }
 
     // Called on the UI thread after every link state change (e.g. for the tray icon).
     using LinkListener = std::function<void(LinkState before, LinkState now)>;
@@ -99,6 +109,7 @@ private:
     void update_icons();
     bool input_active() const;
     void on_mouse_button(proto::MouseButton button, bool down, LPARAM lp);
+    void give_back_stream();
     void resize_for_stream(int width, int height);
     void on_strip_click(viewer::StripButton button);
     LRESULT hit_test_nc(POINT screen) const;
@@ -118,6 +129,7 @@ private:
         std::optional<int> rtt_ms;
         std::optional<int> jpeg_quality;
         std::wstring stream_title;
+        std::optional<std::uint64_t> stream_hwnd;  // the owner's window while a stream_start is active
         std::uint64_t generation = 0;  // bumped when a stream ends; the UI resets per-stream state
         BgraImage pending;
         FrameInfo pending_info;
@@ -160,6 +172,8 @@ private:
     std::wstring footer_;
     std::wstring window_text_;
     LinkListener link_listener_;
+    MessageSink sink_;
+    std::function<void()> close_handler_;
     ViewerInput input_;
     ui::unique_icon small_icon_;
     ui::unique_icon big_icon_;

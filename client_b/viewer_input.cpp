@@ -4,28 +4,28 @@
 
 namespace kvm {
 
-void ViewerInput::send(const proto::Message& msg) {
-    if (sink_) {
-        sink_(msg);
-    }
+bool ViewerInput::send(const proto::Message& msg) {
+    return sink_ && sink_(msg);
 }
 
 void ViewerInput::mouse_move(NormPoint pos) {
     if (last_pos_ && last_pos_->x == pos.x && last_pos_->y == pos.y) {
         return;
     }
-    last_pos_ = pos;
-    send(proto::RemoteMouseMove{.x_norm = pos.x, .y_norm = pos.y});
+    if (send(proto::RemoteMouseMove{.x_norm = pos.x, .y_norm = pos.y})) {
+        last_pos_ = pos;
+    }
 }
 
 void ViewerInput::mouse_button(proto::MouseButton button, bool down, NormPoint pos) {
     if (down) {
-        mouse_move(pos);  // A moves the pointer first, then presses at exactly that spot
+        mouse_move(pos);  // the owner moves the pointer first, then presses at exactly that spot
     } else if (!buttons_[index(button)]) {
-        return;  // never send an up for a down A did not get
+        return;  // never send an up for a down the owner did not get
     }
-    buttons_[index(button)] = down;
-    send(proto::MouseButtonEvent{.button = button, .down = down, .x_norm = pos.x, .y_norm = pos.y});
+    const bool sent = send(proto::MouseButtonEvent{.button = button, .down = down, .x_norm = pos.x, .y_norm = pos.y});
+    // An up always clears the button here; a down only counts as held if it actually went out.
+    buttons_[index(button)] = down && sent;
 }
 
 void ViewerInput::wheel(int delta, bool horizontal) {
@@ -38,17 +38,16 @@ void ViewerInput::key(WPARAM vk, LPARAM lp, bool down) {
                     .extended = ((lp >> 24) & 1) != 0};
     const auto same = [&](const HeldKey& h) { return h.vk == k.vk && h.extended == k.extended; };
     const auto it = std::find_if(keys_.begin(), keys_.end(), same);
-    if (down) {
-        if (it == keys_.end()) {
-            keys_.push_back(k);
-        }
-    } else {
+    if (!down) {
         if (it == keys_.end()) {
             return;  // its down was not sent (e.g. pressed before the viewer had focus)
         }
         keys_.erase(it);
     }
-    send(proto::Key{.vk = k.vk, .scan = k.scan, .down = down, .extended = k.extended});
+    const bool sent = send(proto::Key{.vk = k.vk, .scan = k.scan, .down = down, .extended = k.extended});
+    if (down && sent && it == keys_.end()) {
+        keys_.push_back(k);  // auto-repeat downs of a held key are sent but tracked once
+    }
 }
 
 bool ViewerInput::button_held(proto::MouseButton button) const {

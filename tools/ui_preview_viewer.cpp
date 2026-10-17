@@ -5,6 +5,7 @@
 //   ui_preview_viewer.exe --state <name>     hold one: waiting | connecting | linked | streaming | stalled | lost
 //   ui_preview_viewer.exe --image <file.jpg> stream this JPEG instead of the generated test pattern
 //   ui_preview_viewer.exe --seconds <n>      time per state when cycling (default 4)
+//   ui_preview_viewer.exe --hidden           start hidden; the viewer appears when the stream starts
 
 #include <algorithm>
 #include <array>
@@ -48,8 +49,9 @@ constexpr auto kFakeLatency = 38ms;
 constexpr std::size_t kFakePayloadBytes = 140 * 1024;
 constexpr std::uint32_t kFakeDropEvery = 45;  // skip one seq now and then so DROP is not 0
 constexpr int kFps = 30;
-constexpr wchar_t kFakeTitle[] =
-    L"ფოტოშოპი — Untitled-1.psd @ 66.7% (Layer 1, RGB/8) · Adobe Photoshop 2025";
+// UTF-8 like stream_start on the wire (the build uses /utf-8).
+constexpr char kFakeTitle[] = "ფოტოშოპი — Untitled-1.psd @ 66.7% (Layer 1, RGB/8) · Adobe Photoshop 2025";
+constexpr std::uint64_t kFakeHwnd = 0x000A0B2C;
 
 std::optional<Phase> parse_phase(std::wstring_view s) {
     if (s == L"waiting") return Phase::Waiting;
@@ -143,7 +145,7 @@ private:
             viewer_.set_link_state(kvm::LinkState::Linked);
             viewer_.set_rtt_ms(kFakeRttMs);
             if (!streaming_) {
-                viewer_.start_stream(kFakeTitle, base_.width, base_.height);
+                viewer_.start_stream({.hwnd = kFakeHwnd, .title = kFakeTitle, .width = base_.width, .height = base_.height});
                 streaming_ = true;
             }
             break;
@@ -152,7 +154,7 @@ private:
             viewer_.set_link_state(kvm::LinkState::Linked);
             viewer_.set_rtt_ms(kFakeRttMs);
             if (!streaming_) {
-                viewer_.start_stream(kFakeTitle, base_.width, base_.height);
+                viewer_.start_stream({.hwnd = kFakeHwnd, .title = kFakeTitle, .width = base_.width, .height = base_.height});
                 streaming_ = true;
             }
             break;
@@ -212,6 +214,10 @@ int wmain(int argc, wchar_t** argv) {
             seconds = std::max(1, _wtoi(argv[++i]));
         }
     }
+    bool hidden = false;  // like the window owner's side: the viewer only appears when a stream starts
+    for (int i = 1; i < argc; ++i) {
+        hidden = hidden || std::wstring_view(argv[i]) == L"--hidden";
+    }
 
     kvm::BgraImage base;
     if (image_path) {
@@ -227,7 +233,7 @@ int wmain(int argc, wchar_t** argv) {
     }
 
     kvm::ViewerWindow viewer;
-    if (!viewer.create()) {
+    if (!viewer.create(!hidden)) {
         kvm::log::error("could not create the viewer window (error {})", GetLastError());
         return 1;
     }
@@ -241,6 +247,11 @@ int wmain(int argc, wchar_t** argv) {
                                 .quit = [&] { PostMessageW(viewer.hwnd(), WM_CLOSE, 0, 0); }});
     viewer.set_link_listener(
         [&](kvm::LinkState before, kvm::LinkState now) { tray.on_link_change(before, now, endpoint, true); });
+    // No owner here: messages the viewer would send (input, stream_stop) are only logged.
+    viewer.set_message_sink([](const kvm::proto::Message& m) {
+        kvm::log::info("to owner (preview): {}", kvm::proto::encode(m).dump());
+        return true;
+    });
 
     Driver driver(viewer, std::move(base));
     std::jthread thread([&](std::stop_token stop) { driver.run(stop, hold, std::chrono::seconds(seconds)); });
