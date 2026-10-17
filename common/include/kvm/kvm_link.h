@@ -74,6 +74,11 @@ public:
     // Explorer): show a "drop here" window at `at`. See InputCapture::set_on_drag_at_edge.
     void set_on_drag_at_edge(host::InputCapture::DragAtEdge callback);
 
+    // Hands control to the peer now, as if the cursor had crossed the edge at y_norm, also while a
+    // button is held: a file drag caught at the edge continues on the peer (FileLink::catch_drag).
+    // No-op without hooks.
+    void switch_to_peer(double y_norm);
+
     bool controlling_peer() const { return capture_ && capture_->remote(); }
     bool controlled_by_peer() const { return inject_.active(); }
     // Ctrl+Alt+Shift+Q was pressed here: this PC no longer sends its input.

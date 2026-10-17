@@ -240,9 +240,12 @@ int wmain(int argc, wchar_t** argv) {
         // Files (port 50502): drop window + Ctrl+Alt+Shift+F, received files land in Downloads\KVM.
         kvm::FileLink files;
         if (kvm_link) {
-            // A file dragged to the edge towards the other PC opens the drop box there (Demetre's D1);
-            // the cursor sits on the edge pixel at that moment.
-            kvm_link->set_on_drag_at_edge([&files](double, kvm::display::Point) { files.show_catcher_at_cursor(); });
+            // Files dragged to the edge towards the other PC go across like on one desktop (Demetre's
+            // D1 + Temo's T10): caught here, sent as a drag, the cursor follows them and the drag goes
+            // on over there until the button goes up. Other drags (windows, text) are left alone.
+            kvm_link->set_on_drag_at_edge(
+                [&files](double y, kvm::display::Point at) { files.catch_drag(y, POINT{at.x, at.y}); });
+            files.set_on_drag_caught([&kvm_link](double y) { kvm_link->switch_to_peer(y); });
         }
         // Unhook before `files` goes away (declared after it, so destroyed first).
         struct DragReset {

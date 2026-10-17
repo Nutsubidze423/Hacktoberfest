@@ -51,6 +51,10 @@ void KvmLink::set_on_drag_at_edge(host::InputCapture::DragAtEdge callback) {
     if (capture_) capture_->set_on_drag_at_edge(on_drag_at_edge_);
 }
 
+void KvmLink::switch_to_peer(double y_norm) {
+    if (capture_) capture_->switch_to_remote(y_norm);
+}
+
 void KvmLink::attach(Sink send_fn) {
     {
         std::lock_guard lock(sink_mutex_);

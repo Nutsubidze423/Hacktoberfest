@@ -24,9 +24,11 @@ constexpr UINT kHideMessage = WM_APP + 2;
 constexpr UINT kCatchMessage = WM_APP + 3;  // lParam = MAKELPARAM(x, y)
 constexpr UINT_PTR kHideTimer = 1;
 constexpr UINT_PTR kReleaseTimer = 2;
+constexpr UINT_PTR kGiveUpTimer = 3;
 constexpr int kCatchSizePx = 32;
 constexpr UINT kCatchTimeoutMs = 1500;
-constexpr UINT kReleaseAfterMs = 60;  // time for the drag to enter the catcher before the button goes up
+constexpr UINT kReleaseAfterMs = 30;  // after the file drag entered the catcher
+constexpr UINT kGiveUpMs = 250;       // no file drag entered by then: leave the user's drag alone
 constexpr int kWidthDp = 240;
 constexpr int kHeightDp = 64;
 constexpr UINT kAfterLeaveMs = 700;  // a drag that left may come back
@@ -56,7 +58,8 @@ std::vector<fs::path> files_in(IDataObject* data) {
 // catcher's thread.
 class DropTarget final : public IDropTarget {
 public:
-    DropTarget(HWND hwnd, FileDropCatcher::OnDrop* on_drop) : hwnd_(hwnd), on_drop_(on_drop) {}
+    DropTarget(HWND hwnd, FileDropCatcher::OnDrop* on_drop, std::atomic<bool>* catching)
+        : hwnd_(hwnd), on_drop_(on_drop), catching_(catching) {}
 
     HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void** out) override {
         if (riid == IID_IUnknown || riid == IID_IDropTarget) {
@@ -79,6 +82,8 @@ public:
         has_files_ = data->QueryGetData(&format) == S_OK;
         dragging_ = true;
         *effect = has_files_ ? DROPEFFECT_COPY : DROPEFFECT_NONE;
+        // catch_now(): only a drag that carries files gets its button released here.
+        if (has_files_ && *catching_) SetTimer(hwnd_, kReleaseTimer, kReleaseAfterMs, nullptr);
         return S_OK;
     }
     HRESULT STDMETHODCALLTYPE DragOver(DWORD, POINTL, DWORD* effect) override {
@@ -109,6 +114,7 @@ private:
 
     HWND hwnd_;
     FileDropCatcher::OnDrop* on_drop_;
+    std::atomic<bool>* catching_;
     ULONG refs_ = 1;
     bool has_files_ = false;
     bool dragging_ = false;
@@ -117,6 +123,7 @@ private:
 struct WindowState {
     std::wstring label;
     std::atomic<bool>* visible = nullptr;
+    std::atomic<bool> catching = false;  // catch_now() is waiting for a file drag to enter
     DropTarget* target = nullptr;
     HFONT font = nullptr;
     UINT font_dpi = 0;
@@ -172,10 +179,12 @@ void catch_window(HWND hwnd, WindowState& state, POINT pt) {
     *state.visible = true;
     SetTimer(hwnd, kHideTimer, kCatchTimeoutMs, nullptr);
     // A drag only picks a new drop target when the mouse moves: nudge it so the catcher becomes the
-    // target, then let go a moment later (kReleaseTimer).
+    // target. If it's a file drag, DragEnter arms kReleaseTimer; otherwise kGiveUpTimer leaves the
+    // drag (a window or a text selection) alone.
+    state.catching = true;
     input::move_cursor_abs(pt.x + 1, pt.y);
     input::move_cursor_abs(pt.x, pt.y);
-    SetTimer(hwnd, kReleaseTimer, kReleaseAfterMs, nullptr);
+    SetTimer(hwnd, kGiveUpTimer, kGiveUpMs, nullptr);
 }
 
 void paint(HWND hwnd, WindowState& state) {
@@ -216,7 +225,17 @@ LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         case WM_TIMER:
             if (wp == kReleaseTimer) {
                 KillTimer(hwnd, kReleaseTimer);
-                input::send_mouse_button(input::MouseButton::Left, false);  // the drag drops onto us
+                KillTimer(hwnd, kGiveUpTimer);
+                if (state) state->catching = false;
+                input::send_mouse_button(input::MouseButton::Left, false);  // the file drag drops onto us
+                return 0;
+            }
+            if (wp == kGiveUpTimer) {
+                KillTimer(hwnd, kGiveUpTimer);
+                if (state && state->catching) {
+                    state->catching = false;
+                    hide_window(hwnd, *state);
+                }
                 return 0;
             }
             if (state && wp == kHideTimer) {
@@ -291,7 +310,7 @@ FileDropCatcher::FileDropCatcher(OnDrop on_drop, std::wstring label)
             return;
         }
         SetLayeredWindowAttributes(hwnd, 0, 235, LWA_ALPHA);
-        state->target = new DropTarget(hwnd, &on_drop_);
+        state->target = new DropTarget(hwnd, &on_drop_, &state->catching);
         if (FAILED(RegisterDragDrop(hwnd, state->target))) log::error("file_drop: RegisterDragDrop failed");
         hwnd_ = hwnd;
         signal.reset();  // the constructor may return now
