@@ -6,6 +6,7 @@
 
 #include "jpeg_encoder.h"
 #include "kvm/log.h"
+#include "kvm/net.h"
 
 namespace kvm {
 namespace {
@@ -13,6 +14,9 @@ namespace {
 using Clock = std::chrono::steady_clock;
 constexpr auto kLogEvery = std::chrono::seconds(5);
 constexpr auto kPollStop = std::chrono::milliseconds(100);
+// WGC only delivers frames when something changes. A still window would look frozen ("stalled") on
+// the viewer, so the last frame goes out again this often while nothing new arrives.
+constexpr auto kRepeatAfter = std::chrono::milliseconds(500);
 
 double ms_since(Clock::time_point start) {
     return std::chrono::duration<double, std::milli>(Clock::now() - start).count();
@@ -52,6 +56,9 @@ void VideoSender::run(std::stop_token stop) {
                                   : Clock::duration::zero();
     std::uint32_t seq = 0;
     auto next_send = Clock::now();
+    std::vector<std::uint8_t> last_payload;  // the last frame sent, repeated while the window is still
+    proto::FrameHeader last_header;
+    auto last_sent = Clock::now();
 
     // Totals for the periodic log line.
     auto period_start = Clock::now();
@@ -90,9 +97,21 @@ void VideoSender::run(std::stop_token stop) {
                 period_bytes += encoded.size();
                 ++period_frames;
                 ++sent_;
+                last_header = header;
+                last_payload = encoded;
+                last_sent = Clock::now();
             }
         } else if (frames_.closed()) {
             break;
+        } else if (!last_payload.empty() && Clock::now() - last_sent >= kRepeatAfter) {
+            // Nothing changed on the window: send the same picture again, stamped now (it is current).
+            last_header.seq = seq++;
+            last_header.t_capture_us = steady_now_us();
+            if (!send_(last_header, last_payload)) {
+                log::info("video: channel closed after {} frames", sent_.load());
+                break;
+            }
+            last_sent = Clock::now();
         }
 
         const auto elapsed = Clock::now() - period_start;

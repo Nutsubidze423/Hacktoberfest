@@ -122,7 +122,7 @@ Claude წაიკითხავს ამ ფაილს, იპოვის
 - [x] M1a: KVM ინტეგრაცია დემეტრესთან — ტესტი 2 გავიდა ორ კომპიუტერზე (`4d16b70`, touchpad-ის ჩათვლით)
 - [ ] ტესტი 3: სატესტო ვიდეო ნამდვილ ქსელზე (`5_run_host_video_test.cmd`) — fps / Mbit/s / latency
 - [x] protocol v2 (ორმხრივი), ორივე exe ორივე ბიბლიოთეკას ლინკავს, A-ს პასუხის `hello`, firewall 50502
-- [ ] M1b: ფანჯარა A ⇄ B `main.cpp`-ში: ვიდეო არხი ორივე მიმართულებით, `WindowShare` + viewer + `remote_input`, hotkey `Ctrl+Alt+Shift+W`, დაბრუნება გამოსვლისას (სანდროს S1-ს ელოდება)
+- [x] M1b: ფანჯარა A ⇄ B `main.cpp`-ში: ვიდეო არხი ორივე მიმართულებით, `WindowShare` + viewer + `remote_input`, hotkey `Ctrl+Alt+Shift+W`, დაბრუნება გამოსვლისას — გააკეთა თემომ გუნდის თხოვნით (`host_a/window_link.*`, სანდროს viewer-ის მერჯი); ერთ PC-ზე შემოწმებულია, ორ PC-ზე ჯერ არა
 - [x] KVM ორივე მიმართულებით + clipboard `main.cpp`-ში (დემეტრეს `KvmLink`, `ClipboardSync`), protocol `clipboard` (`0d7a7c1`)
 - [x] ფაილების არხი 50502 `main.cpp`-ში (თემოს T9) + `FileLink` + `Hotkeys` (`Ctrl+Alt+Shift+F` = drop ყუთი კურსორთან, სანამ დემეტრეს D1 არ არის)
 - [ ] ფაზა 2: end-to-end latency, კავშირის გაწყვეტის სცენარები
@@ -164,7 +164,7 @@ Claude წაიკითხავს ამ ფაილს, იპოვის
 - [x] S2: ბრენჩი `main`-ზე rebase და push (`sandro/viewer-design`)
 - [x] ლოგო (C „Caret“), tray icon, შეტყობინებები „Connected to host“ / „Connection lost“ (`docs/DESIGN.md` 9)
 - [ ] დიზაინის შემოწმება DPI 125 / 150 / 200%-ზე და ორ მონიტორს შორის (`docs/DESIGN.md` 7)
-- [ ] M1b (ლუკა): ფანჯარა A ⇄ B `main.cpp`-ში — viewer-ის მხარე მზადაა
+- [x] M1b (ლუკა): ფანჯარა A ⇄ B `main.cpp`-ში — viewer-ის მხარე მზადაა (ჩართო თემომ, `host_a/window_link.*`)
 - [x] ~~ფაზა 2: `host_a/remote_input.*`~~ → თემოს გადაეცა (გადაწყვეტილებები 2, #3; T8 `5fc0ab5`)
 
 ## რისკები

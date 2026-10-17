@@ -28,6 +28,7 @@
 #include "kvm/protocol.h"
 #include "kvm/video.h"
 #include "virtual_display.h"
+#include "window_link.h"
 
 namespace {
 
@@ -81,50 +82,8 @@ kvm::clip::Chunk to_chunk(const proto::Clipboard& m) {
     return {.seq = m.seq, .kind = m.kind, .total = m.total, .offset = m.offset, .data = m.data};
 }
 
-// Counters filled by the video receiver thread, read and reset by the stats log.
-struct VideoStats {
-    std::atomic<std::int64_t> frames{0};
-    std::atomic<std::int64_t> bytes{0};
-    std::atomic<std::int64_t> latency_sum_us{0};
-    std::atomic<std::int64_t> latency_max_us{0};
-    std::atomic<std::int64_t> latency_samples{0};
-};
-
-// Receives frames until the channel closes.
-// TODO(luka): hand frames to the viewer (sandro) instead of only counting them.
-void receive_video(kvm::net::FrameChannel& channel, const kvm::net::Connection& conn, VideoStats& stats) {
-    while (const auto frame = channel.recv_frame()) {
-        ++stats.frames;
-        stats.bytes += static_cast<std::int64_t>(frame->payload.size());
-        // Latency needs the clock offset, which exists after the first ping round trip.
-        if (conn.stats().rtt_us >= 0) {
-            const std::int64_t latency = kvm::steady_now_us() - conn.peer_to_local_us(frame->header.t_capture_us);
-            stats.latency_sum_us += latency;
-            ++stats.latency_samples;
-            std::int64_t prev = stats.latency_max_us;
-            while (latency > prev && !stats.latency_max_us.compare_exchange_weak(prev, latency)) {
-            }
-        }
-    }
-}
-
-void log_video_stats(VideoStats& stats, std::chrono::seconds interval) {
-    const auto frames = stats.frames.exchange(0);
-    if (frames == 0) {
-        return;
-    }
-    const auto bytes = stats.bytes.exchange(0);
-    const auto samples = stats.latency_samples.exchange(0);
-    const auto latency_sum = stats.latency_sum_us.exchange(0);
-    const auto latency_max = stats.latency_max_us.exchange(0);
-    const double secs = static_cast<double>(interval.count());
-    kvm::log::info("video: {:.1f} fps, {:.2f} MB/s ({:.0f} Mbit/s), latency avg {:.1f} ms, max {:.1f} ms",
-                   frames / secs, bytes / secs / 1e6, bytes * 8 / secs / 1e6,
-                   samples ? latency_sum / 1000.0 / samples : 0.0, latency_max / 1000.0);
-}
-
 void run_session(kvm::net::Connection& conn, const kvm::Config& cfg, kvm::KvmLink* kvm,
-                 kvm::clip::ClipboardSync* clip, kvm::FileLink& files) {
+                 kvm::clip::ClipboardSync* clip, kvm::FileLink& files, kvm::WindowLink& windows) {
     if (!conn.send(make_hello())) {
         return;
     }
@@ -143,15 +102,16 @@ void run_session(kvm::net::Connection& conn, const kvm::Config& cfg, kvm::KvmLin
     if (kvm) kvm->attach([&conn](const proto::Message& m) { return conn.send_json(proto::encode(m)); });
     if (clip) clip->attach([&conn](const kvm::clip::Chunk& c) { return conn.send(to_message(c)); });
 
-    VideoStats video_stats;
-    std::unique_ptr<kvm::net::FrameChannel> video = kvm::net::connect_video(cfg.host_ip, cfg.video_port);
-    std::jthread video_receiver;
+    // Windows A <-> B on this video connection: A's window shows in the viewer here (Sandro's
+    // VideoReceiver reads it), B's window goes to A on the same connection.
+    std::shared_ptr<kvm::net::FrameChannel> video = kvm::net::connect_video(cfg.host_ip, cfg.video_port);
     if (video) {
         kvm::log::info("video channel connected ({}:{})", cfg.host_ip, cfg.video_port);
-        video_receiver = std::jthread([&] { receive_video(*video, conn, video_stats); });
+        windows.set_video(video);
     } else {
         kvm::log::warn("no video channel — is port {} open on the host?", cfg.video_port);
     }
+    windows.attach([&conn](const proto::Message& m) { return conn.send_json(proto::encode(m)); }, 0, 0);
     if (auto channel = kvm::files::connect_files(cfg.host_ip, cfg.file_port, files.callbacks())) {
         kvm::log::info("file channel connected ({}:{})", cfg.host_ip, cfg.file_port);
         files.set(std::move(channel));
@@ -164,6 +124,8 @@ void run_session(kvm::net::Connection& conn, const kvm::Config& cfg, kvm::KvmLin
         if (const auto msg = conn.incoming().pop_for(500ms)) {
             if (kvm && kvm->handle(*msg)) {
                 // KVM: A controls B, or A's cursor came back
+            } else if (windows.handle(*msg)) {
+                // windows: A's window streams to the viewer here, or A's viewer controls B's window
             } else if (const auto* c = std::get_if<proto::Clipboard>(&*msg); c && clip) {
                 clip->receive(to_chunk(*c));
             } else if (const auto* h = std::get_if<proto::Hello>(&*msg)) {
@@ -171,8 +133,8 @@ void run_session(kvm::net::Connection& conn, const kvm::Config& cfg, kvm::KvmLin
                                h->dpi_scale);
                 const auto client_side = kvm::display::parse_side(cfg.client_side).value_or(kvm::display::Side::Right);
                 match_vdd_to_peer(h->screen_w, h->screen_h, kvm::display::opposite(client_side));
+                windows.set_peer_screen(h->screen_w, h->screen_h);  // B's window goes to A at A's size
             } else {
-                // TODO(luka): route to viewer (sandro) once it exists.
                 kvm::log::info("from host: {}", proto::encode(*msg).dump());
             }
         }
@@ -180,7 +142,7 @@ void run_session(kvm::net::Connection& conn, const kvm::Config& cfg, kvm::KvmLin
             const auto stats = conn.stats();
             kvm::log::info("link: rtt {:.2f} ms, clock offset {:.1f} ms", stats.rtt_us / 1000.0,
                            stats.clock_offset_us / 1000.0);
-            log_video_stats(video_stats, std::chrono::duration_cast<std::chrono::seconds>(kStatsInterval));
+            if (stats.rtt_us >= 0) windows.set_rtt_ms(static_cast<int>(stats.rtt_us / 1000), stats.clock_offset_us);
             next_stats += kStatsInterval;
         }
     }
@@ -190,13 +152,9 @@ void run_session(kvm::net::Connection& conn, const kvm::Config& cfg, kvm::KvmLin
     if (clip) clip->detach();
     if (kvm) kvm->detach();
     detach = {nullptr, nullptr};
+    windows.detach();  // B's window shown on A comes home; the viewer shows the link as lost
     files.set(nullptr);
-    if (video) {
-        video->close();  // unblocks recv_frame; join before `video` is destroyed
-        if (video_receiver.joinable()) {
-            video_receiver.join();
-        }
-    }
+    windows.set_video(nullptr);  // closes the video channel and joins the viewer's reader
 }
 
 }  // namespace
@@ -266,15 +224,22 @@ int wmain(int argc, wchar_t** argv) {
                 if (link) link->set_on_drag_at_edge(nullptr);
             }
         } drag_reset{kvm_link ? &*kvm_link : nullptr};
+
+        // Windows A <-> B (Ctrl+Alt+Shift+W): A's windows show up in the viewer here; a window of B
+        // goes to A's viewer and back.
+        kvm::WindowLink windows({.jpeg_quality = cfg.jpeg_quality, .max_fps = cfg.max_fps, .peer_side = host_side});
+
         kvm::Hotkeys hotkeys;
         hotkeys.add('F', [&] { files.show_catcher_at_cursor(); });
+        hotkeys.add('W', [&] { windows.toggle(); });
         if (hotkeys.start()) {
             kvm::log::info("Ctrl+Alt+Shift+F: drop files on the box at the cursor to send them to the other PC");
+            kvm::log::info("Ctrl+Alt+Shift+W: send the window in front to the other PC, press again to bring it back");
         }
 
         while (g_running) {
             if (auto conn = kvm::net::connect(cfg.host_ip, cfg.control_port)) {
-                run_session(*conn, cfg, kvm_link ? &*kvm_link : nullptr, clip_on ? &clip : nullptr, files);
+                run_session(*conn, cfg, kvm_link ? &*kvm_link : nullptr, clip_on ? &clip : nullptr, files, windows);
             }
             if (g_running) {
                 kvm::log::info("reconnecting in {} s...", kReconnectDelay.count());

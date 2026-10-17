@@ -34,6 +34,7 @@
 #include "kvm/protocol.h"
 #include "kvm/video.h"
 #include "virtual_display.h"
+#include "window_link.h"
 
 namespace {
 
@@ -91,7 +92,7 @@ private:
     std::shared_ptr<kvm::net::FrameChannel> channel_;
 };
 
-void accept_video_loop(kvm::net::VideoServer& server, VideoSlot& slot) {
+void accept_video_loop(kvm::net::VideoServer& server, VideoSlot& slot, kvm::WindowLink& windows) {
     while (g_running) {
         auto channel = server.accept();
         if (!channel) {
@@ -99,6 +100,7 @@ void accept_video_loop(kvm::net::VideoServer& server, VideoSlot& slot) {
         }
         kvm::log::info("video channel from {}", channel->peer());
         slot.set(std::move(channel));
+        windows.set_video(slot.get());  // window frames go both ways on the newest connection
     }
 }
 
@@ -187,7 +189,7 @@ void match_vdd_to_peer(int width, int height, kvm::display::Side side) {
 }
 
 void run_session(kvm::net::Connection& conn, kvm::KvmLink* kvm, kvm::clip::ClipboardSync* clip, VideoSlot& video,
-                 const Options& opt, kvm::display::Side client_side) {
+                 const Options& opt, kvm::display::Side client_side, kvm::WindowLink& windows) {
     const auto hello = handshake(conn);
     if (!hello) {
         return;
@@ -209,6 +211,12 @@ void run_session(kvm::net::Connection& conn, kvm::KvmLink* kvm, kvm::clip::Clipb
     } detach{kvm, clip};
     if (kvm) kvm->attach([&conn](const proto::Message& m) { return conn.send_json(proto::encode(m)); });
     if (clip) clip->attach([&conn](const kvm::clip::Chunk& c) { return conn.send(to_message(c)); });
+    windows.attach([&conn](const proto::Message& m) { return conn.send_json(proto::encode(m)); }, hello->screen_w,
+                   hello->screen_h);
+    struct WindowsDetach {  // a window sent to B comes home before conn goes away
+        kvm::WindowLink& windows;
+        ~WindowsDetach() { windows.detach(); }
+    } windows_detach{windows};
 
     std::jthread test_video;
     if (opt.test_video) {
@@ -220,10 +228,11 @@ void run_session(kvm::net::Connection& conn, kvm::KvmLink* kvm, kvm::clip::Clipb
         if (const auto msg = conn.incoming().pop_for(500ms)) {
             if (kvm && kvm->handle(*msg)) {
                 // KVM: B's cursor came back, or B controls A
+            } else if (windows.handle(*msg)) {
+                // windows: B's viewer controls A's window (remote_input), or B's window streams here
             } else if (const auto* c = std::get_if<proto::Clipboard>(&*msg); c && clip) {
                 clip->receive(to_chunk(*c));
             } else {
-                // TODO(luka): route to remote_input (sandro) once it exists.
                 kvm::log::info("from client: {}", proto::encode(*msg).dump());
             }
         }
@@ -231,6 +240,7 @@ void run_session(kvm::net::Connection& conn, kvm::KvmLink* kvm, kvm::clip::Clipb
             const auto stats = conn.stats();
             kvm::log::info("link: rtt {:.2f} ms, clock offset {:.1f} ms", stats.rtt_us / 1000.0,
                            stats.clock_offset_us / 1000.0);
+            if (stats.rtt_us >= 0) windows.set_rtt_ms(static_cast<int>(stats.rtt_us / 1000), stats.clock_offset_us);
             next_stats += kStatsInterval;
         }
     }
@@ -296,8 +306,13 @@ int wmain(int argc, wchar_t** argv) {
         kvm::log::info("kvm_host: protocol v{}, listening on ports {} + {} (client on the {}). Ctrl+C to quit.",
                        proto::kProtocolVersion, cfg.control_port, cfg.video_port, cfg.client_side);
 
+        // Windows A <-> B (Ctrl+Alt+Shift+W): a window of A goes to B's viewer and back; B's windows
+        // show up in the viewer here.
+        kvm::WindowLink windows({.jpeg_quality = cfg.jpeg_quality,
+                                 .max_fps = cfg.max_fps,
+                                 .peer_side = side.value_or(kvm::display::Side::Right)});
         VideoSlot video;
-        std::jthread video_acceptor([&] { accept_video_loop(video_server, video); });
+        std::jthread video_acceptor([&] { accept_video_loop(video_server, video, windows); });
 
         // Files (port 50502): drop window + Ctrl+Alt+Shift+F, received files land in Downloads\KVM.
         kvm::FileLink files;
@@ -326,8 +341,10 @@ int wmain(int argc, wchar_t** argv) {
         });
         kvm::Hotkeys hotkeys;
         hotkeys.add('F', [&] { files.show_catcher_at_cursor(); });
+        hotkeys.add('W', [&] { windows.toggle(); });
         if (hotkeys.start()) {
             kvm::log::info("Ctrl+Alt+Shift+F: drop files on the box at the cursor to send them to the other PC");
+            kvm::log::info("Ctrl+Alt+Shift+W: send the window in front to the other PC, press again to bring it back");
         }
 
         while (g_running) {
@@ -336,7 +353,7 @@ int wmain(int argc, wchar_t** argv) {
                 continue;  // stop() or a transient accept error
             }
             run_session(*conn, kvm_link ? &*kvm_link : nullptr, clip_on ? &clip : nullptr, video, opt,
-                        side.value_or(kvm::display::Side::Right));
+                        side.value_or(kvm::display::Side::Right), windows);
         }
         hotkeys.stop();
         file_server.stop();
