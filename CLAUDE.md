@@ -48,10 +48,11 @@
 3. **viewer-ის ინფუთი:** კლიკები/სქროლი/კლავიატურა viewer-ში → owner-ის ორიგინალ ფანჯარას.
 4. **ფაილები:** გადათრევით კიდეზე, A → B და B → A, პორტი 50502, სამიზნე `Downloads\KVM\`.
 5. **Clipboard (დემეტრე):** კოპირება ერთ კომპიუტერზე → ჩასმა მეორეზე (ტექსტი UTF-8, სურათები PNG; ფაილები ჯერ არა).
+6. **Desk mode (თემო):** მეორე PC-ის ეკრანი = კიდევ ერთი მონიტორი. კავშირისას VDD peer-ის ზომით/მასშტაბით peer-ის მხარეს დგას; ფანჯარა კიდეზე გადაითრევა, owner-ზე მუშაობს და peer მას თავის desktop-ზე იმავე ადგილას ხატავს (`desk_share` → `desk_view`). კლიკი ფანჯარაზე owner-ზე რჩება, დანარჩენი peer-ის desktop-ს ეგზავნება; კლავიატურა ბოლო კლიკს მიჰყვება. `--no-desk` / `"desk": false` = ძველი viewer.
 
 დეტალები და ვინ რას აკეთებს: `ARTEFACT/გადაწყვეტილებები 2 (ლუკა → თემო, სანდრო, დემეტრე).md`.
 
-**არ შედის (მერე):** საკუთარი IddCx დრაივერის დაწერა, ფანჯრის მაუსით drag-ით გადატანა (hotkey-ის ნაცვლად), ფაილის ჩაგდება კონკრეტულ ადგილას (v2), დაშიფვრა/დაწყვილება, ფაილები clipboard-ით, ინსტალერი, პენის წნევა.
+**არ შედის (მერე):** საკუთარი IddCx დრაივერის დაწერა, დაშიფვრა/დაწყვილება, ინსტალერი, პენის წნევა, ხმის გადატანა.
 
 ## ტექნოლოგიები
 - **C++20**, MSVC (Visual Studio 2022), **CMake ≥ 3.25 + Ninja**, **vcpkg** (manifest mode). მხოლოდ Windows 10/11 x64.
@@ -104,8 +105,10 @@ tools/
 შეტყობინებები (`type` ველით):
 | type | მიმართულება | ველები |
 |---|---|---|
-| `hello` | B→A, მერე A→B (პასუხი) | `protocol_version`, `screen_w`, `screen_h`, `dpi_scale`, `hostname` |
-| `focus_enter` | ორივე (KVM controller → controlled) | `y_norm` (კურსორის შესვლის წერტილი) |
+| `hello` | B→A, მერე A→B (პასუხი) | `protocol_version`, `screen_w`, `screen_h`, `dpi_scale`, `hostname`, `desk` (desk mode-ს აჩვენებს) |
+| `focus_enter` | ორივე (KVM controller → controlled) | `y_norm` (კურსორის შესვლის წერტილი), `desk` (კურსორი `desk_move`-ს მიჰყვება) |
+| `desk_move` | ორივე (desk mode, controller → controlled) | `x`, `y` — კურსორი controlled-ის primary მონიტორზე, px (= controller-ის VDD) |
+| `desk_cursor` | ორივე (window owner → viewer) | `shape` (`arrow`/`ibeam`/`hand`/`sizewe`/…) — კურსორის ფორმა owner-ის ფანჯრებზე |
 | `focus_leave` | ორივე | `y_norm`. controller → controlled: „ინფუთი დავიბრუნე“; controlled → controller: „შენი კურსორი ჩემი კიდით დაბრუნდა“ |
 | `mouse_move` | ორივე (KVM controller → controlled) | `dx`, `dy` (relative) |
 | `mouse_button` | ორივე | `button` (`left`/`right`/`middle`/`x1`/`x2`), `down` (+ viewer → window owner-ზე `x_norm`, `y_norm`) |
@@ -116,7 +119,7 @@ tools/
 | `remote_mouse_move` | viewer → window owner (ორივე) | `x_norm`, `y_norm` (სტრიმულ ფანჯარაში, 0..1) |
 | `clipboard` | ორივე | `seq`, `kind` (`text`/`png`), `total`, `offset`, `data` (base64, ≤ 32 KB) — ერთი კოპირება რამდენიმე ნაწილად |
 | `ping` / `pong` | ორივე | `t` (+ `pong`-ში `t_peer` — clock offset-ისთვის) |
-| `frame` (50501 header) | window owner → viewer (ორივე, ერთი TCP არხი) | `seq`, `t_capture_us`, `width`, `height`, `codec` |
+| `frame` (50501 header) | window owner → viewer (ორივე, ერთი TCP არხი) | `seq`, `t_capture_us`, `width`, `height`, `codec`; desk mode: `layer:"desk"`, `x`, `y` (crop VDD-ში), `desk_w`, `desk_h`, `rects` (ფანჯრების ადგილი; ცარიელი + codec `none` = დამალე) |
 
 ## მნიშვნელოვანი წესები
 - **DPI:** ორივე პროცესი იწყება `SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2)`-ით (ან manifest-ით). ყოველთვის ფიზიკურ პიქსელებში იმუშავე.
@@ -154,4 +157,4 @@ Windows Firewall-ში დაუშვი `kvm_host.exe` პორტებზ�
 - [ ] M2. ტესტი Photoshop-ით; latency/ხარისხის მორგება; დემოს სცენარი
 
 ## შემდეგი ეტაპები (დემოს მერე)
-H.264 (Media Foundation / NVENC) → D3D11 zero-copy pipeline → ფანჯრის მაუსით drag-ით გადატანა → ფაილის ჩაგდება კონკრეტულ ადგილას → TLS + PIN დაწყვილება → ფაილები clipboard-ით → საკუთარი IddCx დრაივერი.
+H.264 (Media Foundation / NVENC) → D3D11 zero-copy pipeline (GPU crop) → ხმა owner-იდან viewer-ზე → TLS + PIN დაწყვილება → საკუთარი IddCx დრაივერი.

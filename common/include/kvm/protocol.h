@@ -15,6 +15,7 @@
 #include <type_traits>
 #include <utility>
 #include <variant>
+#include <vector>
 
 #include <nlohmann/json.hpp>
 
@@ -42,6 +43,8 @@ NLOHMANN_JSON_SERIALIZE_ENUM(MouseButton, {
 // Both directions, first message on a new connection: B (always the TCP client) sends it, A checks
 // protocol_version and answers with its own. screen_* = the sender's primary monitor, so a window
 // owner can size its virtual display to the viewer's screen.
+// desk = the sender can show the peer's windows in desk mode (the peer's screen is one more monitor:
+// windows are dragged across and drawn on top of the desktop, see desk_move / FrameHeader::layer).
 struct Hello {
     static constexpr std::string_view kType = "hello";
     int protocol_version = kProtocolVersion;
@@ -49,13 +52,16 @@ struct Hello {
     int screen_h = 0;
     double dpi_scale = 1.0;
     std::string hostname;
+    bool desk = false;
 };
 
 // Both directions (KVM), controller -> controlled. Either PC can be the controller: the side whose
 // physical mouse/keyboard crossed its edge; from now on its input drives the receiver. y_norm = edge crossing height (0..1).
+// desk = desk mode: the cursor follows desk_move (absolute) instead of mouse_move, no edge logic.
 struct FocusEnter {
     static constexpr std::string_view kType = "focus_enter";
     double y_norm = 0.5;
+    bool desk = false;
 };
 
 // Both directions (KVM). Ends the control started by focus_enter. Controller -> controlled: "I took my
@@ -148,7 +154,35 @@ struct Pong {
     std::int64_t t_peer = 0;
 };
 
+// Desk mode, controller -> controlled: where the cursor is, in physical pixels relative to the
+// controlled PC's primary monitor (= the controller's virtual display). Not clamped: it may lie
+// beyond the screen while a dragged button is held.
+struct DeskMove {
+    static constexpr std::string_view kType = "desk_move";
+    int x = 0;
+    int y = 0;
+};
+
+// Desk mode, window owner -> viewer: the cursor shape over the owner's windows ("arrow", "ibeam",
+// "hand", "wait", "cross", "sizewe", "sizens", "sizenwse", "sizenesw", "sizeall", "no").
+struct DeskCursor {
+    static constexpr std::string_view kType = "desk_cursor";
+    std::string shape;
+};
+
+// One visible piece of a desk-mode picture, in virtual-display pixels.
+struct DeskRect {
+    int x = 0;
+    int y = 0;
+    int w = 0;
+    int h = 0;
+};
+
 // Video channel header (port 50501), followed by `payload_len` bytes of encoded image.
+// layer "" = a window stream for the viewer window. layer "desk" = desk mode: the payload is the
+// part (x, y, width, height) of the owner's desk_w x desk_h virtual display that holds its windows,
+// and only `rects` of it are drawn, at the same place on the viewer's primary monitor. Empty rects
+// with codec "none" = nothing to show.
 struct FrameHeader {
     static constexpr std::string_view kType = "frame";
     std::uint32_t seq = 0;
@@ -156,10 +190,16 @@ struct FrameHeader {
     int width = 0;
     int height = 0;
     std::string codec = "jpeg";
+    std::string layer;
+    int x = 0;
+    int y = 0;
+    int desk_w = 0;
+    int desk_h = 0;
+    std::vector<DeskRect> rects;
 };
 
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(Hello, protocol_version, screen_w, screen_h, dpi_scale, hostname)
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(FocusEnter, y_norm)
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(Hello, protocol_version, screen_w, screen_h, dpi_scale, hostname, desk)
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(FocusEnter, y_norm, desk)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(FocusLeave, y_norm)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(MouseMove, dx, dy)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(MouseButtonEvent, button, down, x_norm, y_norm)
@@ -171,11 +211,16 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(RemoteMouseMove, x_norm, y_norm)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(Clipboard, seq, kind, total, offset, data)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(Ping, t)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(Pong, t, t_peer)
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(FrameHeader, seq, t_capture_us, width, height, codec)
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(DeskMove, x, y)
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(DeskCursor, shape)
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(DeskRect, x, y, w, h)
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(FrameHeader, seq, t_capture_us, width, height, codec, layer, x, y,
+                                                desk_w, desk_h, rects)
 
 // Any message that travels on the control channel (port 50500).
 using Message = std::variant<Hello, FocusEnter, FocusLeave, MouseMove, MouseButtonEvent, MouseWheel,
-                             Key, StreamStart, StreamStop, RemoteMouseMove, Clipboard, Ping, Pong>;
+                             Key, StreamStart, StreamStop, RemoteMouseMove, Clipboard, Ping, Pong,
+                             DeskMove, DeskCursor>;
 
 // Serializes a message struct (including FrameHeader) to JSON with its "type" field set.
 template <class M>

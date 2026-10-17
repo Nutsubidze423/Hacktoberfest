@@ -14,6 +14,11 @@
 // peer, focus_leave{y_norm} goes back and injection stops. Every key and button
 // pressed here is released when control leaves (either way) or the connection
 // drops, so nothing stays stuck.
+//
+// Desk mode (focus_enter{desk}): the cursor isn't moved on enter; desk_move puts
+// it exactly where the peer's cursor is on its virtual display, which is the size
+// of this PC's primary monitor. The peer decides when it leaves. If this PC has a
+// VDD of its own (set_desk), the cursor never gets lost on it.
 
 #include <atomic>
 #include <chrono>
@@ -22,6 +27,7 @@
 #include <tuple>
 #include <vector>
 
+#include "kvm/desk_region.h"
 #include "kvm/dpi.h"
 #include "kvm/protocol.h"
 
@@ -53,8 +59,15 @@ public:
     // Releases held keys/buttons and stops. For disconnects.
     void release_all();
 
+    // This PC's own desk Region (its VDD, lent to the peer); nullptr = none. Must outlive this.
+    void set_desk(const desk::Region* region) { desk_region_ = region; }
+
 private:
     void enter(double y_norm);
+    void enter_desk();
+    void desk_move(int x, int y);
+    std::vector<display::Monitor> real_monitors() const;  // without our own VDD
+    bool off_own_vdd();  // moves the cursor off our VDD if it is there; true if it was
     void leave_to_host(double y_norm);
     bool towards_host(int dx, int dy) const;
     void move(int dx, int dy);
@@ -68,6 +81,9 @@ private:
     std::chrono::milliseconds leave_cooldown_;
     std::chrono::steady_clock::time_point entered_at_{};
     display::OuterEdge edge_;
+    const desk::Region* desk_region_ = nullptr;
+    bool desk_ = false;           // this stay is desk mode
+    display::Rect primary_{};     // desk mode: where desk_move positions land
     std::atomic<bool> active_{false};  // read from other threads (KvmLink::controlled_by_peer)
     bool warned_blocked_ = false;
     struct {

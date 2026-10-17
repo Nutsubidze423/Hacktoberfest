@@ -1,5 +1,9 @@
 #include "kvm/input_inject.h"
 
+#include <windows.h>
+
+#include <algorithm>
+#include <climits>
 #include <utility>
 #include <variant>
 
@@ -30,7 +34,21 @@ InputInject::~InputInject() {
 bool InputInject::handle(const proto::Message& msg) {
     return std::visit(
         overloaded{
-            [&](const proto::FocusEnter& m) { enter(m.y_norm); return true; },
+            [&](const proto::FocusEnter& m) {
+                if (m.desk) {
+                    enter_desk();
+                } else {
+                    enter(m.y_norm);
+                }
+                return true;
+            },
+            [&](const proto::DeskMove& m) {
+                if (active_ && desk_) {
+                    ++received_.moves;
+                    desk_move(m.x, m.y);
+                }
+                return true;
+            },
             [&](const proto::FocusLeave&) {
                 if (active_) {
                     log::info("input inject: the other PC took its input back");
@@ -77,11 +95,66 @@ void InputInject::release_all() {
     for (const auto& [vk, scan, extended] : keys_down_) input::send_key(vk, scan, false, extended);
     buttons_down_.clear();
     keys_down_.clear();
-    active_ = false;
+    const bool was_active = active_.exchange(false);
+    desk_ = false;
+    if (was_active) off_own_vdd();  // e.g. a drag ended on our VDD: it isn't visible here
+}
+
+std::vector<display::Monitor> InputInject::real_monitors() const {
+    auto mons = display::monitors();
+    if (desk_region_) {
+        std::erase_if(mons, [&](const display::Monitor& m) { return desk_region_->is_vdd(m.name); });
+    }
+    return mons;
+}
+
+bool InputInject::off_own_vdd() {
+    display::Rect vdd;
+    bool live = false;
+    input::Point cur;
+    if (!desk_region_ || !desk_region_->vdd_rect(vdd, live) || !input::get_cursor_pos(cur) || !vdd.contains(cur)) {
+        return false;
+    }
+    input::Point best = cur;
+    long long best_d = LLONG_MAX;
+    for (const auto& m : real_monitors()) {
+        const auto& r = m.rect;
+        const input::Point c{std::clamp(cur.x, r.left, r.right - 1), std::clamp(cur.y, r.top, r.bottom - 1)};
+        const long long d = 1LL * (c.x - cur.x) * (c.x - cur.x) + 1LL * (c.y - cur.y) * (c.y - cur.y);
+        if (d < best_d) {
+            best_d = d;
+            best = c;
+        }
+    }
+    best = display::inward(best, host_side_, kEnterInset);
+    SetCursorPos(best.x, best.y);  // not SendInput: nothing to replay through the hooks
+    return true;
+}
+
+void InputInject::enter_desk() {
+    primary_ = display::primary_monitor().rect;
+    warned_blocked_ = false;
+    received_ = {};
+    entered_at_ = std::chrono::steady_clock::now();
+    desk_ = true;
+    active_ = true;
+    log::info("input inject: the other PC's cursor is on this screen (desk mode)");
+}
+
+void InputInject::desk_move(int x, int y) {
+    int px = primary_.left + x;
+    int py = primary_.top + y;
+    if (buttons_down_.empty()) {
+        // Only the peer's virtual display maps onto our screen. While its button is held (a drag),
+        // the position may go beyond, e.g. one of our windows dragged onto our own VDD.
+        px = std::clamp(px, primary_.left, primary_.right - 1);
+        py = std::clamp(py, primary_.top, primary_.bottom - 1);
+    }
+    check(input::move_cursor_abs(px, py));
 }
 
 void InputInject::enter(double y_norm) {
-    edge_ = display::OuterEdge(display::monitors(), host_side_);
+    edge_ = display::OuterEdge(real_monitors(), host_side_);
     const auto p = display::inward(edge_.point(y_norm), host_side_, kEnterInset);
     warned_blocked_ = false;
     received_ = {};
@@ -124,6 +197,9 @@ void InputInject::move(int dx, int dy) {
         }
     }
     check(input::send_mouse_move_rel(dx, dy));
+    // Our VDD sits on the peer's side, beyond the edge, so Windows lets the cursor through: going
+    // onto it means going back to the peer.
+    if (off_own_vdd() && cooled_down && input::get_cursor_pos(cur)) leave_to_host(edge_.position(cur).value_or(0.5));
 }
 
 void InputInject::button(proto::MouseButton b, bool down) {

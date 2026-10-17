@@ -18,6 +18,16 @@
 //
 // Ctrl+Alt+Shift+Q always works: control returns here and the hooks are removed
 // for good (restart the program to use the KVM again).
+//
+// Desk mode (CaptureOptions::desk, Temo): a virtual display (VDD) the size of the
+// peer's screen sits on the peer's side, so the peer's screen is one more monitor.
+// While the Region says it is live, the cursor simply moves onto it (no edge
+// switch) and the peer's cursor follows it (focus_enter{desk}, desk_move). Input
+// there is routed by what is under the cursor: on one of this PC's windows
+// (Region::hit) it stays here, natively — dragging, resizing, menus all work as
+// on one PC; anywhere else it goes to the peer's own desktop. The keyboard
+// follows the last click. While the VDD is attached but not live, the cursor
+// can't get lost on it: it stops at the real monitors' edge as usual.
 
 #include <atomic>
 #include <functional>
@@ -25,6 +35,7 @@
 #include <optional>
 #include <thread>
 
+#include "kvm/desk_region.h"
 #include "kvm/dpi.h"
 #include "kvm/protocol.h"
 #include "kvm/queue.h"
@@ -47,6 +58,8 @@ struct CaptureOptions {
     // while on B (or this is false), motion comes from the hook instead, with A's
     // cursor parked in the middle of its monitor.
     bool raw_input = true;
+    // Desk mode (see above); nullptr = off. Must outlive the capture.
+    desk::Region* desk = nullptr;
 };
 
 class InputCapture {
@@ -95,8 +108,14 @@ public:
     using LocalActivity = std::function<void()>;
     void set_on_local_activity(LocalActivity callback);
 
-    // Control is currently on the peer.
+    // Called (worker thread) after Ctrl+Alt+Shift+Q, e.g. to switch desk mode off.
+    using Emergency = std::function<void()>;
+    void set_on_emergency(Emergency callback);
+
+    // Control is currently on the peer (in desk mode: the cursor is on its screen,
+    // or its desktop has the keyboard).
     bool remote() const { return remote_; }
+    bool desk() const { return desk_; }
     // The emergency exit was used; the hooks are gone.
     bool disabled() const { return disabled_; }
 
@@ -110,6 +129,7 @@ private:
         const char* note = nullptr;  // log line only, msg is ignored
         std::optional<input::Point> drag_at;  // drag reached the edge here (msg = FocusEnter with its y_norm)
         bool local_activity = false;          // own mouse moved while suspended
+        bool cancel_menus = false;            // a click went to the peer: close this PC's open menu
     };
 
     void hook_thread_main();
@@ -118,6 +138,7 @@ private:
 
     CaptureOptions options_;
     std::atomic<bool> remote_{false};
+    std::atomic<bool> desk_{false};
     std::atomic<bool> disabled_{false};
     std::atomic<bool> has_client_{false};
     std::atomic<bool> suspended_{false};
@@ -129,6 +150,7 @@ private:
     Sink sink_;
     DragAtEdge on_drag_at_edge_;        // guarded by sink_mutex_
     LocalActivity on_local_activity_;   // guarded by sink_mutex_
+    Emergency on_emergency_;            // guarded by sink_mutex_
 
     std::thread hook_thread_;
     std::thread worker_;

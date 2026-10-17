@@ -16,6 +16,9 @@ struct Config {
     std::string client_side = "right";  // where B stands relative to A: "left" or "right"
     int jpeg_quality = 75;
     int max_fps = 30;
+    // Desk mode: the other PC's screen is one more monitor, windows are dragged across (needs the
+    // Virtual Display Driver on the PC whose windows go over). false = Ctrl+Alt+Shift+W viewer only.
+    bool desk = true;
 };
 
 // Looks for config.json in the working directory, then next to the executable and up to

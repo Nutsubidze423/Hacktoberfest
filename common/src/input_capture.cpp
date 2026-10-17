@@ -3,9 +3,11 @@
 #include <windows.h>
 
 #include <algorithm>
+#include <array>
 #include <bit>
 #include <bitset>
 #include <chrono>
+#include <climits>
 #include <cstdint>
 #include <cstdlib>
 #include <optional>
@@ -25,6 +27,7 @@ constexpr UINT kMsgUnhook = WM_APP + 4;    // after the emergency exit
 constexpr UINT kMsgStop = WM_APP + 5;
 constexpr UINT kMsgCooldown = WM_APP + 6;  // suspension ended
 constexpr UINT kMsgSuspended = WM_APP + 7; // suspension started
+constexpr UINT kMsgDeskChanged = WM_APP + 8;  // the desk Region's VDD changed
 
 // While the peer controls this PC, this much of our own mouse movement within
 // kTakeoverWindowMs means "I want my PC back" (touchpad noise stays below it).
@@ -79,6 +82,18 @@ struct CaptureThread {
     static inline ULONGLONG no_switch_until = 0;   // GetTickCount64() of the end of the cooldown
     static inline bool drag_signalled = false;     // this left-button drag already reported at the edge
     static constexpr unsigned kLeftButton = 1u << static_cast<unsigned>(proto::MouseButton::Left);
+
+    // Desk mode (see input_capture.h). The VDD as of the last refresh_monitors().
+    static inline display::Rect vdd{};
+    static inline bool vdd_attached = false;
+    static inline bool vdd_live = false;
+    static inline std::vector<display::Rect> real_monitors;  // every monitor but the VDD
+    // Per desk session (cap->remote_ and desk both true):
+    static inline bool desk = false;
+    static inline bool key_peer = false;           // the keyboard goes to the peer (its desktop got the last click)
+    enum class Owner : unsigned char { None, Local, Peer };
+    static inline std::array<Owner, 5> button_owner{};  // who got each held button's press
+    static inline std::bitset<256> keys_on_peer;   // keys whose press went to the peer: their release goes there too
 
     // Left button held while the cursor touches the edge: e.g. files dragged
     // from Explorer that should go to the peer. Reported once per touch.
@@ -148,7 +163,205 @@ struct CaptureThread {
     }
 
     static void refresh_monitors() {
-        edge = display::OuterEdge(display::monitors(), cap->options_.client_side);
+        auto mons = display::monitors();
+        vdd_attached = vdd_live = false;
+        if (const desk::Region* region = cap->options_.desk) {
+            display::Rect r;
+            bool live = false;
+            if (region->vdd_rect(r, live)) {
+                vdd = r;
+                vdd_attached = true;
+                vdd_live = live;
+            }
+            // The VDD is not a screen of this PC: the edges are the real monitors' edges.
+            std::erase_if(mons, [&](const display::Monitor& m) {
+                return region->is_vdd(m.name) || (vdd_attached && m.rect == vdd);
+            });
+        }
+        real_monitors.clear();
+        for (const auto& m : mons) real_monitors.push_back(m.rect);
+        edge = display::OuterEdge(mons, cap->options_.client_side);
+        if (desk && !vdd_live) {  // desk mode went off under the cursor
+            desk_leave(/*tell=*/true);
+            bounce_out_of_vdd();
+        }
+    }
+
+    // ---- desk mode ------------------------------------------------------------------------------
+
+    // The point of the real monitors closest to p.
+    static input::Point nearest_real(input::Point p) {
+        input::Point best = p;
+        long long best_d = LLONG_MAX;
+        for (const auto& r : real_monitors) {
+            const input::Point c{std::clamp(p.x, r.left, r.right - 1), std::clamp(p.y, r.top, r.bottom - 1)};
+            const long long d = 1LL * (c.x - p.x) * (c.x - p.x) + 1LL * (c.y - p.y) * (c.y - p.y);
+            if (d < best_d) {
+                best_d = d;
+                best = c;
+            }
+        }
+        return best;
+    }
+
+    // The last pixel of the real monitors before the VDD, next to p (where Windows would stop the
+    // cursor if the VDD weren't there).
+    static input::Point before_vdd(input::Point p) {
+        switch (cap->options_.client_side) {
+            case display::Side::Left: p.x = vdd.right; break;
+            case display::Side::Top: p.y = vdd.bottom; break;
+            case display::Side::Bottom: p.y = vdd.top - 1; break;
+            default: p.x = vdd.left - 1; break;
+        }
+        return nearest_real(p);
+    }
+
+    // Takes the cursor off the VDD (it is invisible here) to just inside the real monitors.
+    static void bounce_out_of_vdd() {
+        POINT cur{};
+        GetCursorPos(&cur);
+        if (!vdd_attached || !vdd.contains({cur.x, cur.y})) return;
+        const auto at = display::inward(before_vdd({cur.x, cur.y}), cap->options_.client_side, kReturnInset);
+        SetCursorPos(at.x, at.y);
+    }
+
+    static double vdd_y_norm(input::Point p) {
+        return vdd.height() > 0 ? std::clamp((p.y - vdd.top + 0.5) / vdd.height(), 0.0, 1.0) : 0.5;
+    }
+
+    static void desk_move(input::Point p) {
+        push(proto::DeskMove{.x = p.x - vdd.left, .y = p.y - vdd.top});
+    }
+
+    static bool peer_buttons() {
+        return std::any_of(button_owner.begin(), button_owner.end(), [](Owner o) { return o == Owner::Peer; });
+    }
+
+    static void set_key_peer(bool peer) {
+        if (peer && !key_peer) keys_pass_up = keys_down;  // held now = pressed here: released here
+        key_peer = peer;
+    }
+
+    // The cursor moves onto the VDD: from now on it is on the peer's screen. Returns false if desk
+    // mode can't start now (no peer, the peer controls this PC, cooldown...).
+    static bool desk_enter(input::Point p) {
+        if (cap->remote_ || cap->disabled_ || !cap->has_client_ || cap->suspended_ || GetTickCount64() < no_switch_until) {
+            return false;
+        }
+        cap->remote_ = true;
+        cap->desk_ = true;
+        desk = true;
+        key_peer = false;
+        keys_on_peer.reset();
+        keys_pass_up.reset();
+        for (unsigned i = 0; i < button_owner.size(); ++i) {
+            button_owner[i] = (buttons_down & (1u << i)) ? Owner::Local : Owner::None;  // e.g. a window being dragged over
+        }
+        exit_point = p;
+        push(proto::FocusEnter{.y_norm = vdd_y_norm(p), .desk = true});
+        desk_move(p);
+        return true;
+    }
+
+    // Ends the desk session. The peer releases whatever it still holds for us on focus_leave.
+    static void desk_leave(bool tell) {
+        if (!desk) return;
+        desk = false;
+        cap->desk_ = false;
+        cap->remote_ = false;
+        key_peer = false;
+        button_owner.fill(Owner::None);
+        keys_on_peer.reset();
+        keys_pass_up.reset();
+        POINT cur{};
+        GetCursorPos(&cur);
+        push(proto::FocusLeave{.y_norm = vdd_y_norm({cur.x, cur.y})}, tell);
+    }
+
+    // FileLink caught files dragged onto the peer's desktop and the peer continues the drag: the
+    // physical release of the left button belongs to the peer now.
+    static void desk_drag() {
+        if (!desk || !(buttons_down & kLeftButton)) return;
+        button_owner[static_cast<unsigned>(proto::MouseButton::Left)] = Owner::Peer;
+        set_key_peer(true);
+    }
+
+    // The cursor tries to go onto the VDD from a real monitor. Returns the hook's answer.
+    static std::optional<LRESULT> crossing_onto_vdd(input::Point p) {
+        if (vdd_live && desk_enter(p)) return std::nullopt;  // like a real monitor: just go on
+        POINT cur{};
+        GetCursorPos(&cur);
+        // Put there by the peer's input on our windows, and desk mode can't start now (e.g. the peer
+        // controls this PC): let it move; the takeover check below still sees this movement.
+        if (vdd_live && vdd.contains({cur.x, cur.y})) return std::nullopt;
+        // Not now: stop at the real edge, where the old edge logic still works when desk mode is off.
+        if (cap->suspended_) local_move_while_suspended({p.x, p.y});
+        const auto at = before_vdd(p);
+        if (!vdd_live && cap->options_.edge_switching) {
+            const auto t = edge.position(at);
+            if (t && buttons_down == 0 && GetTickCount64() >= no_switch_until) {
+                if (enter_remote(*t, at) && hook_motion) return 1;  // parked already
+            } else if (t && buttons_down == kLeftButton) {
+                drag_at_edge(*t, at);
+            }
+        }
+        SetCursorPos(at.x, at.y);
+        return 1;
+    }
+
+    // Mouse input while in a desk session.
+    static LRESULT desk_mouse(int code, WPARAM wp, LPARAM lp, const MSLLHOOKSTRUCT& m,
+                              std::optional<proto::MouseButton> button, bool down) {
+        const input::Point p{m.pt.x, m.pt.y};
+        const bool on_vdd = vdd.contains(p);
+        const bool on_window = on_vdd && cap->options_.desk && cap->options_.desk->hit(p);
+        const auto leave_if_home = [&] {
+            if (!on_vdd && !peer_buttons() && !key_peer) desk_leave(/*tell=*/true);
+        };
+
+        if (wp == WM_MOUSEMOVE) {
+            if (!on_vdd && !peer_buttons() && !key_peer) {
+                desk_leave(/*tell=*/true);
+                return CallNextHookEx(nullptr, code, wp, lp);
+            }
+            if (on_vdd || peer_buttons()) desk_move(p);
+            // Files dragged from here over the peer's desktop: FileLink may catch them (as at the old edge).
+            const auto left = static_cast<unsigned>(proto::MouseButton::Left);
+            if (on_vdd && !on_window && buttons_down == kLeftButton && button_owner[left] == Owner::Local) {
+                drag_at_edge(vdd_y_norm(p), p);
+            } else if (!(buttons_down & kLeftButton)) {
+                drag_signalled = false;
+            }
+            return CallNextHookEx(nullptr, code, wp, lp);
+        }
+        if (button) {
+            const auto i = static_cast<unsigned>(*button);
+            if (down) {
+                const Owner owner = on_vdd && !on_window ? Owner::Peer : Owner::Local;
+                button_owner[i] = owner;
+                set_key_peer(owner == Owner::Peer);
+                if (owner == Owner::Peer) {
+                    cap->events_.push({.msg = proto::MouseButtonEvent{.button = *button, .down = true}, .cancel_menus = true});
+                    return 1;
+                }
+                leave_if_home();
+                return CallNextHookEx(nullptr, code, wp, lp);
+            }
+            const Owner owner = button_owner[i];
+            button_owner[i] = Owner::None;
+            if (owner == Owner::Peer) {
+                push(proto::MouseButtonEvent{.button = *button, .down = false});
+                leave_if_home();
+                return 1;
+            }
+            leave_if_home();
+            return CallNextHookEx(nullptr, code, wp, lp);
+        }
+        if ((wp == WM_MOUSEWHEEL || wp == WM_MOUSEHWHEEL) && on_vdd && !on_window) {
+            push(proto::MouseWheel{.delta = static_cast<short>(HIWORD(m.mouseData)), .horizontal = wp == WM_MOUSEHWHEEL});
+            return 1;
+        }
+        return CallNextHookEx(nullptr, code, wp, lp);
     }
 
     static bool is_physical(ULONG_PTR extra, bool injected) {
@@ -174,6 +387,12 @@ struct CaptureThread {
     // the cursor goes back to where it left, 2 px inside the edge.
     static void leave_remote(bool tell_b) {
         if (!cap->remote_) return;
+        if (desk) {
+            desk_leave(tell_b);
+            bounce_out_of_vdd();
+            start_cooldown();
+            return;
+        }
         cap->remote_ = false;
         const auto on_edge = edge.position(exit_point);
         const auto back = on_edge ? display::inward(exit_point, edge.side(), kReturnInset) : exit_point;
@@ -185,6 +404,12 @@ struct CaptureThread {
     // B's cursor left through the edge facing A at y_norm.
     static void returned(double y_norm) {
         if (!cap->remote_) return;
+        if (desk) {  // the peer's own mouse took its PC back: our cursor comes home
+            desk_leave(/*tell=*/false);
+            bounce_out_of_vdd();
+            start_cooldown();
+            return;
+        }
         cap->remote_ = false;
         const auto in = display::inward(edge.point(y_norm), edge.side(), kReturnInset);
         SetCursorPos(in.x, in.y);  // not SendInput: never feed input through our own hook
@@ -193,10 +418,14 @@ struct CaptureThread {
     }
 
     static void emergency() {
-        if (cap->remote_) {
+        if (desk) {
+            desk = false;
+            cap->desk_ = false;
+        } else if (cap->remote_) {
             const auto back = edge.position(exit_point) ? display::inward(exit_point, edge.side(), kReturnInset) : exit_point;
             SetCursorPos(back.x, back.y);
         }
+        bounce_out_of_vdd();
         cap->remote_ = false;
         cap->disabled_ = true;
         push(proto::FocusLeave{.y_norm = 0.5}, /*send=*/true, /*emergency=*/true);
@@ -238,7 +467,12 @@ struct CaptureThread {
         }
 
         if (!cap->remote_) {
-            if (wp == WM_MOUSEMOVE && cap->options_.edge_switching) {
+            if (wp == WM_MOUSEMOVE && vdd_attached && vdd.contains({m.pt.x, m.pt.y})) {
+                if (const auto answer = crossing_onto_vdd({m.pt.x, m.pt.y})) return *answer;
+                if (desk) return desk_mouse(code, wp, lp, m, button, down);  // just entered
+            }
+            // With desk mode live the VDD is the way to the peer: no edge switch there.
+            if (wp == WM_MOUSEMOVE && cap->options_.edge_switching && !vdd_live) {
                 const auto t = edge.position({m.pt.x, m.pt.y});
                 if (t && buttons_down == 0 && GetTickCount64() >= no_switch_until) {
                     // With the cursor parked, this move must not land on the edge.
@@ -253,6 +487,8 @@ struct CaptureThread {
             if (wp == WM_MOUSEMOVE && cap->suspended_) local_move_while_suspended(m.pt);
             return CallNextHookEx(nullptr, code, wp, lp);
         }
+
+        if (desk) return desk_mouse(code, wp, lp, m, button, down);
 
         // Control is on B: swallow everything, forward what matters. Motion
         // normally comes from Raw Input (the hook only sees the clipped cursor
@@ -290,6 +526,28 @@ struct CaptureThread {
         keys_down[vk] = !up;
 
         if (!cap->remote_) return CallNextHookEx(nullptr, code, wp, lp);
+        const auto forward = [&] {
+            push(proto::Key{.vk = static_cast<std::uint16_t>(vk),
+                            .scan = static_cast<std::uint16_t>(k.scanCode & 0xFF),
+                            .down = !up,
+                            .extended = (k.flags & LLKHF_EXTENDED) != 0});
+            return LRESULT{1};
+        };
+        if (desk) {
+            // The keyboard follows the last click: the peer's desktop, or this PC's windows (also on the VDD).
+            if (up && keys_on_peer[vk]) {
+                keys_on_peer[vk] = false;
+                return forward();
+            }
+            if (!key_peer) return CallNextHookEx(nullptr, code, wp, lp);
+            if (up && keys_pass_up[vk]) {
+                keys_pass_up[vk] = false;
+                return CallNextHookEx(nullptr, code, wp, lp);
+            }
+            if (vk == VK_LCONTROL && (k.scanCode & 0x200)) return 1;  // AltGr's fake LCtrl, as below
+            if (!up) keys_on_peer[vk] = true;
+            return forward();
+        }
         if (up && keys_pass_up[vk]) {
             keys_pass_up[vk] = false;
             return CallNextHookEx(nullptr, code, wp, lp);
@@ -308,7 +566,7 @@ struct CaptureThread {
         RAWINPUT raw{};
         UINT size = sizeof(raw);
         if (GetRawInputData(handle, RID_INPUT, &raw, &size, sizeof(RAWINPUTHEADER)) == static_cast<UINT>(-1)) return;
-        if (raw.header.dwType != RIM_TYPEMOUSE || !cap->remote_ || hook_motion) return;
+        if (raw.header.dwType != RIM_TYPEMOUSE || !cap->remote_ || hook_motion || desk) return;  // desk: the cursor really moves
         const RAWMOUSE& rm = raw.data.mouse;
         // Only our own injected moves are skipped. A null hDevice does NOT mean
         // injected: precision touchpads deliver all their motion that way.
@@ -348,7 +606,14 @@ struct CaptureThread {
             case WM_TIMER:
                 if (wp == kMonitorTimer) refresh_monitors();
                 return 0;
-            case kMsgRemote: enter_remote(unpack(wp), cursor_pos()); return 0;
+            case kMsgRemote:
+                if (desk) {
+                    desk_drag();  // a file drag caught over the peer's desktop continues there
+                } else {
+                    enter_remote(unpack(wp), cursor_pos());
+                }
+                return 0;
+            case kMsgDeskChanged: refresh_monitors(); return 0;
             case kMsgLocal: leave_remote(wp != 0); return 0;
             case kMsgReturned: returned(unpack(wp)); return 0;
             case kMsgUnhook: unhook(); return 0;
@@ -390,12 +655,14 @@ bool InputCapture::start() {
         return false;
     }
     worker_ = std::thread(&InputCapture::worker_main, this);
+    if (options_.desk) options_.desk->set_on_change([this] { post(kMsgDeskChanged); });
     log::info("input capture: hooks installed, the other PC is on the {}{}. Emergency exit: Ctrl+Alt+Shift+Q",
               display::to_string(options_.client_side), options_.edge_switching ? "" : " (edge switching off)");
     return true;
 }
 
 void InputCapture::stop() {
+    if (options_.desk) options_.desk->set_on_change(nullptr);
     if (hook_thread_.joinable()) {
         post(kMsgStop);
         hook_thread_.join();
@@ -441,6 +708,11 @@ void InputCapture::set_suspended(bool suspended) {
 void InputCapture::set_on_local_activity(LocalActivity callback) {
     std::lock_guard lock(sink_mutex_);
     on_local_activity_ = std::move(callback);
+}
+
+void InputCapture::set_on_emergency(Emergency callback) {
+    std::lock_guard lock(sink_mutex_);
+    on_emergency_ = std::move(callback);
 }
 
 bool InputCapture::post(unsigned msg, unsigned long long wparam) {
@@ -518,14 +790,20 @@ void InputCapture::worker_main() {
     } sent;  // per stay on B, for the log
     Clock::time_point last_move_sent{};
 
-    const auto is_move = [](const Event& ev) { return !ev.note && std::holds_alternative<proto::MouseMove>(ev.msg); };
-    // Appends ev, merging consecutive mouse moves into one message.
+    const auto is_move = [](const Event& ev) {
+        return !ev.note && (std::holds_alternative<proto::MouseMove>(ev.msg) || std::holds_alternative<proto::DeskMove>(ev.msg));
+    };
+    // Appends ev, merging consecutive mouse moves into one message (relative ones add up, desk
+    // positions: the newest wins).
     const auto append = [&](Event&& ev) {
-        if (!batch.empty() && is_move(batch.back()) && is_move(ev)) {
-            auto& prev = std::get<proto::MouseMove>(batch.back().msg);
-            const auto& next = std::get<proto::MouseMove>(ev.msg);
-            prev.dx += next.dx;
-            prev.dy += next.dy;
+        if (!batch.empty() && is_move(batch.back()) && is_move(ev) && batch.back().msg.index() == ev.msg.index()) {
+            if (auto* prev = std::get_if<proto::MouseMove>(&batch.back().msg)) {
+                const auto& next = std::get<proto::MouseMove>(ev.msg);
+                prev->dx += next.dx;
+                prev->dy += next.dy;
+            } else {
+                batch.back().msg = std::move(ev.msg);
+            }
         } else {
             batch.push_back(std::move(ev));
         }
@@ -550,9 +828,20 @@ void InputCapture::worker_main() {
                 continue;
             }
             if (ev.drag_at) {
+                // A window being dragged (its move/size loop) is not a file drag: leave it alone.
+                GUITHREADINFO gti{sizeof(gti)};
+                if (GetGUIThreadInfo(0, &gti) && (gti.flags & GUI_INMOVESIZE)) continue;
                 std::lock_guard lock(sink_mutex_);
                 if (on_drag_at_edge_) on_drag_at_edge_(std::get<proto::FocusEnter>(ev.msg).y_norm, *ev.drag_at);
                 continue;
+            }
+            if (ev.cancel_menus) {
+                // The click went to the peer's desktop, so this PC's open menu never saw it: close the
+                // menu as a click elsewhere would.
+                GUITHREADINFO gti{sizeof(gti)};
+                if (GetGUIThreadInfo(0, &gti) && (gti.flags & GUI_INMENUMODE) && gti.hwndMenuOwner) {
+                    PostMessageW(gti.hwndMenuOwner, WM_CANCELMODE, 0, 0);
+                }
             }
             if (ev.local_activity) {
                 LocalActivity callback;
@@ -566,10 +855,20 @@ void InputCapture::worker_main() {
             if (const auto* enter = std::get_if<proto::FocusEnter>(&ev.msg)) {
                 send_failed = false;
                 sent = {};
-                log::info("input capture: control -> other PC (edge at {:.3f})", enter->y_norm);
+                if (enter->desk) {
+                    log::info("input capture: cursor on the other PC's screen (desk, at {:.3f})", enter->y_norm);
+                } else {
+                    log::info("input capture: control -> other PC (edge at {:.3f})", enter->y_norm);
+                }
             } else if (const auto* leave = std::get_if<proto::FocusLeave>(&ev.msg)) {
                 if (ev.emergency) {
                     log::warn("input capture: Ctrl+Alt+Shift+Q - control back here, hooks removed (restart to use the KVM)");
+                    Emergency callback;
+                    {
+                        std::lock_guard lock(sink_mutex_);
+                        callback = on_emergency_;
+                    }
+                    if (callback) callback();
                 } else {
                     log::info("input capture: control back here (edge at {:.3f})", leave->y_norm);
                 }
@@ -580,7 +879,7 @@ void InputCapture::worker_main() {
             std::lock_guard lock(sink_mutex_);
             if (!sink_) continue;
             if (sink_(ev.msg)) {
-                if (std::holds_alternative<proto::MouseMove>(ev.msg)) {
+                if (std::holds_alternative<proto::MouseMove>(ev.msg) || std::holds_alternative<proto::DeskMove>(ev.msg)) {
                     ++sent.moves;
                     last_move_sent = Clock::now();
                 }

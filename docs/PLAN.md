@@ -151,6 +151,8 @@ Claude წაიკითხავს ამ ფაილს, იპოვის
 - [x] T8: `remote_input.*`: viewer-ის `remote_*`/`key` → VDD-ზე `SendInput` (`tools/remote_input_test.exe`: Paint-ში ხაზი და Ctrl+Z, სათაურზე კლიკის შემდეგაც მაქსიმალებული რჩება)
 - [x] T9: ფაილები A ⇄ B: `common/file_transfer.*` (50502) + `common/file_drop.*` — `tools/file_transfer_test.exe` (ორივე მიმართულებით, უსაფრთხოება), `tools/file_drop_test.exe`; ნამდვილი OLE drop: `tools/file_drag_test.exe`
 - [x] T10: ფაილის გადათრევა ორ კომპიუტერს შორის (Mouse Without Borders-ის მსგავსად, ნებისმიერ საქაღალდეში): `common/file_drag.*` (drag-ის გაგრძელება მიმღებ მხარეს), `FileDropCatcher::catch_now`, `send(..., drag)` → `on_drag_received`; `tools/file_drag_test.exe` მთელ ნაკადს ერთ PC-ზე ამოწმებს. ჩართვა: დემეტრე (KVM გადასვლა drag-ის დროს) + ლუკა (`main.cpp`)
+- [x] T11 (ერთ PC-ზე): **desk mode** — მეორე PC-ის ეკრანი = კიდევ ერთი მონიტორი. ფანჯარას კიდეზე გადაათრევ, owner-ზე რჩება VDD-ზე (peer-ის ზომით, მასშტაბით და მხარეს) და peer თავის desktop-ზე იმავე ადგილას ხატავს; კლიკი ფანჯარაზე native-ია, დანარჩენი peer-ს ეგზავნება, კლავიატურა ბოლო კლიკს მიჰყვება; peer-ის საკუთარი მაუსიც მუშაობს ამ ფანჯრებზე. ფაილები: `common/desk_region.*`, `host_a/desk_tracker.* desk_share.* desk_input.* frame_router.*`, `client_b/desk_view.*`; ცვლილებები: protocol (`desk_move`, `desk_cursor`, `hello/focus_enter.desk`, frame `layer/rects`), `input_capture`/`input_inject`/`kvm_link` (დემეტრეს), `main.cpp` (ლუკას) — თემოს თხოვნით. ტესტები: `tools/desk_test.exe --auto`, `tools/desk_hook_test.exe`, ძველები ყველა გადის
+- [ ] T11 ორ PC-ზე (თემო + სანდრო): YouTube A → B და უკან, B → A (სანდროს VDD სჭირდება)
 - [ ] M1: რეალური ფანჯრის სტრიმი B-ზე (ლუკასთან და სანდროსთან ერთად)
 - [ ] ფაზა 2: (სურვ.) H.264 Media Foundation
 

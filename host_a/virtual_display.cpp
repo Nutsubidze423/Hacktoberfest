@@ -2,8 +2,11 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
+#include <cstdint>
 #include <cstdlib>
 #include <format>
+#include <iterator>
 #include <string_view>
 #include <thread>
 #include <vector>
@@ -100,6 +103,48 @@ bool apply(const std::wstring& device, DEVMODEW& dm, const char* what) {
         return false;
     }
     return true;
+}
+
+// The display scale per monitor: DisplayConfig{Get,Set}DeviceInfo with these private request types
+// (what Settings > Display > Scale uses; stable since Windows 10 1607). Steps are relative to the
+// monitor's recommended scale.
+constexpr int kGetDpiScale = -3;
+constexpr int kSetDpiScale = -4;
+constexpr int kScalePercents[] = {100, 125, 150, 175, 200, 225, 250, 300, 350, 400, 450, 500};
+
+struct DpiScaleGet {
+    DISPLAYCONFIG_DEVICE_INFO_HEADER header;
+    std::int32_t min_rel;  // 100 % relative to the recommended step (so recommended = -min_rel)
+    std::int32_t cur_rel;
+    std::int32_t max_rel;
+};
+
+struct DpiScaleSet {
+    DISPLAYCONFIG_DEVICE_INFO_HEADER header;
+    std::int32_t rel;
+};
+
+// The active display source that is `device` (e.g. \\.\DISPLAY5).
+std::optional<DISPLAYCONFIG_PATH_SOURCE_INFO> source_of(const std::wstring& device) {
+    UINT32 path_count = 0, mode_count = 0;
+    if (GetDisplayConfigBufferSizes(QDC_ONLY_ACTIVE_PATHS, &path_count, &mode_count) != ERROR_SUCCESS) return std::nullopt;
+    std::vector<DISPLAYCONFIG_PATH_INFO> paths(path_count);
+    std::vector<DISPLAYCONFIG_MODE_INFO> modes(mode_count);
+    if (QueryDisplayConfig(QDC_ONLY_ACTIVE_PATHS, &path_count, paths.data(), &mode_count, modes.data(), nullptr) !=
+        ERROR_SUCCESS) {
+        return std::nullopt;
+    }
+    for (UINT32 i = 0; i < path_count; ++i) {
+        DISPLAYCONFIG_SOURCE_DEVICE_NAME name{};
+        name.header.type = DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME;
+        name.header.size = sizeof(name);
+        name.header.adapterId = paths[i].sourceInfo.adapterId;
+        name.header.id = paths[i].sourceInfo.id;
+        if (DisplayConfigGetDeviceInfo(&name.header) == ERROR_SUCCESS && device == name.viewGdiDeviceName) {
+            return paths[i].sourceInfo;
+        }
+    }
+    return std::nullopt;
 }
 
 template <class Pred>
@@ -255,6 +300,45 @@ bool VirtualDisplay::detach() {
         return false;
     }
     log::info("vdd: detached {}", utf8(device_));
+    return true;
+}
+
+bool VirtualDisplay::set_scale(double scale) {
+    const auto source = source_of(device_);
+    if (!source) {
+        log::warn("vdd: set_scale {}: not attached", utf8(device_));
+        return false;
+    }
+    DpiScaleGet get{};
+    get.header.type = static_cast<DISPLAYCONFIG_DEVICE_INFO_TYPE>(kGetDpiScale);
+    get.header.size = sizeof(get);
+    get.header.adapterId = source->adapterId;
+    get.header.id = source->id;
+    if (DisplayConfigGetDeviceInfo(&get.header) != ERROR_SUCCESS) {
+        log::warn("vdd: {}: Windows doesn't report its scale", utf8(device_));
+        return false;
+    }
+    const int recommended = -get.min_rel;
+    const int last = static_cast<int>(std::size(kScalePercents)) - 1;
+    const auto percent = static_cast<int>(std::lround(scale * 100));
+    int want = 0;
+    for (int i = 1; i <= last; ++i) {
+        if (std::abs(kScalePercents[i] - percent) < std::abs(kScalePercents[want] - percent)) want = i;
+    }
+    want = std::clamp(want, recommended + get.min_rel, std::min(recommended + get.max_rel, last));
+    if (want == recommended + get.cur_rel) return true;
+
+    DpiScaleSet set{};
+    set.header.type = static_cast<DISPLAYCONFIG_DEVICE_INFO_TYPE>(kSetDpiScale);
+    set.header.size = sizeof(set);
+    set.header.adapterId = source->adapterId;
+    set.header.id = source->id;
+    set.rel = want - recommended;
+    if (DisplayConfigSetDeviceInfo(&set.header) != ERROR_SUCCESS) {
+        log::warn("vdd: {}: Windows refused scale {}%", utf8(device_), kScalePercents[want]);
+        return false;
+    }
+    log::info("vdd: {} scale {}% (like the other PC's screen)", utf8(device_), kScalePercents[want]);
     return true;
 }
 
