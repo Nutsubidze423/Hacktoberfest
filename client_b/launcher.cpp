@@ -223,6 +223,7 @@ private:
     LRESULT handle_message(UINT msg, WPARAM wp, LPARAM lp);
 
     void decide_role();
+    void switch_role(Role want);  // tray "Connect to the other PC" / the Displays window's Host/Client
     bool start_app();
     void stop_app(bool restart);
     void end_app_now();
@@ -325,6 +326,8 @@ int App::run() {
                                 .quit = [this] { on_command(kCmdQuit); }});
     tray_.set_menu([this] { return build_menu(); }, [this](UINT id) { on_command(id); });
     displays_.set_applied_handler([this] { restart(L"to use the new side"); });
+    // The Host/Client toggle in the Displays window connects / disconnects, like the tray item.
+    displays_.set_role_change_handler([this](Role r) { switch_role(r); });
 
     decide_role();
     if (start_app()) {
@@ -358,6 +361,15 @@ void App::decide_role() {
     }
     settings_.role = role_;
     save_settings(settings_);
+}
+
+void App::switch_role(Role want) {
+    if (want == role_) return;
+    role_ = want;
+    settings_.role = want;
+    save_settings(settings_);
+    peer_name_.clear();
+    restart(want == Role::Client ? L"Connecting to the other PC" : L"This PC is the host now");
 }
 
 bool App::start_app() {
@@ -719,16 +731,9 @@ void App::on_command(UINT id) {
         if (!log_path_.empty()) ShellExecuteW(nullptr, L"open", L"notepad.exe", (L"\"" + log_path_.wstring() + L"\"").c_str(), nullptr, SW_SHOWNORMAL);
         break;
     case kCmdRoleHost:
-    case kCmdRoleClient: {
-        const Role want = id == kCmdRoleHost ? Role::Host : Role::Client;
-        if (want == role_) break;
-        role_ = want;
-        settings_.role = want;
-        save_settings(settings_);
-        peer_name_.clear();
-        restart(want == Role::Client ? L"Connecting to the other PC" : L"This PC is the host now");
+    case kCmdRoleClient:
+        switch_role(id == kCmdRoleHost ? Role::Host : Role::Client);
         break;
-    }
     case kCmdRestart:
         if (process_) {
             restart(L"");

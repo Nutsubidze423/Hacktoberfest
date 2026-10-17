@@ -598,10 +598,13 @@ void DisplaySettings::reload_config() {
 }
 
 void DisplaySettings::set_role(Role role) {
-    if (options_.role || role == role_) return;
+    if (role == role_) return;
+    if (options_.role && !on_role_change_) return;  // the launcher owns the role, unless it gave us a handler
     role_ = role;
     status_ = Status::Clean;
     reload_config();
+    if (hwnd_) InvalidateRect(hwnd_, nullptr, FALSE);
+    if (on_role_change_) on_role_change_(role);  // the launcher connects / disconnects and restarts the app
 }
 
 void DisplaySettings::set_pending(Side side) {
@@ -801,7 +804,7 @@ bool DisplaySettings::hit_enabled(Hit hit) const {
     case Hit::SideRight:
     case Hit::Peer: return !mons_.empty();
     case Hit::RoleHost:
-    case Hit::RoleClient: return !options_.role.has_value();
+    case Hit::RoleClient: return !options_.role.has_value() || static_cast<bool>(on_role_change_);
     case Hit::Apply: return dirty() && !mons_.empty();
     case Hit::Revert: return dirty() && saved_valid_;
     case Hit::Identify: return !mons_.empty();

@@ -64,6 +64,12 @@ public:
     // Runs on the UI thread after Apply wrote config.json (e.g. the launcher restarts the app).
     void set_applied_handler(std::function<void()> on_applied) { on_applied_ = std::move(on_applied); }
 
+    // Runs on the UI thread when the user picks the Host / Client toggle, so the launcher can connect
+    // or disconnect. When set, the toggle is live even though the launcher passed a known role.
+    void set_role_change_handler(std::function<void(layout::Role)> on_role_change) {
+        on_role_change_ = std::move(on_role_change);
+    }
+
     enum class Hit {
         None, Minimize, Close, Peer,
         SideLeft, SideRight, SideTop, SideBottom,
@@ -135,6 +141,7 @@ private:
     ui::unique_icon small_icon_, big_icon_;
     std::function<void()> on_close_;
     std::function<void()> on_applied_;
+    std::function<void(layout::Role)> on_role_change_;
 
     Options options_;
     layout::Role role_ = layout::Role::Host;
