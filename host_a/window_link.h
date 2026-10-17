@@ -102,6 +102,7 @@ private:
         enum Kind { Start, Stop, Disable, Exit } kind = Start;
         int width = 0;
         int height = 0;
+        double scale = 1.0;  // the peer's display scale
     };
 
     void stop_share(bool tell_peer);  // mutex_ held

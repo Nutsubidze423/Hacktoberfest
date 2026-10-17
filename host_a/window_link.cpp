@@ -192,7 +192,8 @@ void WindowLink::set_peer(const proto::Hello& hello) {
         return;
     }
     if (hello.screen_w > 0 && hello.screen_h > 0) {
-        desk_commands_.push({.kind = DeskCommand::Start, .width = hello.screen_w, .height = hello.screen_h});
+        desk_commands_.push(
+            {.kind = DeskCommand::Start, .width = hello.screen_w, .height = hello.screen_h, .scale = hello.dpi_scale});
     }
 }
 
@@ -403,11 +404,12 @@ void WindowLink::desk_main(std::stop_token stop) {
         stop_at.reset();
         log::info("desk: off");
     };
-    const auto start = [&](int w, int h) {
+    const auto start = [&](int w, int h, double scale) {
         stop_at.reset();
         if (!vdd || disabled) return;
         const SIZE want = vdd->best_mode(w, h);
         if (share && want.cx == size.cx && want.cy == size.cy && vdd->attached()) {
+            vdd->set_scale(scale);
             go_live(true);  // reconnected within the grace period: everything stayed where it was
             log::info("desk: back on");
             return;
@@ -423,6 +425,8 @@ void WindowLink::desk_main(std::stop_token stop) {
             region.set_vdd({.device = device});
             return;
         }
+        // Windows on it get the peer's scale, so they look over there like the peer's own windows.
+        vdd->set_scale(scale);
         vdd_rect = to_rect(r->rect);
         region.set_vdd({.device = device, .rect = vdd_rect, .live = false});
         try {
@@ -445,7 +449,7 @@ void WindowLink::desk_main(std::stop_token stop) {
     while (!stop.stop_requested()) {
         if (auto cmd = desk_commands_.pop_for(kDeskPoll)) {
             switch (cmd->kind) {
-                case DeskCommand::Start: start(cmd->width, cmd->height); break;
+                case DeskCommand::Start: start(cmd->width, cmd->height, cmd->scale); break;
                 case DeskCommand::Stop:
                     if (share) {
                         go_live(false);  // the cursor can't go there meanwhile; windows stay put

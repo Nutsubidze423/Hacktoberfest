@@ -67,6 +67,11 @@ public:
     // Removes the monitor from the desktop. Windows moves its windows to the remaining monitors.
     bool detach();
 
+    // Sets the attached monitor's display scale (Settings > Display > Scale) to the closest step to
+    // `scale` (1.25 = 125 %), e.g. the other PC's, so windows on it look the same size over there.
+    // Windows remembers it for this monitor. False if Windows refused.
+    bool set_scale(double scale);
+
 private:
     explicit VirtualDisplay(std::wstring device) : device_(std::move(device)) {}
     std::wstring device_;

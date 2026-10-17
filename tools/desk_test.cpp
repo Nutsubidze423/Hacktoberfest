@@ -113,6 +113,8 @@ int wmain(int argc, wchar_t** argv) {
     }
     const kvm::display::Rect vr{vdd_rect->rect.left, vdd_rect->rect.top, vdd_rect->rect.right, vdd_rect->rect.bottom};
     kvm::log::info("VDD {} at {},{} {}x{}", kvm::to_utf8(vdd->device()), vr.left, vr.top, vr.width(), vr.height());
+    // The "other PC" is this screen: give the VDD its scale, as kvm_host does with the peer's.
+    vdd->set_scale(primary.scale);
 
     Checks check;
     {
