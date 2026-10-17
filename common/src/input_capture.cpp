@@ -534,10 +534,15 @@ void InputCapture::worker_main() {
                 if (std::holds_alternative<proto::MouseButtonEvent>(ev.msg)) ++sent.buttons;
                 if (std::holds_alternative<proto::MouseWheel>(ev.msg)) ++sent.wheels;
                 if (std::holds_alternative<proto::Key>(ev.msg)) ++sent.keys;
-            } else if (remote_ && !send_failed) {
-                send_failed = true;
-                log::warn("input capture: send to the other PC failed, control back here");
-                post(kMsgLocal, 0);
+            } else {
+                // The connection is gone: don't keep handing control to it until
+                // set_client() attaches a new one (the session may take a while to end).
+                has_client_ = false;
+                if (remote_ && !send_failed) {
+                    send_failed = true;
+                    log::warn("input capture: send to the other PC failed, control back here");
+                    post(kMsgLocal, 0);
+                }
             }
         }
     }

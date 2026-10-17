@@ -301,6 +301,10 @@ int main() {
         g_sink_ok = true;
         key(VK_F13, false);
         settle();
+        abs_move(inside); settle();
+        abs_move(edge_at(0.5)); settle();
+        check(!cap.remote(), "after a failed send the edge stays on A until a new client is attached");
+        cap.set_client(sink);
         take_sent();
         take_seen();
 
