@@ -12,7 +12,9 @@
 
 #include <windows.h>
 
+#include "input_inject.h"
 #include "kvm/config.h"
+#include "kvm/dpi.h"
 #include "kvm/log.h"
 #include "kvm/net.h"
 #include "kvm/protocol.h"
@@ -39,32 +41,38 @@ std::string narrow(std::wstring_view s) {
     return out;
 }
 
-// TODO(demetre): switch to the dpi module once it exists (multi-monitor geometry).
+// Screen = B's primary monitor, in physical pixels.
 proto::Hello make_hello() {
     wchar_t name[256];
     DWORD name_len = static_cast<DWORD>(std::size(name));
     if (!GetComputerNameExW(ComputerNameDnsHostname, name, &name_len)) {
         name_len = 0;
     }
+    const auto primary = kvm::display::primary_monitor();
     return proto::Hello{
-        .screen_w = GetSystemMetrics(SM_CXSCREEN),
-        .screen_h = GetSystemMetrics(SM_CYSCREEN),
-        .dpi_scale = GetDpiForSystem() / 96.0,
+        .screen_w = primary.rect.width(),
+        .screen_h = primary.rect.height(),
+        .dpi_scale = primary.scale,
         .hostname = narrow(std::wstring_view(name, name_len)),
     };
 }
 
-void run_session(kvm::net::Connection& conn) {
+void run_session(kvm::net::Connection& conn, kvm::display::Side host_side) {
     if (!conn.send(make_hello())) {
         return;
     }
     kvm::log::info("connected to host {}", conn.peer());
 
+    // KVM: replays A's input while B has control; releases everything held when the session ends.
+    kvm::client::InputInject inject(host_side, [&conn](const proto::Message& m) { return conn.send_json(proto::encode(m)); });
+
     auto next_stats = std::chrono::steady_clock::now() + kStatsInterval;
     while (g_running && conn.is_open()) {
         if (const auto msg = conn.incoming().pop_for(500ms)) {
-            // TODO(luka): route to input_inject (demetre) / viewer (sandro) once they exist.
-            kvm::log::info("from host: {}", proto::encode(*msg).dump());
+            if (!inject.handle(*msg)) {
+                // TODO(luka): route to viewer (sandro) once it exists.
+                kvm::log::info("from host: {}", proto::encode(*msg).dump());
+            }
         }
         if (std::chrono::steady_clock::now() >= next_stats) {
             const auto stats = conn.stats();
@@ -102,9 +110,17 @@ int wmain(int argc, wchar_t** argv) {
         kvm::log::info("kvm_client: protocol v{}, host {}:{}. Ctrl+C to quit.", proto::kProtocolVersion, cfg.host_ip,
                        cfg.control_port);
 
+        // client_side says where B stands next to A, so A is on the opposite side of B.
+        const auto side = kvm::display::parse_side(cfg.client_side);
+        if (!side || (*side != kvm::display::Side::Left && *side != kvm::display::Side::Right)) {
+            kvm::log::error("config: client_side must be \"left\" or \"right\", got \"{}\"", cfg.client_side);
+            return 1;
+        }
+        const auto host_side = kvm::display::opposite(*side);
+
         while (g_running) {
             if (auto conn = kvm::net::connect(cfg.host_ip, cfg.control_port)) {
-                run_session(*conn);
+                run_session(*conn, host_side);
             }
             if (g_running) {
                 kvm::log::info("reconnecting in {} s...", kReconnectDelay.count());

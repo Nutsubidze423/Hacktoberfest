@@ -1,5 +1,6 @@
 // kvm_host.exe — runs on A (owns the physical mouse/keyboard, streams a window).
-// Usage: kvm_host.exe [--config <path>] [--log <file>]
+// Usage: kvm_host.exe [--config <path>] [--log <file>] [--no-kvm]
+//   --no-kvm  don't install the input hooks (e.g. when only testing the video stream)
 
 #include <atomic>
 #include <chrono>
@@ -10,7 +11,9 @@
 
 #include <windows.h>
 
+#include "input_capture.h"
 #include "kvm/config.h"
+#include "kvm/dpi.h"
 #include "kvm/log.h"
 #include "kvm/net.h"
 #include "kvm/protocol.h"
@@ -54,7 +57,7 @@ std::optional<proto::Hello> handshake(kvm::net::Connection& conn) {
     return *hello;
 }
 
-void run_session(kvm::net::Connection& conn) {
+void run_session(kvm::net::Connection& conn, kvm::host::InputCapture* capture) {
     const auto hello = handshake(conn);
     if (!hello) {
         return;
@@ -62,11 +65,27 @@ void run_session(kvm::net::Connection& conn) {
     kvm::log::info("client '{}' connected from {}: screen {}x{}, dpi scale {:.2f}", hello->hostname, conn.peer(),
                    hello->screen_w, hello->screen_h, hello->dpi_scale);
 
+    // KVM: input goes to this client while the session lasts. Detaching blocks until the
+    // capture stops using conn, so it must happen before conn goes away (struct dtor).
+    struct Detach {
+        kvm::host::InputCapture* capture;
+        ~Detach() {
+            if (capture) capture->set_client(nullptr);
+        }
+    } detach{capture};
+    if (capture) {
+        capture->set_client([&conn](const proto::Message& m) { return conn.send_json(proto::encode(m)); });
+    }
+
     auto next_stats = std::chrono::steady_clock::now() + kStatsInterval;
     while (g_running && conn.is_open()) {
         if (const auto msg = conn.incoming().pop_for(500ms)) {
-            // TODO(luka): route to remote_input (sandro) once it exists.
-            kvm::log::info("from client: {}", proto::encode(*msg).dump());
+            if (const auto* leave = std::get_if<proto::FocusLeave>(&*msg); leave && capture) {
+                capture->on_focus_leave(*leave);  // B's cursor came back through its edge
+            } else {
+                // TODO(luka): route to remote_input (sandro) once it exists.
+                kvm::log::info("from client: {}", proto::encode(*msg).dump());
+            }
         }
         if (std::chrono::steady_clock::now() >= next_stats) {
             const auto stats = conn.stats();
@@ -85,17 +104,36 @@ int wmain(int argc, wchar_t** argv) {
     SetConsoleCtrlHandler(on_console_ctrl, TRUE);
 
     std::optional<std::filesystem::path> config_path;
+    bool kvm_enabled = true;
     for (int i = 1; i < argc; ++i) {
         const std::wstring_view arg = argv[i];
         if (arg == L"--config" && i + 1 < argc) {
             config_path = argv[++i];
         } else if (arg == L"--log" && i + 1 < argc) {
             kvm::log::open_file(argv[++i]);
+        } else if (arg == L"--no-kvm") {
+            kvm_enabled = false;
         }
     }
 
     try {
         const kvm::Config cfg = kvm::load_config(config_path);
+
+        // KVM: hooks run for the whole process; sessions attach/detach the client.
+        const auto side = kvm::display::parse_side(cfg.client_side);
+        if (kvm_enabled && (!side || (*side != kvm::display::Side::Left && *side != kvm::display::Side::Right))) {
+            kvm::log::error("config: client_side must be \"left\" or \"right\", got \"{}\" - KVM disabled", cfg.client_side);
+            kvm_enabled = false;
+        }
+        std::optional<kvm::host::InputCapture> capture;
+        if (kvm_enabled) {
+            capture.emplace(kvm::host::CaptureOptions{.client_side = *side});
+            if (!capture->start()) {
+                kvm::log::error("KVM disabled: could not install the input hooks");
+                capture.reset();
+            }
+        }
+
         kvm::net::Server server(cfg.control_port);
         g_server = &server;
         kvm::log::info("kvm_host: protocol v{}, listening on port {} (client on the {}). Ctrl+C to quit.",
@@ -106,7 +144,7 @@ int wmain(int argc, wchar_t** argv) {
             if (!conn) {
                 continue;  // stop() or a transient accept error
             }
-            run_session(*conn);
+            run_session(*conn, capture ? &*capture : nullptr);
         }
         g_server = nullptr;
         kvm::log::info("kvm_host: bye");
