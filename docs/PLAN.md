@@ -166,7 +166,8 @@ Claude წაიკითხავს ამ ფაილს, იპოვის
 - [x] S1: `video_receiver.*` კითხულობს გარედან მიცემულ `FrameChannel&`-ს (არხს და reconnect-ს `main.cpp` ფლობს); LatestSlot, 1080p 30 fps / ~9 ms ლოკალურად; `kvm_host --no-kvm --test-video`-ის ფრეიმები მიიღო (codec `test` არ ჩანს, MBPS-ში ითვლება)
 - [x] S3: viewer-ის ინფუთი → `remote_mouse_move`, `mouse_button`, `mouse_wheel`, `key` (`viewer_input.*`, ორივე exe-ში; მხოლოდ გამოსახულებაზე, drag-ისას clamp, ფოკუსის დაკარგვისას ყველაფერი up, Alt+F4 ლოკალურია). viewer-ის დახურვა სტრიმისას → `stream_stop {hwnd}`. გაგზავნა: `set_message_sink` → `conn.send_json`
 - [x] S2: ბრენჩი `main`-ზე rebase და push (`sandro/viewer-design`)
-- [x] ლოგო (C „Caret“), tray icon, შეტყობინებები „Connected to host“ / „Connection lost“ (`docs/DESIGN.md` 9)
+- [x] ლოგო, tray icon, შეტყობინებები „Connected to host“ / „Connection lost“ (`docs/DESIGN.md` 9)
+- [x] აპის სახელი **Sarke** (viewer, tray, შეტყობინებები, DESIGN.md) + ლოგო „ს caret“ + `docs/brand/sarke.ico`, `tools/ui_preview_logo.exe`. exe-ების სახელები და `.rc` — ლუკა (`ARTEFACT/Sarke — სახელი და ლოგო`)
 - [ ] დიზაინის შემოწმება DPI 125 / 150 / 200%-ზე და ორ მონიტორს შორის (`docs/DESIGN.md` 7)
 - [x] M1b (ლუკა): ფანჯარა A ⇄ B `main.cpp`-ში — viewer-ის მხარე მზადაა (ჩართო თემომ, `host_a/window_link.*`)
 - [x] ~~ფაზა 2: `host_a/remote_input.*`~~ → თემოს გადაეცა (გადაწყვეტილებები 2, #3; T8 `5fc0ab5`)

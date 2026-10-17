@@ -5,15 +5,18 @@
 //   3. 16 / 20 / 24 / 32 px magnified 8x (nearest neighbor): 100 / 125 / 150 / 200 % tray icons
 //
 //   ui_preview_logo.exe [out.bmp]        default: sarke_logo_sizes.bmp next to the exe
+//   ui_preview_logo.exe --ico <out.ico>  multi-size .ico (16-256 px) for the exe's icon resource
 
 #include <windows.h>
 
 #include <algorithm>
 #include <cstdint>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <numeric>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "app_logo.h"
@@ -76,10 +79,104 @@ bool save_bmp(const fs::path& path, const std::uint32_t* top_down, int width, in
     return static_cast<bool>(out);
 }
 
+constexpr int kIcoSizes[] = {16, 20, 24, 32, 40, 48, 64, 256};
+
+// The logo at `size` x `size` as opaque top-down BGRA pixels.
+std::vector<std::uint32_t> render_pixels(int size) {
+    BITMAPINFO bmi{};
+    bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    bmi.bmiHeader.biWidth = size;
+    bmi.bmiHeader.biHeight = -size;
+    bmi.bmiHeader.biPlanes = 1;
+    bmi.bmiHeader.biBitCount = 32;
+    bmi.bmiHeader.biCompression = BI_RGB;
+    void* bits = nullptr;
+    std::unique_ptr<std::remove_pointer_t<HDC>, DcDeleter> dc(CreateCompatibleDC(nullptr));
+    std::unique_ptr<std::remove_pointer_t<HBITMAP>, GdiDeleter> dib(
+        CreateDIBSection(dc.get(), &bmi, DIB_RGB_COLORS, &bits, nullptr, 0));
+    std::vector<std::uint32_t> pixels(static_cast<std::size_t>(size) * size, 0);
+    if (!dc || !dib || !bits) {
+        return pixels;
+    }
+    const HGDIOBJ old = SelectObject(dc.get(), dib.get());
+    const auto icon = kvm::ui::create_logo_icon(size);
+    DrawIconEx(dc.get(), 0, 0, icon.get(), size, size, 0, nullptr, DI_NORMAL);
+    GdiFlush();
+    const auto* src = static_cast<const std::uint32_t*>(bits);
+    for (std::size_t i = 0; i < pixels.size(); ++i) {
+        pixels[i] = src[i] | 0xFF000000u;  // the tile is fully opaque
+    }
+    SelectObject(dc.get(), old);
+    return pixels;
+}
+
+// Classic .ico: one 32-bpp DIB per size (height doubled for the AND mask, which stays empty).
+bool save_ico(const fs::path& path) {
+    struct Image {
+        int size;
+        std::vector<char> data;
+    };
+    std::vector<Image> images;
+    for (const int size : kIcoSizes) {
+        const auto pixels = render_pixels(size);
+        BITMAPINFOHEADER info{};
+        info.biSize = sizeof(info);
+        info.biWidth = size;
+        info.biHeight = size * 2;
+        info.biPlanes = 1;
+        info.biBitCount = 32;
+        info.biCompression = BI_RGB;
+        const std::size_t mask_row = static_cast<std::size_t>((size + 31) / 32) * 4;
+        Image image{size, {}};
+        image.data.resize(sizeof(info) + pixels.size() * 4 + mask_row * size, 0);
+        std::memcpy(image.data.data(), &info, sizeof(info));
+        char* xor_bits = image.data.data() + sizeof(info);
+        for (int y = 0; y < size; ++y) {  // bottom-up rows
+            std::memcpy(xor_bits + static_cast<std::size_t>(size - 1 - y) * size * 4,
+                        pixels.data() + static_cast<std::size_t>(y) * size, static_cast<std::size_t>(size) * 4);
+        }
+        images.push_back(std::move(image));
+    }
+
+    std::ofstream out(path, std::ios::binary);
+    const auto put16 = [&](std::uint16_t v) { out.write(reinterpret_cast<const char*>(&v), 2); };
+    const auto put32 = [&](std::uint32_t v) { out.write(reinterpret_cast<const char*>(&v), 4); };
+    put16(0);  // reserved
+    put16(1);  // type: icon
+    put16(static_cast<std::uint16_t>(images.size()));
+    auto offset = static_cast<std::uint32_t>(6 + 16 * images.size());
+    for (const Image& image : images) {
+        const auto dim = static_cast<std::uint8_t>(image.size >= 256 ? 0 : image.size);  // 0 means 256
+        out.put(static_cast<char>(dim));
+        out.put(static_cast<char>(dim));
+        out.put(0);  // palette size
+        out.put(0);  // reserved
+        put16(1);    // planes
+        put16(32);   // bits per pixel
+        put32(static_cast<std::uint32_t>(image.data.size()));
+        put32(offset);
+        offset += static_cast<std::uint32_t>(image.data.size());
+    }
+    for (const Image& image : images) {
+        out.write(image.data.data(), static_cast<std::streamsize>(image.data.size()));
+    }
+    return static_cast<bool>(out);
+}
+
 }  // namespace
 
 int wmain(int argc, wchar_t** argv) {
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+
+    if (argc >= 3 && std::wstring_view(argv[1]) == L"--ico") {
+        const fs::path ico = argv[2];
+        if (!save_ico(ico)) {
+            kvm::log::error("could not write {}", utf8(ico.wstring()));
+            return 1;
+        }
+        kvm::log::info("saved {}: sizes 16 20 24 32 40 48 64 256 px", utf8(ico.wstring()));
+        return 0;
+    }
 
     fs::path out_path;
     if (argc >= 2) {
