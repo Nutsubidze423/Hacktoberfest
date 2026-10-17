@@ -6,7 +6,7 @@ Claude, ეს ფაილი ლუკას სესიისთვისა
 
 ## რა გაკეთდა (ბრენჩი `sandro/displays`, `sandro/sarke-brand`-ის თავზე)
 
-- **`client_b/display_layout.*`** — ლოგიკა UI-ს გარეშე: ამ PC-ის რეალური მონიტორები (`display::monitors()` VDD-ის გარეშე), გადაკვეთის კიდე (იგივე წესი, რაც დემეტრეს `OuterEdge`-ში), მეორე PC-ის ადგილი, host/client → `client_side`, `config.json`-ის ჩაწერა (დანარჩენი გასაღებები და მათი თანმიმდევრობა რჩება; გაუმართავ ფაილს არასოდეს გადააწერს; temp + swap), `peer.json` (`%LOCALAPPDATA%\Sarke\`), როლის გამოცნობა `host_ip`-დან. ტესტი: `tools/display_layout_test.exe` (60 შემოწმება).
+- **`client_b/display_layout.*`** — ლოგიკა UI-ს გარეშე: ამ PC-ის რეალური მონიტორები (`display::monitors()` VDD-ის გარეშე), გადაკვეთის კიდე (იგივე წესი, რაც დემეტრეს `OuterEdge`-ში), მეორე PC-ის ადგილი, host/client → `client_side`, `config.json`-ის ჩაწერა (დანარჩენი გასაღებები და მათი თანმიმდევრობა რჩება; გაუმართავ ფაილს არასოდეს გადააწერს; temp + swap), `peer.json` (`%LOCALAPPDATA%\Sarke\`), როლის გამოცნობა (ჯერ რომელი აპი მუშაობს ამ PC-ზე — `kvm_host`/`kvm_client`, მერე `host_ip`; ახალი default `"auto"` = host, მომხმარებელს შეუძლია შეცვალოს). ტესტი: `tools/display_layout_test.exe` (62 შემოწმება).
 - **`client_b/display_settings.*`** — ფანჯარა „Where is the other PC?“ (`docs/DESIGN.md` 10): რეალური მონიტორები (live: `WM_DISPLAYCHANGE`, DPI, ყოველ 2 წმ), მეორე PC drag-ით / ღილაკებით / ისრებით, ნარინჯისფერი კიდე = სადაც კურსორი რეალურად გადადის, Apply → `config.json`, Identify (ნომერი ყველა ეკრანზე), „Windows display settings“.
 - **`tools/sarke_displays.exe`** — იგივე ფანჯარა ცალკე (window app, კონსოლის გარეშე): `--role host|client`, `--config <path>`, `--peer 1920x1200@1.5 <name>`.
 - **`client_b/toast.*`** — Sarke-ის შეტყობინების ბარათი (`docs/DESIGN.md` 9.3): ზედა მარჯვნივ, slide + fade (Windows-ის ანიმაციები გამორთულია → მხოლოდ fade), დროის ხაზი, hover აჩერებს, click = open, × = დახურვა. `TrayIcon::notify` ახლა მას იყენებს (Windows-ის toast მხოლოდ fallback-ია). Preview: `tools/ui_preview_toast.exe --sequence`.
@@ -20,8 +20,8 @@ KVM კურსორს **პროპორციულად** ასახ�
 ## ლუკა — შენი ფაილები
 
 1. **top / bottom ჩართვა.** KVM-ის კოდი (დემეტრეს `OuterEdge`, `input_capture`, `input_inject`) და VDD-ის განთავსება (თემოს `virtual_display`) ოთხივე მხარეს უკვე უჭერს მხარს, მაგრამ:
-   - `host_a/main.cpp` (~309): `client_side` უნდა იყოს `left`/`right`, თორემ KVM ითიშება;
-   - `client_b/main.cpp` (~220): იგივე, მაგრამ `return 1` — client საერთოდ არ ეშვება.
+   - `host_a/main.cpp` (~310): `client_side` უნდა იყოს `left`/`right`, თორემ KVM ითიშება;
+   - `client_b/main.cpp` (~259): იგივე, მაგრამ `return 1` — client საერთოდ არ ეშვება.
    შემოთავაზება: ორივეგან დატოვე მხოლოდ `if (!side)` (უცნობი სიტყვა). შემდეგ `client_b/display_layout.h`-ში `kVerticalSidesAccepted = true` (ერთი ხაზი — მე ან შენ), და Displays-ში TOP/BOTTOM ჩაირთვება. მანამდე ფანჯარა მათ არ გთავაზობს, რომ client არ გაჩერდეს.
 2. **Hello-ზე peer-ის დამახსოვრება** (ორივე `main.cpp`, სადაც `proto::Hello` მოდის):
    ```cpp
@@ -47,7 +47,7 @@ KVM კურსორს **პროპორციულად** ასახ�
 ## როგორ შევამოწმოთ
 
 ```
-build\x64-release\tools\display_layout_test.exe        # 60 შემოწმება, exit 0
+build\x64-release\tools\display_layout_test.exe        # 62 შემოწმება, exit 0
 build\x64-release\tools\sarke_displays.exe              # ფანჯარა; Apply წერს config.json-ში
 build\x64-release\tools\ui_preview_toast.exe --sequence # ბარათები ზედა მარჯვნივ
 ```

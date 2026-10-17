@@ -250,7 +250,8 @@ bool DisplaySettings::show(Options options) {
     computer_ = layout::computer_name();
     mons_ = layout::local_monitors();
     cfg_ = layout::read_config(options_.config_path);
-    role_ = options_.role ? *options_.role : layout::guess_role(cfg_.host_ip);
+    // The app that runs here knows best; else config.json's host_ip. The user can switch it.
+    role_ = options_.role ? *options_.role : layout::running_role().value_or(layout::guess_role(cfg_.host_ip));
     if (!peer_set_) {
         if (auto p = layout::load_peer()) peer_ = *p;
     }

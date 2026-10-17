@@ -103,8 +103,13 @@ ConfigState read_config(const std::optional<std::filesystem::path>& path = std::
 // Returns "" on success, else the reason.
 std::string save_client_side(const std::filesystem::path& path, Side client_side);
 
-// Host if config.json's host_ip is this PC (an address of one of its adapters, or loopback):
-// on A that's normal, on B host_ip is A's address. Client otherwise.
+// From config.json's host_ip: Host if it is this PC (an address of one of its adapters, loopback or
+// this PC's name), or "auto" / empty (the default since discovery: both PCs may share one config, so
+// the user picks); Client if it names another PC.
 Role guess_role(const std::string& host_ip);
+
+// The role of the Sarke app running on this PC right now: Host if only kvm_host.exe runs, Client if
+// only kvm_client.exe runs, nullopt if neither or both (e.g. a test on one PC).
+std::optional<Role> running_role();
 
 }  // namespace kvm::layout

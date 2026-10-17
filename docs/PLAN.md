@@ -168,7 +168,7 @@ Claude წაიკითხავს ამ ფაილს, იპოვის
 - [x] S2: ბრენჩი `main`-ზე rebase და push (`sandro/viewer-design`)
 - [x] ლოგო, tray icon, შეტყობინებები „Connected to host“ / „Connection lost“ (`docs/DESIGN.md` 9)
 - [x] აპის სახელი **Sarke** (viewer, tray, შეტყობინებები, DESIGN.md) + ლოგო „ს caret“ + `docs/brand/sarke.ico`, `tools/ui_preview_logo.exe`. exe-ების სახელები და `.rc` — ლუკა (`ARTEFACT/Sarke — სახელი და ლოგო`)
-- [x] ეკრანების განლაგება (Displays, `docs/DESIGN.md` 10): `client_b/display_layout.*` + `display_settings.*`, `tools/sarke_displays.exe` — რეალური მონიტორები (live), მეორე PC drag-ით, Apply → `config.json` `client_side` (host/client), Identify; ტესტი `tools/display_layout_test.exe` (60). top/bottom — ლუკას `main.cpp`-ების შემდეგ (`ARTEFACT/ეკრანების განლაგება და Sarke-ის შეტყობინება`)
+- [x] ეკრანების განლაგება (Displays, `docs/DESIGN.md` 10): `client_b/display_layout.*` + `display_settings.*`, `tools/sarke_displays.exe` — რეალური მონიტორები (live), მეორე PC drag-ით, Apply → `config.json` `client_side` (host/client), Identify; ტესტი `tools/display_layout_test.exe` (62). top/bottom — ლუკას `main.cpp`-ების შემდეგ (`ARTEFACT/ეკრანების განლაგება და Sarke-ის შეტყობინება`)
 - [x] Sarke-ის შეტყობინება ზედა მარჯვნივ, NVIDIA-ს მსგავსად (`client_b/toast.*`, `docs/DESIGN.md` 9.3, `tools/ui_preview_toast.exe`); tray-ში „Display arrangement...“
 - [x] ბრაუზერის პროტოტიპი `docs/preview/sarke-app.html` (+ `sarke-ui.html`): იგივე side-only მოდელი, ბრაუზერის რეალური ეკრანები, ახალი ბარათი; 95 ტესტი (`test_sarke_app.py`)
 - [ ] ლუკა: tray + Displays + peer-ის დამახსოვრება `main.cpp`-ებში, top/bottom-ის დაშვება (იხ. იგივე ARTEFACT)

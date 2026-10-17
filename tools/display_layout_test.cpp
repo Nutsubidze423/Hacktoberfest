@@ -160,9 +160,13 @@ void config_files() {
 
 void roles() {
     check(layout::guess_role("127.0.0.1") == Role::Host, "127.0.0.1 -> host");
-    check(layout::guess_role("") == Role::Host, "no host_ip -> host (the apps default to 127.0.0.1)");
+    check(layout::guess_role("") == Role::Host, "no host_ip -> host");
+    check(layout::guess_role("auto") == Role::Host, "\"auto\" (discovery, the default) -> host, the user may switch");
     check(layout::guess_role("203.0.113.7") == Role::Client, "someone else's address -> client");
-    check(layout::guess_role("not an address") == Role::Client, "a name -> client");
+    check(layout::guess_role("some-other-pc") == Role::Client, "another PC's name -> client");
+    check(layout::guess_role(layout::computer_name()) == Role::Host, "this PC's own name -> host");
+    const auto running = layout::running_role();
+    std::printf("running here: %s\n", !running ? "no Sarke app (or both)" : *running == Role::Host ? "kvm_host" : "kvm_client");
 }
 
 void this_machine() {

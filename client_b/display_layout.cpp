@@ -4,6 +4,7 @@
 #include <ws2tcpip.h>
 #include <windows.h>
 #include <shlobj.h>
+#include <tlhelp32.h>
 
 #include <algorithm>
 #include <cmath>
@@ -308,7 +309,9 @@ Role guess_role(const std::string& host_ip) {
         a->sin6_addr = v6;
         addr_len = sizeof(sockaddr_in6);
     } else {
-        return host_ip.empty() || host_ip == "localhost" ? Role::Host : Role::Client;
+        // "auto" (discovery) says nothing about this PC; a name is this PC's or another's.
+        if (host_ip.empty() || host_ip == "auto" || host_ip == "localhost") return Role::Host;
+        return _stricmp(host_ip.c_str(), computer_name().c_str()) == 0 ? Role::Host : Role::Client;
     }
     // Binding to an address only works if one of this PC's adapters has it.
     WSADATA wsa{};
@@ -321,6 +324,21 @@ Role guess_role(const std::string& host_ip) {
     }
     WSACleanup();
     return local ? Role::Host : Role::Client;
+}
+
+std::optional<Role> running_role() {
+    const HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (snap == INVALID_HANDLE_VALUE) return std::nullopt;
+    bool host = false, client = false;
+    PROCESSENTRY32W pe{};
+    pe.dwSize = sizeof(pe);
+    for (BOOL ok = Process32FirstW(snap, &pe); ok; ok = Process32NextW(snap, &pe)) {
+        host = host || _wcsicmp(pe.szExeFile, L"kvm_host.exe") == 0;
+        client = client || _wcsicmp(pe.szExeFile, L"kvm_client.exe") == 0;
+    }
+    CloseHandle(snap);
+    if (host == client) return std::nullopt;
+    return host ? Role::Host : Role::Client;
 }
 
 }  // namespace kvm::layout
