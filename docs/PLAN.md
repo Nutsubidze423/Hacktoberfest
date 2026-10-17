@@ -123,7 +123,7 @@ Claude წაიკითხავს ამ ფაილს, იპოვის
 
 ### დემეტრე — KVM ინფუთი
 - [x] `win32_input.*` (SendInput wrappers) — **სანდროს სჭირდება, პირველ რიგში**
-- [ ] `dpi.*`: DPI awareness, მონიტორები, ვირტუალური დესკტოპის კიდეები
+- [x] `dpi.*`: DPI awareness, მონიტორები, ვირტუალური დესკტოპის კიდეები (+ `tools/dpi_test.cpp`)
 - [ ] `input_capture.*`: hooks thread + `Ctrl+Alt+Shift+Q`
 - [ ] edge detection + suppress + Raw Input deltas; `--local-test` რეჟიმი
 - [ ] `input_inject.*` (B): მოძრაობა, ღილაკები, `focus_enter` / `focus_leave`
