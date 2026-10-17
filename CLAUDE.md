@@ -76,7 +76,7 @@ docs/PLAN.md               # როლები, ვადები, ჩეკ�
 common/                    # static lib kvm_common
   include/kvm/
     protocol.h             # შეტყობინებები (ლუკა) — გაყინული კონტრაქტი
-    net.h  video.h  config.h  log.h  queue.h   # (ლუკა)
+    net.h  video.h  config.h  log.h  queue.h  file_link.h  hotkeys.h   # (ლუკა)
     win32_input.h  dpi.h  input_capture.h  input_inject.h  kvm_link.h  clipboard.h   # (დემეტრე)
   src/*.cpp
 host_a/                    # kvm_host.exe

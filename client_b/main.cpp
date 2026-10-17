@@ -19,6 +19,9 @@
 #include "kvm/clipboard.h"
 #include "kvm/config.h"
 #include "kvm/dpi.h"
+#include "kvm/file_link.h"
+#include "kvm/file_transfer.h"
+#include "kvm/hotkeys.h"
 #include "kvm/kvm_link.h"
 #include "kvm/log.h"
 #include "kvm/net.h"
@@ -114,7 +117,7 @@ void log_video_stats(VideoStats& stats, std::chrono::seconds interval) {
 }
 
 void run_session(kvm::net::Connection& conn, const kvm::Config& cfg, kvm::KvmLink* kvm,
-                 kvm::clip::ClipboardSync* clip) {
+                 kvm::clip::ClipboardSync* clip, kvm::FileLink& files) {
     if (!conn.send(make_hello())) {
         return;
     }
@@ -142,6 +145,12 @@ void run_session(kvm::net::Connection& conn, const kvm::Config& cfg, kvm::KvmLin
     } else {
         kvm::log::warn("no video channel — is port {} open on the host?", cfg.video_port);
     }
+    if (auto channel = kvm::files::connect_files(cfg.host_ip, cfg.file_port, files.callbacks())) {
+        kvm::log::info("file channel connected ({}:{})", cfg.host_ip, cfg.file_port);
+        files.set(std::move(channel));
+    } else {
+        kvm::log::warn("no file channel — is port {} open on the host?", cfg.file_port);
+    }
 
     auto next_stats = std::chrono::steady_clock::now() + kStatsInterval;
     while (g_running && conn.is_open()) {
@@ -163,6 +172,7 @@ void run_session(kvm::net::Connection& conn, const kvm::Config& cfg, kvm::KvmLin
             next_stats += kStatsInterval;
         }
     }
+    files.set(nullptr);
     if (video) {
         video->close();  // unblocks recv_frame; join before `video` is destroyed
         if (video_receiver.joinable()) {
@@ -221,9 +231,17 @@ int wmain(int argc, wchar_t** argv) {
         kvm::clip::ClipboardSync clip;
         const bool clip_on = clipboard_enabled && clip.start();
 
+        // Files (port 50502): drop window + Ctrl+Alt+Shift+F, received files land in Downloads\KVM.
+        kvm::FileLink files;
+        kvm::Hotkeys hotkeys;
+        hotkeys.add('F', [&] { files.show_catcher_at_cursor(); });
+        if (hotkeys.start()) {
+            kvm::log::info("Ctrl+Alt+Shift+F: drop files on the box at the cursor to send them to the other PC");
+        }
+
         while (g_running) {
             if (auto conn = kvm::net::connect(cfg.host_ip, cfg.control_port)) {
-                run_session(*conn, cfg, kvm_link ? &*kvm_link : nullptr, clip_on ? &clip : nullptr);
+                run_session(*conn, cfg, kvm_link ? &*kvm_link : nullptr, clip_on ? &clip : nullptr, files);
             }
             if (g_running) {
                 kvm::log::info("reconnecting in {} s...", kReconnectDelay.count());

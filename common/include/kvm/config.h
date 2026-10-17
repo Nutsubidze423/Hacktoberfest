@@ -12,6 +12,7 @@ struct Config {
     std::string host_ip = "127.0.0.1";
     std::uint16_t control_port = 50500;
     std::uint16_t video_port = 50501;
+    std::uint16_t file_port = 50502;
     std::string client_side = "right";  // where B stands relative to A: "left" or "right"
     int jpeg_quality = 75;
     int max_fps = 30;

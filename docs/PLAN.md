@@ -123,8 +123,8 @@ Claude წაიკითხავს ამ ფაილს, იპოვის
 - [ ] ტესტი 3: სატესტო ვიდეო ნამდვილ ქსელზე (`5_run_host_video_test.cmd`) — fps / Mbit/s / latency
 - [x] protocol v2 (ორმხრივი), ორივე exe ორივე ბიბლიოთეკას ლინკავს, A-ს პასუხის `hello`, firewall 50502
 - [ ] M1b: ფანჯარა A ⇄ B `main.cpp`-ში: ვიდეო არხი ორივე მიმართულებით, `WindowShare` + viewer + `remote_input`, hotkey `Ctrl+Alt+Shift+W`, დაბრუნება გამოსვლისას (სანდროს S1-ს ელოდება)
-- [ ] KVM B → A-ს ჩართვა `main.cpp`-ში (დემეტრეს D0-თან ერთად)
-- [ ] ფაილების არხი 50502 `main.cpp`-ში (თემოს T9-თან ერთად)
+- [x] KVM ორივე მიმართულებით + clipboard `main.cpp`-ში (დემეტრეს `KvmLink`, `ClipboardSync`), protocol `clipboard` (`0d7a7c1`)
+- [x] ფაილების არხი 50502 `main.cpp`-ში (თემოს T9) + `FileLink` + `Hotkeys` (`Ctrl+Alt+Shift+F` = drop ყუთი კურსორთან, სანამ დემეტრეს D1 არ არის)
 - [ ] ფაზა 2: end-to-end latency, კავშირის გაწყვეტის სცენარები
 - [ ] M2: დემოს სცენარი, README
 

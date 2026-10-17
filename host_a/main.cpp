@@ -25,6 +25,9 @@
 #include "kvm/clipboard.h"
 #include "kvm/config.h"
 #include "kvm/dpi.h"
+#include "kvm/file_link.h"
+#include "kvm/file_transfer.h"
+#include "kvm/hotkeys.h"
 #include "kvm/kvm_link.h"
 #include "kvm/log.h"
 #include "kvm/net.h"
@@ -51,6 +54,7 @@ struct Options {
 std::atomic<bool> g_running{true};
 std::atomic<kvm::net::Server*> g_server{nullptr};
 std::atomic<kvm::net::VideoServer*> g_video_server{nullptr};
+std::atomic<kvm::files::FileServer*> g_file_server{nullptr};
 
 BOOL WINAPI on_console_ctrl(DWORD) {
     g_running = false;
@@ -59,6 +63,9 @@ BOOL WINAPI on_console_ctrl(DWORD) {
     }
     if (auto* video = g_video_server.load()) {
         video->stop();
+    }
+    if (auto* files = g_file_server.load()) {
+        files->stop();
     }
     return TRUE;
 }
@@ -274,13 +281,31 @@ int wmain(int argc, wchar_t** argv) {
 
         kvm::net::Server server(cfg.control_port);
         kvm::net::VideoServer video_server(cfg.video_port);
+        kvm::files::FileServer file_server(cfg.file_port);
         g_server = &server;
         g_video_server = &video_server;
+        g_file_server = &file_server;
         kvm::log::info("kvm_host: protocol v{}, listening on ports {} + {} (client on the {}). Ctrl+C to quit.",
                        proto::kProtocolVersion, cfg.control_port, cfg.video_port, cfg.client_side);
 
         VideoSlot video;
         std::jthread video_acceptor([&] { accept_video_loop(video_server, video); });
+
+        // Files (port 50502): drop window + Ctrl+Alt+Shift+F, received files land in Downloads\KVM.
+        kvm::FileLink files;
+        std::jthread file_acceptor([&] {
+            while (g_running) {
+                if (auto channel = file_server.accept(files.callbacks())) {
+                    kvm::log::info("file channel from {}", channel->peer());
+                    files.set(std::move(channel));
+                }
+            }
+        });
+        kvm::Hotkeys hotkeys;
+        hotkeys.add('F', [&] { files.show_catcher_at_cursor(); });
+        if (hotkeys.start()) {
+            kvm::log::info("Ctrl+Alt+Shift+F: drop files on the box at the cursor to send them to the other PC");
+        }
 
         while (g_running) {
             auto conn = server.accept();
@@ -289,10 +314,14 @@ int wmain(int argc, wchar_t** argv) {
             }
             run_session(*conn, kvm_link ? &*kvm_link : nullptr, clip_on ? &clip : nullptr, video, opt);
         }
+        hotkeys.stop();
+        file_server.stop();
+        file_acceptor.join();
         video_server.stop();
         video_acceptor.join();
         g_server = nullptr;
         g_video_server = nullptr;
+        g_file_server = nullptr;
         kvm::log::info("kvm_host: bye");
         return 0;
     } catch (const std::exception& e) {

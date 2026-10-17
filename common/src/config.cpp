@@ -11,7 +11,7 @@
 
 namespace kvm {
 
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(Config, host_ip, control_port, video_port, client_side,
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(Config, host_ip, control_port, video_port, file_port, client_side,
                                                 jpeg_quality, max_fps)
 
 namespace {
