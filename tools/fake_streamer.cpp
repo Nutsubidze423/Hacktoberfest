@@ -1,16 +1,13 @@
 // fake_streamer: stands in for A's video sender, so the B side can be tested without capture.
-// Listens on the video port (50501) and sends JPEGs from disk in a loop, framed exactly like A.
+// Listens on the video port (50501) with Luka's kvm::net::VideoServer — the same channel A uses —
+// and sends JPEGs from disk in a loop.
 //
 //   fake_streamer.exe <folder | image.jpg> [--port 50501] [--fps 30]
 //   viewer_test.exe --connect 127.0.0.1          (same PC; or B's viewer pointed at this PC's IP)
 //
 // Each frame gets t_capture_us = send time, so the viewer's latency shows network + decode time.
 
-#include <winsock2.h>
-#include <ws2tcpip.h>
-
 #include <algorithm>
-#include <array>
 #include <chrono>
 #include <cstdint>
 #include <cwctype>
@@ -26,7 +23,7 @@
 #include "kvm/config.h"
 #include "kvm/log.h"
 #include "kvm/net.h"
-#include "video_receiver.h"
+#include "kvm/video.h"
 
 namespace fs = std::filesystem;
 using Clock = std::chrono::steady_clock;
@@ -87,15 +84,9 @@ std::vector<JpegFile> load_jpegs(const fs::path& input) {
     return files;
 }
 
-std::string peer_name(const sockaddr_storage& addr) {
-    std::array<char, INET6_ADDRSTRLEN> text{};
-    const auto* in = reinterpret_cast<const sockaddr_in*>(&addr);
-    inet_ntop(AF_INET, &in->sin_addr, text.data(), text.size());
-    return std::string(text.data()) + ":" + std::to_string(ntohs(in->sin_port));
-}
-
 // Sends frames to one client until it disconnects. Returns the number of frames sent.
-std::uint64_t stream_to(SOCKET client, const std::vector<JpegFile>& files, int fps, std::uint32_t& seq) {
+std::uint64_t stream_to(kvm::net::FrameChannel& channel, const std::vector<JpegFile>& files, int fps,
+                        std::uint32_t& seq) {
     const auto period = std::chrono::microseconds(1'000'000 / fps);
     auto next = Clock::now();
     auto stats_start = Clock::now();
@@ -110,7 +101,7 @@ std::uint64_t stream_to(SOCKET client, const std::vector<JpegFile>& files, int f
                                              .width = file.width,
                                              .height = file.height,
                                              .codec = "jpeg"};
-        if (!kvm::video_wire::send_frame(client, header, file.bytes)) {
+        if (!channel.send_frame(header, file.bytes)) {
             return sent;
         }
         ++sent;
@@ -165,26 +156,16 @@ int wmain(int argc, wchar_t** argv) {
         kvm::log::info("loaded {} JPEG(s), first {} is {}x{}", files.size(), files[0].name, files[0].width,
                        files[0].height);
 
-        const auto listener = kvm::video_wire::listen_tcp(port);
+        kvm::net::VideoServer server(port);
         kvm::log::info("listening on port {} ({} fps); waiting for a viewer to connect...", port, fps);
 
         std::uint32_t seq = 0;
-        while (true) {
-            sockaddr_storage addr{};
-            int len = sizeof(addr);
-            kvm::video_wire::Socket client(::accept(listener.get(), reinterpret_cast<sockaddr*>(&addr), &len));
-            if (!client.valid()) {
-                kvm::log::error("accept failed: error {}", WSAGetLastError());
-                return 1;
-            }
-            BOOL nodelay = TRUE;
-            setsockopt(client.get(), IPPROTO_TCP, TCP_NODELAY, reinterpret_cast<const char*>(&nodelay), sizeof(nodelay));
-
-            const std::string peer = peer_name(addr);
-            kvm::log::info("viewer connected from {}", peer);
-            const auto sent = stream_to(client.get(), files, fps, seq);
-            kvm::log::info("viewer {} disconnected after {} frames; waiting for the next one", peer, sent);
+        while (auto channel = server.accept()) {
+            kvm::log::info("viewer connected from {}", channel->peer());
+            const auto sent = stream_to(*channel, files, fps, seq);
+            kvm::log::info("viewer {} disconnected after {} frames; waiting for the next one", channel->peer(), sent);
         }
+        return 0;
     } catch (const std::exception& e) {
         kvm::log::error("{}", e.what());
         return 1;
