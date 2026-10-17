@@ -13,10 +13,12 @@
 #include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <functional>
 #include <mutex>
 #include <optional>
 #include <string>
 
+#include "app_logo.h"
 #include "jpeg_decoder.h"
 #include "ui_draw_tmp.h"
 #include "viewer_chrome.h"
@@ -65,6 +67,13 @@ public:
     // Client point -> 0..1 over the drawn image. nullopt over the strip, letterbox or no frame.
     std::optional<D2D1_POINT_2F> to_normalized(POINT client) const;
 
+    // Called on the UI thread after every link state change (e.g. for the tray icon).
+    using LinkListener = std::function<void(LinkState before, LinkState now)>;
+    void set_link_listener(LinkListener listener) { link_listener_ = std::move(listener); }
+
+    // Restores (if minimized) and activates the window.
+    void bring_to_front();
+
 private:
     enum class View { Waiting, Connecting, Linked, Streaming, Stalled, Lost };
     using Clock = std::chrono::steady_clock;
@@ -81,6 +90,7 @@ private:
     void on_hud_tick();
     void on_blink_tick();
     void apply_dpi(UINT dpi);
+    void update_icons();
     void resize_for_stream(int width, int height);
     void on_strip_click(viewer::StripButton button);
     LRESULT hit_test_nc(POINT screen) const;
@@ -141,6 +151,9 @@ private:
     bool tracking_mouse_ = false;
     std::wstring footer_;
     std::wstring window_text_;
+    LinkListener link_listener_;
+    ui::unique_icon small_icon_;
+    ui::unique_icon big_icon_;
 };
 
 }  // namespace kvm

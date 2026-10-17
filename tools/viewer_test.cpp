@@ -13,6 +13,7 @@
 #include <cstdint>
 #include <cwctype>
 #include <filesystem>
+#include <format>
 #include <fstream>
 #include <iterator>
 #include <stop_token>
@@ -26,6 +27,7 @@
 #include "kvm/config.h"
 #include "kvm/log.h"
 #include "kvm/net.h"
+#include "tray_icon.h"
 #include "video_receiver.h"
 #include "viewer_window.h"
 
@@ -113,6 +115,15 @@ int run_connect(int argc, wchar_t** argv) {
         return 1;
     }
     viewer.set_jpeg_quality(cfg.jpeg_quality);
+
+    // Tray icon + "Connected to host" / "Connection lost" notifications.
+    const std::wstring endpoint = std::format(L"{}:{}", argv[2], port);
+    kvm::TrayIcon tray;
+    tray.create(L"KVM client", {.open = [&] { viewer.bring_to_front(); },
+                                .quit = [&] { PostMessageW(viewer.hwnd(), WM_CLOSE, 0, 0); }});
+    viewer.set_link_listener(
+        [&](kvm::LinkState before, kvm::LinkState now) { tray.on_link_change(before, now, endpoint, true); });
+
     kvm::VideoReceiver receiver(host, port, viewer);  // declared after viewer: its threads stop first
     if (host == "127.0.0.1" || host == "localhost") {
         receiver.set_clock_offset_us(0);  // same machine, same clock: latency is exact

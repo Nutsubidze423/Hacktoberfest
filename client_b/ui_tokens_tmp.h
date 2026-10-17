@@ -85,6 +85,25 @@ inline constexpr wchar_t kSeparator[] = L" · ";  // " · "
 inline constexpr wchar_t kTimes[] = L"×";        // "×"
 inline constexpr wchar_t kUnknown[] = L"—";      // "—"
 
+// --- 9. App logo (concept C, "Caret"): pixel K + accent block caret on a 16x16 grid.
+namespace logo {
+inline constexpr int grid = 16;
+inline constexpr std::uint32_t background = color::bg0;
+struct Cell {
+    int x, y, w, h;  // in grid units
+    std::uint32_t rgb;
+};
+inline constexpr Cell cells[] = {
+    {2, 3, 2, 10, color::text_hi},  // K stem
+    {4, 7, 2, 2, color::text_hi},   // K joint
+    {6, 5, 2, 2, color::text_hi},   // K upper arm
+    {8, 3, 2, 2, color::text_hi},
+    {6, 9, 2, 2, color::text_hi},   // K lower leg
+    {8, 11, 2, 2, color::text_hi},
+    {11, 5, 3, 8, color::accent},   // block caret
+};
+}  // namespace logo
+
 // --- 4. Viewer window (client B).
 namespace viewer {
 inline constexpr float initial_client_w = 960;

@@ -12,6 +12,7 @@
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
+#include <format>
 #include <fstream>
 #include <iterator>
 #include <optional>
@@ -26,6 +27,7 @@
 #include "jpeg_decoder.h"
 #include "kvm/log.h"
 #include "kvm/net.h"
+#include "tray_icon.h"
 #include "viewer_window.h"
 
 using namespace std::chrono_literals;
@@ -230,6 +232,15 @@ int wmain(int argc, wchar_t** argv) {
         return 1;
     }
     kvm::log::info("preview: FAKE data; {}", hold ? "holding one state" : "cycling all states");
+
+    // Tray icon + notifications, driven by the same (fake) link changes.
+    const std::string fake_host = kFakeHost;  // ASCII, so a plain widening copy is exact
+    const std::wstring endpoint = std::format(L"{}:{}", std::wstring(fake_host.begin(), fake_host.end()), kFakePort);
+    kvm::TrayIcon tray;
+    tray.create(L"KVM client", {.open = [&] { viewer.bring_to_front(); },
+                                .quit = [&] { PostMessageW(viewer.hwnd(), WM_CLOSE, 0, 0); }});
+    viewer.set_link_listener(
+        [&](kvm::LinkState before, kvm::LinkState now) { tray.on_link_change(before, now, endpoint, true); });
 
     Driver driver(viewer, std::move(base));
     std::jthread thread([&](std::stop_token stop) { driver.run(stop, hold, std::chrono::seconds(seconds)); });

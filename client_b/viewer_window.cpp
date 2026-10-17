@@ -30,6 +30,7 @@ using ui::TextStyle;
 constexpr wchar_t kClassName[] = L"KvmViewerWindow";
 constexpr wchar_t kDefaultTitle[] = L"kvm client";
 constexpr UINT kMsgStreamStart = WM_APP + 1;  // wParam = width, lParam = height
+constexpr UINT kMsgLinkChanged = WM_APP + 2;  // wParam = LinkState before, lParam = LinkState now
 constexpr UINT_PTR kHudTimer = 1;
 constexpr UINT_PTR kBlinkTimer = 2;
 
@@ -121,6 +122,7 @@ bool ViewerWindow::create() {
         return false;
     }
     apply_dpi(GetDpiForWindow(hwnd));
+    update_icons();
 
     const DWM_WINDOW_CORNER_PREFERENCE corners = DWMWCP_DONOTROUND;
     DwmSetWindowAttribute(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, &corners, sizeof(corners));
@@ -163,8 +165,24 @@ void ViewerWindow::set_link_state(LinkState state) {
         shared_.has_pending = false;
         shared_.stream_title.clear();
     }
+    const LinkState before = shared_.link;
     shared_.link = state;
-    if (hwnd_) InvalidateRect(hwnd_, nullptr, FALSE);
+    if (hwnd_) {
+        InvalidateRect(hwnd_, nullptr, FALSE);
+        PostMessageW(hwnd_, kMsgLinkChanged, static_cast<WPARAM>(before), static_cast<LPARAM>(state));
+    }
+}
+
+void ViewerWindow::bring_to_front() {
+    ShowWindow(hwnd_, IsIconic(hwnd_) ? SW_RESTORE : SW_SHOW);
+    SetForegroundWindow(hwnd_);
+}
+
+void ViewerWindow::update_icons() {
+    small_icon_ = ui::create_logo_icon(ui::small_icon_size(dpi_));
+    big_icon_ = ui::create_logo_icon(ui::large_icon_size(dpi_));
+    SendMessageW(hwnd_, WM_SETICON, ICON_SMALL, reinterpret_cast<LPARAM>(small_icon_.get()));
+    SendMessageW(hwnd_, WM_SETICON, ICON_BIG, reinterpret_cast<LPARAM>(big_icon_.get()));
 }
 
 void ViewerWindow::set_rtt_ms(std::optional<int> rtt_ms) {
@@ -273,6 +291,7 @@ LRESULT ViewerWindow::handle_message(UINT msg, WPARAM wp, LPARAM lp) {
     }
     case WM_DPICHANGED: {
         apply_dpi(HIWORD(wp));
+        update_icons();
         const auto* suggested = reinterpret_cast<const RECT*>(lp);
         SetWindowPos(hwnd, nullptr, suggested->left, suggested->top, suggested->right - suggested->left,
                      suggested->bottom - suggested->top, SWP_NOZORDER | SWP_NOACTIVATE);
@@ -290,6 +309,11 @@ LRESULT ViewerWindow::handle_message(UINT msg, WPARAM wp, LPARAM lp) {
             on_hud_tick();
         } else if (wp == kBlinkTimer) {
             on_blink_tick();
+        }
+        return 0;
+    case kMsgLinkChanged:
+        if (link_listener_) {
+            link_listener_(static_cast<LinkState>(wp), static_cast<LinkState>(lp));
         }
         return 0;
     case kMsgStreamStart:

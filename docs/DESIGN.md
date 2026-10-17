@@ -226,3 +226,11 @@ Do not hardcode colors/sizes outside tokens.h.
 Do not touch another developer's files; if your surface needs something from theirs, tell the user who to ask.
 
 Future design changes will be made by editing docs/DESIGN.md and tokens.h only.
+
+9. App logo, tray icon and notifications (added 2026-10-17, chosen by Sandro: concept C "Caret")
+Mark: a pixel letter K followed by a block caret, on a 16×16 grid, square tile, no rounding.
+Tile fill bg0. K in textHi: stem (2,3) 2×10; joint (4,7) 2×2; upper arm (6,5) 2×2 and (8,3) 2×2; lower leg (6,9) 2×2 and (8,11) 2×2. Caret in accent: (11,5) 3×8. Coordinates are (x,y) w×h in grid units; the grid lives in tokens.h (logo::cells).
+Rendering: drawn in code at the exact pixel size Windows asks for (SM_CXSMICON / SM_CXICON for the current DPI); grid cell edges are rounded to whole pixels (no antialiasing, no scaling of a bitmap). No .ico/.rc file is needed, so CMake does not change.
+Uses: window icon of the viewer (small and big), tray icon, notification icon.
+Tray icon: in the notification area ("show hidden icons"). Tooltip: {APP} · {STATE WORD}, e.g. KVM client · LINKED. Left click or double click opens the viewer; right click shows a menu: Show viewer, Quit.
+Notifications: Windows draws them (bottom-right); we only provide icon, title and text. Connected: title "Connected to host", text "{ip}:{port}". Lost: title "Connection lost", text "reconnecting" (only if reconnect exists, otherwise "restart the client"). No notification for WAITING/CONNECTING.
