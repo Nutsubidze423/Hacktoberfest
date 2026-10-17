@@ -1,5 +1,7 @@
 // kvm_client.exe — runs on B (receives input and the window stream from A).
-// Usage: kvm_client.exe [--host <A's IP>] [--config <path>] [--log <file>]
+// Usage: kvm_client.exe [--host <A's IP>] [--config <path>] [--log <file>] [--no-kvm] [--no-clipboard]
+//   --no-kvm        don't install the input hooks (A can still control B)
+//   --no-clipboard  don't share copied text/images with the host
 
 #include <atomic>
 #include <chrono>
@@ -14,9 +16,10 @@
 
 #include <windows.h>
 
-#include "input_inject.h"
+#include "kvm/clipboard.h"
 #include "kvm/config.h"
 #include "kvm/dpi.h"
+#include "kvm/kvm_link.h"
 #include "kvm/log.h"
 #include "kvm/net.h"
 #include "kvm/protocol.h"
@@ -58,6 +61,14 @@ proto::Hello make_hello() {
         .dpi_scale = primary.scale,
         .hostname = narrow(std::wstring_view(name, name_len)),
     };
+}
+
+proto::Clipboard to_message(const kvm::clip::Chunk& c) {
+    return {.seq = c.seq, .kind = c.kind, .total = c.total, .offset = c.offset, .data = c.data};
+}
+
+kvm::clip::Chunk to_chunk(const proto::Clipboard& m) {
+    return {.seq = m.seq, .kind = m.kind, .total = m.total, .offset = m.offset, .data = m.data};
 }
 
 // Counters filled by the video receiver thread, read and reset by the stats log.
@@ -102,14 +113,25 @@ void log_video_stats(VideoStats& stats, std::chrono::seconds interval) {
                    samples ? latency_sum / 1000.0 / samples : 0.0, latency_max / 1000.0);
 }
 
-void run_session(kvm::net::Connection& conn, const kvm::Config& cfg, kvm::display::Side host_side) {
+void run_session(kvm::net::Connection& conn, const kvm::Config& cfg, kvm::KvmLink* kvm,
+                 kvm::clip::ClipboardSync* clip) {
     if (!conn.send(make_hello())) {
         return;
     }
     kvm::log::info("connected to host {}", conn.peer());
 
-    // KVM: replays A's input while B has control; releases everything held when the session ends.
-    kvm::client::InputInject inject(host_side, [&conn](const proto::Message& m) { return conn.send_json(proto::encode(m)); });
+    // KVM + clipboard use conn while the session lasts. detach() blocks until they
+    // stop using it, so it must run before conn goes away (struct dtor).
+    struct Detach {
+        kvm::KvmLink* kvm;
+        kvm::clip::ClipboardSync* clip;
+        ~Detach() {
+            if (clip) clip->detach();
+            if (kvm) kvm->detach();
+        }
+    } detach{kvm, clip};
+    if (kvm) kvm->attach([&conn](const proto::Message& m) { return conn.send_json(proto::encode(m)); });
+    if (clip) clip->attach([&conn](const kvm::clip::Chunk& c) { return conn.send(to_message(c)); });
 
     VideoStats video_stats;
     std::unique_ptr<kvm::net::FrameChannel> video = kvm::net::connect_video(cfg.host_ip, cfg.video_port);
@@ -124,7 +146,11 @@ void run_session(kvm::net::Connection& conn, const kvm::Config& cfg, kvm::displa
     auto next_stats = std::chrono::steady_clock::now() + kStatsInterval;
     while (g_running && conn.is_open()) {
         if (const auto msg = conn.incoming().pop_for(500ms)) {
-            if (!inject.handle(*msg)) {
+            if (kvm && kvm->handle(*msg)) {
+                // KVM: A controls B, or A's cursor came back
+            } else if (const auto* c = std::get_if<proto::Clipboard>(&*msg); c && clip) {
+                clip->receive(to_chunk(*c));
+            } else {
                 // TODO(luka): route to viewer (sandro) once it exists.
                 kvm::log::info("from host: {}", proto::encode(*msg).dump());
             }
@@ -153,6 +179,8 @@ int wmain(int argc, wchar_t** argv) {
 
     std::optional<std::filesystem::path> config_path;
     std::optional<std::string> host_override;
+    bool kvm_enabled = true;
+    bool clipboard_enabled = true;
     for (int i = 1; i < argc; ++i) {
         const std::wstring_view arg = argv[i];
         if (arg == L"--config" && i + 1 < argc) {
@@ -161,6 +189,10 @@ int wmain(int argc, wchar_t** argv) {
             host_override = narrow(argv[++i]);
         } else if (arg == L"--log" && i + 1 < argc) {
             kvm::log::open_file(argv[++i]);
+        } else if (arg == L"--no-kvm") {
+            kvm_enabled = false;
+        } else if (arg == L"--no-clipboard") {
+            clipboard_enabled = false;
         }
     }
 
@@ -180,9 +212,18 @@ int wmain(int argc, wchar_t** argv) {
         }
         const auto host_side = kvm::display::opposite(*side);
 
+        // KVM lives for the whole process: its hooks stay installed across reconnects.
+        std::optional<kvm::KvmLink> kvm_link;
+        if (kvm_enabled) {
+            kvm_link.emplace(kvm::KvmOptions{.peer_side = host_side, .is_host = false});
+            kvm_link->start();  // false = hooks failed (logged); A can still control B
+        }
+        kvm::clip::ClipboardSync clip;
+        const bool clip_on = clipboard_enabled && clip.start();
+
         while (g_running) {
             if (auto conn = kvm::net::connect(cfg.host_ip, cfg.control_port)) {
-                run_session(*conn, cfg, host_side);
+                run_session(*conn, cfg, kvm_link ? &*kvm_link : nullptr, clip_on ? &clip : nullptr);
             }
             if (g_running) {
                 kvm::log::info("reconnecting in {} s...", kReconnectDelay.count());

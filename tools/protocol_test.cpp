@@ -42,6 +42,7 @@ int main() {
     round_trip(proto::StreamStart{.hwnd = 0x1234ABCDull, .title = "Photoshop", .width = 1600, .height = 900});
     round_trip(proto::StreamStop{.hwnd = 0x1234ABCDull});
     round_trip(proto::RemoteMouseMove{.x_norm = 0.1, .y_norm = 0.9});
+    round_trip(proto::Clipboard{.seq = 3, .kind = "text", .total = 5, .offset = 0, .data = "aGVsbG8="});
     round_trip(proto::Ping{.t = 123456789});
     round_trip(proto::Pong{.t = 123456789, .t_peer = 987654321});
 

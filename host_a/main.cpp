@@ -1,7 +1,8 @@
 // kvm_host.exe — runs on A (owns the physical mouse/keyboard, streams a window).
-// Usage: kvm_host.exe [--config <path>] [--log <file>] [--no-kvm]
+// Usage: kvm_host.exe [--config <path>] [--log <file>] [--no-kvm] [--no-clipboard]
 //                     [--test-video [--test-video-kb N] [--test-video-fps N]]
 //   --no-kvm      don't install the input hooks (e.g. when only testing the video stream)
+//   --no-clipboard  don't share copied text/images with the client
 //   --test-video  send synthetic frames (codec "test", random bytes, default 250 KB at 30 fps) so
 //                 network throughput and video latency can be measured before capture/viewer exist
 
@@ -21,9 +22,10 @@
 
 #include <windows.h>
 
-#include "input_capture.h"
+#include "kvm/clipboard.h"
 #include "kvm/config.h"
 #include "kvm/dpi.h"
+#include "kvm/kvm_link.h"
 #include "kvm/log.h"
 #include "kvm/net.h"
 #include "kvm/protocol.h"
@@ -40,6 +42,7 @@ constexpr auto kStatsInterval = 5s;
 struct Options {
     std::optional<std::filesystem::path> config_path;
     bool kvm_enabled = true;
+    bool clipboard = true;
     bool test_video = false;
     int test_video_kb = 250;
     int test_video_fps = 30;
@@ -141,6 +144,14 @@ proto::Hello make_hello() {
     };
 }
 
+proto::Clipboard to_message(const kvm::clip::Chunk& c) {
+    return {.seq = c.seq, .kind = c.kind, .total = c.total, .offset = c.offset, .data = c.data};
+}
+
+kvm::clip::Chunk to_chunk(const proto::Clipboard& m) {
+    return {.seq = m.seq, .kind = m.kind, .total = m.total, .offset = m.offset, .data = m.data};
+}
+
 // Waits for the client's hello and checks the protocol version. nullopt = reject the client.
 std::optional<proto::Hello> handshake(kvm::net::Connection& conn) {
     const auto first = conn.incoming().pop_for(kHelloTimeout);
@@ -161,7 +172,7 @@ std::optional<proto::Hello> handshake(kvm::net::Connection& conn) {
     return *hello;
 }
 
-void run_session(kvm::net::Connection& conn, kvm::host::InputCapture* capture, VideoSlot& video,
+void run_session(kvm::net::Connection& conn, kvm::KvmLink* kvm, kvm::clip::ClipboardSync* clip, VideoSlot& video,
                  const Options& opt) {
     const auto hello = handshake(conn);
     if (!hello) {
@@ -171,17 +182,18 @@ void run_session(kvm::net::Connection& conn, kvm::host::InputCapture* capture, V
                    hello->screen_w, hello->screen_h, hello->dpi_scale);
     conn.send(make_hello());
 
-    // KVM: input goes to this client while the session lasts. Detaching blocks until the
-    // capture stops using conn, so it must happen before conn goes away (struct dtor).
+    // KVM + clipboard use conn while the session lasts. detach() blocks until they
+    // stop using it, so it must run before conn goes away (struct dtor).
     struct Detach {
-        kvm::host::InputCapture* capture;
+        kvm::KvmLink* kvm;
+        kvm::clip::ClipboardSync* clip;
         ~Detach() {
-            if (capture) capture->set_client(nullptr);
+            if (clip) clip->detach();
+            if (kvm) kvm->detach();
         }
-    } detach{capture};
-    if (capture) {
-        capture->set_client([&conn](const proto::Message& m) { return conn.send_json(proto::encode(m)); });
-    }
+    } detach{kvm, clip};
+    if (kvm) kvm->attach([&conn](const proto::Message& m) { return conn.send_json(proto::encode(m)); });
+    if (clip) clip->attach([&conn](const kvm::clip::Chunk& c) { return conn.send(to_message(c)); });
 
     std::jthread test_video;
     if (opt.test_video) {
@@ -191,8 +203,10 @@ void run_session(kvm::net::Connection& conn, kvm::host::InputCapture* capture, V
     auto next_stats = std::chrono::steady_clock::now() + kStatsInterval;
     while (g_running && conn.is_open()) {
         if (const auto msg = conn.incoming().pop_for(500ms)) {
-            if (const auto* leave = std::get_if<proto::FocusLeave>(&*msg); leave && capture) {
-                capture->on_focus_leave(*leave);  // B's cursor came back through its edge
+            if (kvm && kvm->handle(*msg)) {
+                // KVM: B's cursor came back, or B controls A
+            } else if (const auto* c = std::get_if<proto::Clipboard>(&*msg); c && clip) {
+                clip->receive(to_chunk(*c));
             } else {
                 // TODO(luka): route to remote_input (sandro) once it exists.
                 kvm::log::info("from client: {}", proto::encode(*msg).dump());
@@ -221,6 +235,8 @@ Options parse_args(int argc, wchar_t** argv) {
             kvm::log::open_file(argv[++i]);
         } else if (arg == L"--no-kvm") {
             opt.kvm_enabled = false;
+        } else if (arg == L"--no-clipboard") {
+            opt.clipboard = false;
         } else if (arg == L"--test-video") {
             opt.test_video = true;
         } else if (arg == L"--test-video-kb" && has_value) {
@@ -248,14 +264,13 @@ int wmain(int argc, wchar_t** argv) {
             kvm::log::error("config: client_side must be \"left\" or \"right\", got \"{}\" - KVM disabled", cfg.client_side);
             opt.kvm_enabled = false;
         }
-        std::optional<kvm::host::InputCapture> capture;
+        std::optional<kvm::KvmLink> kvm_link;
         if (opt.kvm_enabled) {
-            capture.emplace(kvm::host::CaptureOptions{.client_side = *side});
-            if (!capture->start()) {
-                kvm::log::error("KVM disabled: could not install the input hooks");
-                capture.reset();
-            }
+            kvm_link.emplace(kvm::KvmOptions{.peer_side = *side, .is_host = true});
+            kvm_link->start();  // false = hooks failed (logged); B can still control A
         }
+        kvm::clip::ClipboardSync clip;
+        const bool clip_on = opt.clipboard && clip.start();
 
         kvm::net::Server server(cfg.control_port);
         kvm::net::VideoServer video_server(cfg.video_port);
@@ -272,7 +287,7 @@ int wmain(int argc, wchar_t** argv) {
             if (!conn) {
                 continue;  // stop() or a transient accept error
             }
-            run_session(*conn, capture ? &*capture : nullptr, video, opt);
+            run_session(*conn, kvm_link ? &*kvm_link : nullptr, clip_on ? &clip : nullptr, video, opt);
         }
         video_server.stop();
         video_acceptor.join();

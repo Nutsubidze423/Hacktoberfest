@@ -11,7 +11,7 @@
 | სახელი | ტრეკი | ფაილები | პირველი ამოცანა |
 |---|---|---|---|
 | **ლუკა** (lead) | Core / ქსელი / ინტეგრაცია; PR review და merge | root CMake, `CMakePresets.json`, `vcpkg.json`, `common/` (protocol, net, config, log, queue), `host_a/main.cpp`, `client_b/main.cpp`, `tools/ping_test.cpp` | M0: repo-ს ჩონჩხი (CMake + vcpkg + ცარიელი exe-ები) და `protocol.h` |
-| **დემეტრე** | KVM ინფუთი: hooks, კიდიდან გადასვლა, suppress, გადაუდებელი ღილაკი, ემულაცია B-ზე | `common/win32_input.*`, `common/dpi.*`, `host_a/input_capture.*`, `client_b/input_inject.*` | `win32_input` (SendInput wrappers) — სანდროსაც სჭირდება |
+| **დემეტრე** | KVM ინფუთი: hooks, კიდიდან გადასვლა, suppress, გადაუდებელი ღილაკი, ემულაცია B-ზე | `common/` — `win32_input.*`, `dpi.*`, `input_capture.*`, `input_inject.*`, `kvm_link.*`, `clipboard.*` | `win32_input` (SendInput wrappers) — სანდროსაც სჭირდება |
 | **თემო** | ვიდეო A-ზე: ფანჯრის არჩევა, WGC capture, JPEG, გაგზავნა | `host_a/window_picker.*`, `capture.*`, `jpeg_encoder.*`, `video_sender.*`, `tools/capture_test.cpp` | `window_picker`, მერე capture ფაილში შენახვით |
 | **სანდრო** | Viewer B-ზე + უკუ-ინფუთი A-ს ფანჯარაში | `client_b/viewer_window.*`, `jpeg_decoder.*`, `video_receiver.*`, `host_a/remote_input.*`, `tools/fake_streamer.cpp` | JPEG decode + viewer ფანჯარა ფაილიდან წაკითხული სურათით |
 
@@ -47,10 +47,11 @@
 2. **ფანჯარა:** ერთი კონკრეტული ფანჯარა (hotkey `Ctrl+Alt+Shift+W` — წინა პლანის ფანჯარა) გადადის მეორე კომპიუტერზე: owner-ზე ის VDD-ზე (ვირტუალური მონიტორი, მზა ხელმოწერილი დრაივერი) „იმალება“, მეორე მხარეს viewer-ში ჩანს. viewer-ის დახურვა/ღილაკი → ბრუნდება.
 3. **viewer-ის ინფუთი:** კლიკები/სქროლი/კლავიატურა viewer-ში → owner-ის ორიგინალ ფანჯარას.
 4. **ფაილები:** გადათრევით კიდეზე, A → B და B → A, პორტი 50502, სამიზნე `Downloads\KVM\`.
+5. **Clipboard (დემეტრე):** კოპირება ერთ კომპიუტერზე → ჩასმა მეორეზე (ტექსტი UTF-8, სურათები PNG; ფაილები ჯერ არა).
 
 დეტალები და ვინ რას აკეთებს: `ARTEFACT/გადაწყვეტილებები 2 (ლუკა → თემო, სანდრო, დემეტრე).md`.
 
-**არ შედის (მერე):** საკუთარი IddCx დრაივერის დაწერა, ფანჯრის მაუსით drag-ით გადატანა (hotkey-ის ნაცვლად), ფაილის ჩაგდება კონკრეტულ ადგილას (v2), დაშიფვრა/დაწყვილება, clipboard, ინსტალერი, პენის წნევა.
+**არ შედის (მერე):** საკუთარი IddCx დრაივერის დაწერა, ფანჯრის მაუსით drag-ით გადატანა (hotkey-ის ნაცვლად), ფაილის ჩაგდება კონკრეტულ ადგილას (v2), დაშიფვრა/დაწყვილება, ფაილები clipboard-ით, ინსტალერი, პენის წნევა.
 
 ## ტექნოლოგიები
 - **C++20**, MSVC (Visual Studio 2022), **CMake ≥ 3.25 + Ninja**, **vcpkg** (manifest mode). მხოლოდ Windows 10/11 x64.
@@ -76,16 +77,16 @@ common/                    # static lib kvm_common
   include/kvm/
     protocol.h             # შეტყობინებები (ლუკა) — გაყინული კონტრაქტი
     net.h  video.h  config.h  log.h  queue.h   # (ლუკა)
-    win32_input.h  dpi.h                       # (დემეტრე)
+    win32_input.h  dpi.h  input_capture.h  input_inject.h  kvm_link.h  clipboard.h   # (დემეტრე)
   src/*.cpp
 host_a/                    # kvm_host.exe
   main.cpp                 # (ლუკა)
-  input_capture.*          # hooks + edge detection + suppress (დემეტრე)
+  input_capture.h          # forwards to common/kvm/input_capture.h (დემეტრე)
   window_picker.*  capture.*  jpeg_encoder.*  video_sender.*   # (თემო)
   remote_input.*           # B-დან მოსული ინფუთი → A-ს ფანჯარა (სანდრო)
 client_b/                  # kvm_client.exe
   main.cpp                 # (ლუკა)
-  input_inject.*           # A-დან მოსული ინფუთის ემულაცია (დემეტრე)
+  input_inject.h           # forwards to common/kvm/input_inject.h (დემეტრე)
   viewer_window.*  jpeg_decoder.*  video_receiver.*            # (სანდრო)
 tools/
   protocol_test.cpp  queue_test.cpp  video_test.cpp   # ტესტები (ლუკა)
@@ -104,15 +105,16 @@ tools/
 | type | მიმართულება | ველები |
 |---|---|---|
 | `hello` | B→A, მერე A→B (პასუხი) | `protocol_version`, `screen_w`, `screen_h`, `dpi_scale`, `hostname` |
-| `focus_enter` | ორივე (KVM owner → controlled) | `y_norm` (კურსორის შესვლის წერტილი) |
-| `focus_leave` | ორივე | `y_norm`. owner იბრუნებს კონტროლს, ან controlled მხარის კურსორი owner-ისკენ მიმართული კიდით გამოვიდა |
-| `mouse_move` | ორივე (KVM owner → controlled) | `dx`, `dy` (relative) |
+| `focus_enter` | ორივე (KVM controller → controlled) | `y_norm` (კურსორის შესვლის წერტილი) |
+| `focus_leave` | ორივე | `y_norm`. controller → controlled: „ინფუთი დავიბრუნე“; controlled → controller: „შენი კურსორი ჩემი კიდით დაბრუნდა“ |
+| `mouse_move` | ორივე (KVM controller → controlled) | `dx`, `dy` (relative) |
 | `mouse_button` | ორივე | `button` (`left`/`right`/`middle`/`x1`/`x2`), `down` (+ viewer → window owner-ზე `x_norm`, `y_norm`) |
 | `mouse_wheel` | ორივე | `delta`, `horizontal` |
 | `key` | ორივე | `vk`, `scan`, `down`, `extended` |
 | `stream_start` | window owner → viewer (ორივე) | `hwnd`, `title`, `width`, `height` |
 | `stream_stop` | ორივე | `hwnd`. owner → viewer: შეჩერდა; viewer → owner: „დამიბრუნე“ |
 | `remote_mouse_move` | viewer → window owner (ორივე) | `x_norm`, `y_norm` (სტრიმულ ფანჯარაში, 0..1) |
+| `clipboard` | ორივე | `seq`, `kind` (`text`/`png`), `total`, `offset`, `data` (base64, ≤ 32 KB) — ერთი კოპირება რამდენიმე ნაწილად |
 | `ping` / `pong` | ორივე | `t` (+ `pong`-ში `t_peer` — clock offset-ისთვის) |
 | `frame` (50501 header) | window owner → viewer (ორივე, ერთი TCP არხი) | `seq`, `t_capture_us`, `width`, `height`, `codec` |
 
@@ -152,4 +154,4 @@ Windows Firewall-ში დაუშვი `kvm_host.exe` პორტებზ�
 - [ ] M2. ტესტი Photoshop-ით; latency/ხარისხის მორგება; დემოს სცენარი
 
 ## შემდეგი ეტაპები (დემოს მერე)
-H.264 (Media Foundation / NVENC) → D3D11 zero-copy pipeline → ფანჯრის მაუსით drag-ით გადატანა → ფაილის ჩაგდება კონკრეტულ ადგილას → TLS + PIN დაწყვილება → clipboard → საკუთარი IddCx დრაივერი.
+H.264 (Media Foundation / NVENC) → D3D11 zero-copy pipeline → ფანჯრის მაუსით drag-ით გადატანა → ფაილის ჩაგდება კონკრეტულ ადგილას → TLS + PIN დაწყვილება → ფაილები clipboard-ით → საკუთარი IddCx დრაივერი.

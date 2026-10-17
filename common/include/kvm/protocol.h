@@ -51,29 +51,29 @@ struct Hello {
     std::string hostname;
 };
 
-// Both directions (KVM). Sent by the side whose physical mouse/keyboard crossed its edge (the
-// "owner"): from now on the owner's input drives the receiver. y_norm = edge crossing height (0..1).
+// Both directions (KVM), controller -> controlled. Either PC can be the controller: the side whose
+// physical mouse/keyboard crossed its edge; from now on its input drives the receiver. y_norm = edge crossing height (0..1).
 struct FocusEnter {
     static constexpr std::string_view kType = "focus_enter";
     double y_norm = 0.5;
 };
 
-// Both directions (KVM). Ends the control started by focus_enter. The owner sends it when it takes
-// control back (its own decision, Ctrl+Alt+Shift+Q, send failure); the controlled side sends it when
-// the cursor leaves through its edge facing the owner (only that side knows). y_norm = edge height.
+// Both directions (KVM). Ends the control started by focus_enter. Controller -> controlled: "I took my
+// input back" (emergency key, disconnect). Controlled -> controller: "your cursor came back through my
+// edge" (only that side knows). kvm::KvmLink tells the two apart by its own state. y_norm = edge height.
 struct FocusLeave {
     static constexpr std::string_view kType = "focus_leave";
     double y_norm = 0.5;
 };
 
-// KVM owner -> controlled side: relative mouse movement in physical pixels.
+// KVM, controller -> controlled: relative mouse movement in physical pixels.
 struct MouseMove {
     static constexpr std::string_view kType = "mouse_move";
     int dx = 0;
     int dy = 0;
 };
 
-// Both directions. KVM: owner -> controlled side (x_norm/y_norm unused). Remote input: viewer ->
+// Both directions. KVM: controller -> controlled (x_norm/y_norm unused). Remote input: viewer ->
 // window owner, x_norm/y_norm = position inside the streamed picture (0..1).
 struct MouseButtonEvent {
     static constexpr std::string_view kType = "mouse_button";
@@ -123,6 +123,17 @@ struct RemoteMouseMove {
     double y_norm = 0.0;
 };
 
+// Both directions: one piece of copied content (kvm/clipboard.h, kvm::clip::Chunk).
+// Pieces of one copy share seq; the receiver joins them by offset until total bytes arrived.
+struct Clipboard {
+    static constexpr std::string_view kType = "clipboard";
+    std::uint32_t seq = 0;
+    std::string kind;          // "text" (UTF-8) or "png"
+    std::uint32_t total = 0;   // bytes of the whole content
+    std::uint32_t offset = 0;  // where this piece starts
+    std::string data;          // base64, at most kvm::clip::kChunkBytes (32 KB) decoded
+};
+
 // Both directions. t is the sender's monotonic clock in microseconds.
 struct Ping {
     static constexpr std::string_view kType = "ping";
@@ -157,13 +168,14 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(Key, vk, scan, down, extended)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(StreamStart, hwnd, title, width, height)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(StreamStop, hwnd)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(RemoteMouseMove, x_norm, y_norm)
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(Clipboard, seq, kind, total, offset, data)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(Ping, t)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(Pong, t, t_peer)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(FrameHeader, seq, t_capture_us, width, height, codec)
 
 // Any message that travels on the control channel (port 50500).
 using Message = std::variant<Hello, FocusEnter, FocusLeave, MouseMove, MouseButtonEvent, MouseWheel,
-                             Key, StreamStart, StreamStop, RemoteMouseMove, Ping, Pong>;
+                             Key, StreamStart, StreamStop, RemoteMouseMove, Clipboard, Ping, Pong>;
 
 // Serializes a message struct (including FrameHeader) to JSON with its "type" field set.
 template <class M>
