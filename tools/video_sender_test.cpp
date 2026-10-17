@@ -1,0 +1,167 @@
+// video_sender_test: VideoSender without a network (T7). A producer puts 60 frames/s into a
+// LatestSlot, like WGC does; a fake channel spends a fixed time per frame, like Wi-Fi does.
+//
+// Scenarios: a normal channel (frame rate must be capped at max_fps), a slow channel (old frames
+// must be skipped, not queued, so latency stays flat), and a channel that closes (the sender must
+// stop by itself). Every payload must be a valid JPEG with gap-free seq numbers.
+//
+//   video_sender_test.exe
+
+#include <turbojpeg.h>
+
+#include <algorithm>
+#include <atomic>
+#include <chrono>
+#include <format>
+#include <mutex>
+#include <string>
+#include <string_view>
+#include <thread>
+#include <vector>
+
+#include "kvm/log.h"
+#include "kvm/net.h"
+#include "video_sender.h"
+
+namespace {
+
+using namespace std::chrono_literals;
+
+struct Checks {
+    int failed = 0;
+    void operator()(bool ok, std::string_view what) {
+        kvm::log::info("{} {}", ok ? "[ok]  " : "[FAIL]", what);
+        if (!ok) ++failed;
+    }
+};
+
+// A 1920x1080 screen with a block at a different place in each frame.
+std::vector<kvm::CapturedFrame> moving_block_frames() {
+    std::vector<kvm::CapturedFrame> frames(3);
+    for (size_t i = 0; i < frames.size(); ++i) {
+        auto& f = frames[i];
+        f.width = 1920;
+        f.height = 1080;
+        f.stride = f.width * 4;
+        f.bgra.assign(static_cast<size_t>(f.stride) * f.height, 230);
+        for (int y = 400; y < 600; ++y) {
+            for (int x = 300 + static_cast<int>(i) * 500; x < 600 + static_cast<int>(i) * 500; ++x) {
+                auto* p = f.bgra.data() + static_cast<size_t>(y) * f.stride + static_cast<size_t>(x) * 4;
+                p[0] = 200, p[1] = 80, p[2] = 30;
+            }
+        }
+    }
+    return frames;
+}
+
+struct Result {
+    std::vector<kvm::proto::FrameHeader> headers;
+    std::vector<std::int64_t> latency_us;  // capture -> fully sent
+    bool all_valid_jpeg = true;
+    double seconds = 0;
+    std::uint64_t skipped = 0;
+    double stop_ms = 0;
+    bool stopped_by_itself = false;
+};
+
+Result run(std::chrono::milliseconds send_time, int max_fps, std::chrono::milliseconds duration, int close_after = -1) {
+    static const auto pattern = moving_block_frames();
+    kvm::LatestSlot<kvm::CapturedFrame> slot;
+    std::atomic<bool> producing = true;
+    std::thread producer([&] {
+        for (size_t i = 0; producing; ++i) {
+            auto f = pattern[i % pattern.size()];
+            f.t_capture_us = kvm::steady_now_us();
+            slot.put(std::move(f));
+            std::this_thread::sleep_for(16ms);
+        }
+    });
+
+    Result r;
+    std::mutex mutex;
+    tjhandle decoder = tj3Init(TJINIT_DECOMPRESS);  // only used on the sender thread
+    int calls = 0;
+    auto fake_send = [&](const kvm::proto::FrameHeader& h, std::span<const std::uint8_t> payload) {
+        if (close_after >= 0 && calls++ >= close_after) return false;
+        const bool valid = tj3DecompressHeader(decoder, payload.data(), payload.size()) == 0 &&
+                           tj3Get(decoder, TJPARAM_JPEGWIDTH) == h.width &&
+                           tj3Get(decoder, TJPARAM_JPEGHEIGHT) == h.height;
+        std::this_thread::sleep_for(send_time);
+        std::lock_guard lock(mutex);
+        r.headers.push_back(h);
+        r.latency_us.push_back(kvm::steady_now_us() - h.t_capture_us);
+        r.all_valid_jpeg = r.all_valid_jpeg && valid;
+        return true;
+    };
+
+    const auto start = std::chrono::steady_clock::now();
+    {
+        kvm::VideoSender sender(slot, fake_send, {.jpeg_quality = 75, .max_fps = max_fps});
+        std::this_thread::sleep_for(duration);
+        r.stopped_by_itself = !sender.running();
+        const auto stop_start = std::chrono::steady_clock::now();
+        sender.stop();
+        r.stop_ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - stop_start).count();
+    }
+    r.seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+    producing = false;
+    producer.join();
+    tj3Destroy(decoder);
+    r.skipped = slot.overwritten();
+    return r;
+}
+
+bool seq_without_gaps(const Result& r) {
+    for (size_t i = 0; i < r.headers.size(); ++i) {
+        if (r.headers[i].seq != i || r.headers[i].codec != "jpeg") return false;
+    }
+    return true;
+}
+
+double average_ms(const std::vector<std::int64_t>& us, size_t from, size_t to) {
+    if (from >= to) return 0;
+    std::int64_t sum = 0;
+    for (size_t i = from; i < to; ++i) sum += us[i];
+    return static_cast<double>(sum) / static_cast<double>(to - from) / 1000.0;
+}
+
+}  // namespace
+
+int main() {
+    Checks check;
+
+    kvm::log::info("1) channel takes 20 ms per frame, max_fps 30, producer 60 fps");
+    {
+        const auto r = run(20ms, 30, 3s);
+        const double fps = static_cast<double>(r.headers.size()) / r.seconds;
+        check(!r.headers.empty() && seq_without_gaps(r), std::format("{} frames, seq 0..n-1, codec jpeg", r.headers.size()));
+        check(r.all_valid_jpeg, "every payload is a 1920x1080 JPEG");
+        check(fps <= 31.0 && fps >= 20.0, std::format("{:.1f} frames/s (cap 30)", fps));
+        check(r.skipped > 0, std::format("{} older frames skipped instead of queued", r.skipped));
+        check(r.stop_ms < 300, std::format("stop() took {:.0f} ms", r.stop_ms));
+        kvm::log::info("   capture -> sent: {:.1f} ms on average", average_ms(r.latency_us, 0, r.latency_us.size()));
+    }
+
+    kvm::log::info("2) slow channel: 100 ms per frame");
+    {
+        const auto r = run(100ms, 30, 3s);
+        const size_t n = r.latency_us.size();
+        const double early = average_ms(r.latency_us, 0, n / 2), late = average_ms(r.latency_us, n / 2, n);
+        check(n >= 10 && seq_without_gaps(r), std::format("{} frames, seq without gaps", n));
+        check(late < early + 50.0, std::format("latency stays flat: {:.0f} ms early, {:.0f} ms late", early, late));
+    }
+
+    kvm::log::info("3) channel closes after 5 frames");
+    {
+        const auto r = run(5ms, 30, 1s, 5);
+        check(r.stopped_by_itself, "sender stopped by itself");
+        check(r.headers.size() == 5, std::format("{} frames sent before the close", r.headers.size()));
+    }
+
+    if (check.failed) {
+        kvm::log::error("{} check(s) failed", check.failed);
+        return 1;
+    }
+    kvm::log::info("all passed");
+    return 0;
+}
