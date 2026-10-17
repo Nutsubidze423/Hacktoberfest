@@ -22,6 +22,10 @@ constexpr wchar_t kClassName[] = L"KvmDeskView";
 constexpr UINT kMsgUpdate = WM_APP + 1;
 constexpr UINT kMsgSave = WM_APP + 2;  // wparam = const std::wstring* path; returns 1 on success
 
+// The WinEvent callback runs on the UI thread that registered the hook, so the DeskView on that
+// thread can be found without a user-data parameter (there is one DeskView per UI thread).
+thread_local DeskView* t_self = nullptr;
+
 bool injected_by_us() {
     return input::is_own_injection(static_cast<std::uintptr_t>(GetMessageExtraInfo()));
 }
@@ -198,6 +202,7 @@ void DeskView::decode_main(std::stop_token stop) {
 
 void DeskView::ui_main(std::promise<void>* ready) {
     ui_thread_id_ = GetCurrentThreadId();
+    t_self = this;
     const HINSTANCE instance = GetModuleHandleW(nullptr);
     WNDCLASSEXW wc{sizeof(wc)};
     wc.lpfnWndProc = &DeskView::wnd_proc;
@@ -206,12 +211,17 @@ void DeskView::ui_main(std::promise<void>* ready) {
     RegisterClassExW(&wc);  // fails harmlessly if a second DeskView registered it already
 
     screen_ = primary_rect();
-    const HWND hwnd = CreateWindowExW(WS_EX_LAYERED | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TOPMOST, kClassName,
-                                      L"Sarke desk", WS_POPUP, screen_.left, screen_.top, screen_.right - screen_.left,
+    // Not topmost: the overlay rides in the normal z-order so this PC's own windows can come in front
+    // of the owner's windows when the user raises them (apply_z keeps it above the desktop either way).
+    const HWND hwnd = CreateWindowExW(WS_EX_LAYERED | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, kClassName, L"Sarke desk",
+                                      WS_POPUP, screen_.left, screen_.top, screen_.right - screen_.left,
                                       screen_.bottom - screen_.top, nullptr, nullptr, instance, this);
     if (!hwnd) log::error("desk: the overlay window could not be created ({})", GetLastError());
     hwnd_ = hwnd;
     if (hwnd && !make_surface()) log::error("desk: no drawing surface");
+    // Learn when the user raises one of this PC's own windows, so the overlay drops below it.
+    foreground_hook_ = SetWinEventHook(EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND, nullptr, &on_foreground_event,
+                                       0, 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
     ready->set_value();
 
     MSG msg;
@@ -219,9 +229,37 @@ void DeskView::ui_main(std::promise<void>* ready) {
         TranslateMessage(&msg);
         DispatchMessageW(&msg);
     }
+    if (foreground_hook_) UnhookWinEvent(foreground_hook_);
+    foreground_hook_ = nullptr;
     hwnd_ = nullptr;
     if (hwnd) DestroyWindow(hwnd);
     free_surface();
+    t_self = nullptr;
+}
+
+void DeskView::on_foreground_event(HWINEVENTHOOK, DWORD, HWND hwnd, LONG id_object, LONG id_child, DWORD, DWORD) {
+    if (t_self && hwnd && id_object == OBJID_WINDOW && id_child == CHILDID_SELF) t_self->on_local_foreground(hwnd);
+}
+
+void DeskView::on_local_foreground(HWND fg) {
+    if (fg == hwnd_ || GetAncestor(fg, GA_ROOT) != fg) return;  // our overlay or a child control
+    DWORD pid = 0;
+    GetWindowThreadProcessId(fg, &pid);
+    if (pid == GetCurrentProcessId()) return;  // one of our own windows (WINEVENT_SKIPOWNPROCESS should already skip it)
+    local_foreground_ = fg;
+    front_ = Front::Local;  // the user raised a window of this PC: let it cover the owner's windows
+    if (visible_) apply_z();
+}
+
+void DeskView::apply_z() {
+    HWND after = HWND_TOP;  // front_ == Owner: above this PC's normal windows (but not topmost)
+    if (front_ == Front::Local && local_foreground_ && IsWindow(local_foreground_) && local_foreground_ != hwnd_) {
+        after = local_foreground_;  // just below the window the user raised, still above the desktop
+    }
+    UINT flags = SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER;
+    if (!visible_) flags |= SWP_SHOWWINDOW;
+    SetWindowPos(hwnd_, after, 0, 0, 0, 0, flags);
+    visible_ = true;
 }
 
 bool DeskView::make_surface() {
@@ -285,8 +323,14 @@ void DeskView::update() {
         new_pictures.insert(id);
         pictures_[id] = std::move(pic);
     }
+    bool raise_owner = false;
     if (layout) {
         layout_ = std::move(*layout);
+        // The owner's active window is in front over there: bring our overlay above our own windows.
+        if (layout_.active && front_ != Front::Owner) {
+            front_ = Front::Owner;
+            raise_owner = true;
+        }
         // Forget windows that are gone.
         std::set<std::uint64_t> alive;
         for (const auto& w : layout_.windows) alive.insert(w.id);
@@ -365,12 +409,7 @@ void DeskView::update() {
     }
     first_update_ = false;
     ++shown_;
-    if (!visible_ || set_changed) {
-        // On top of everything, but never activated: clicks route by what the owner sees as its windows.
-        SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0,
-                     SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER | (visible_ ? 0 : SWP_SHOWWINDOW));
-        visible_ = true;
-    }
+    if (!visible_ || set_changed || raise_owner) apply_z();
 }
 
 void DeskView::compose(const std::vector<Placed>& placed, const RECT& dirty) {
@@ -472,7 +511,12 @@ bool DeskView::on_input(UINT msg, WPARAM wp, LPARAM lp) {
     if (const auto b = button_of(msg, wp)) {
         if (injected_by_us() || layout_.desk_w <= 0) return true;
         if (b->second) {
-            // Keys typed after this click belong to the owner's window too.
+            // Clicking the owner's window (this is on its opaque pixels) brings its layer in front of
+            // this PC's own windows, and sends keys typed afterwards to it.
+            if (front_ != Front::Owner) {
+                front_ = Front::Owner;
+                apply_z();
+            }
             SetForegroundWindow(hwnd_);
             SetFocus(hwnd_);
             if (buttons_held_++ == 0) SetCapture(hwnd_);
@@ -523,8 +567,8 @@ LRESULT DeskView::handle(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         case WM_DISPLAYCHANGE:
             hide();
             if (make_surface()) {
-                SetWindowPos(hwnd, HWND_TOPMOST, screen_.left, screen_.top, screen_.right - screen_.left,
-                             screen_.bottom - screen_.top, SWP_NOACTIVATE);
+                SetWindowPos(hwnd, nullptr, screen_.left, screen_.top, screen_.right - screen_.left,
+                             screen_.bottom - screen_.top, SWP_NOZORDER | SWP_NOACTIVATE);
             }
             {
                 std::lock_guard lock(pending_mutex_);

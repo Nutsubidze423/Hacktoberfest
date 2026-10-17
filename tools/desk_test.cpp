@@ -103,6 +103,24 @@ bool save_screen(const std::wstring& path) {
     return written;
 }
 
+// Position of `target` among top-level windows in z-order; 0 = topmost, -1 = not found.
+int z_index(HWND target) {
+    struct Ctx {
+        HWND target;
+        int i = 0;
+        int found = -1;
+    } ctx{target};
+    EnumWindows(
+        [](HWND h, LPARAM lp) -> BOOL {
+            auto& c = *reinterpret_cast<Ctx*>(lp);
+            if (h == c.target) c.found = c.i;
+            ++c.i;
+            return TRUE;
+        },
+        reinterpret_cast<LPARAM>(&ctx));
+    return ctx.found;
+}
+
 void print_windows(const kvm::DeskShare& share) {
     for (const auto& w : share.tracker().windows()) {
         kvm::log::info("  {} \"{}\" [{}] {},{} {}x{}", reinterpret_cast<void*>(w.hwnd), w.title, w.cls, w.rect.left,
@@ -255,6 +273,16 @@ int wmain(int argc, wchar_t** argv) {
                                    IsWindowVisible(view.hwnd()) != FALSE);
                 }
                 std::this_thread::sleep_for(1000ms);
+
+                // The overlay isn't topmost, and a window this PC raises comes in front of it.
+                check((GetWindowLongPtrW(view.hwnd(), GWL_EXSTYLE) & WS_EX_TOPMOST) == 0, "the overlay is not topmost");
+                const HWND probe = CreateWindowExW(0, L"STATIC", L"local window", WS_POPUP | WS_VISIBLE, inside.x - 80,
+                                                   vr.top + 150, 320, 320, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
+                SetForegroundWindow(probe);
+                SetWindowPos(probe, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+                check(wait_until([&] { return z_index(probe) >= 0 && z_index(probe) < z_index(view.hwnd()); }, 1s),
+                      "a window raised here goes in front of the transferred window");
+                DestroyWindow(probe);
 
                 SetWindowPlacement(hwnd, &saved);
                 check(wait_until([&] { return region.rects().empty(); }, 2s), "back home: nothing tracked");

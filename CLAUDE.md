@@ -110,7 +110,7 @@ tools/
 | `focus_enter` | ორივე (KVM controller → controlled) | `y_norm` (კურსორის შესვლის წერტილი), `desk` (კურსორი `desk_move`-ს მიჰყვება) |
 | `desk_move` | ორივე (desk mode, controller → controlled) | `x`, `y` — კურსორი controlled-ის primary მონიტორზე, px (= controller-ის VDD) |
 | `desk_cursor` | ორივე (window owner → viewer) | `shape` (`arrow`/`ibeam`/`hand`/`sizewe`/…) — კურსორის ფორმა owner-ის ფანჯრებზე |
-| `desk_layout` | ორივე (window owner → viewer) | `desk_w`, `desk_h`, `windows` [`id`, `x`, `y`, `w`, `h`] — VDD-ზე მყოფი ფანჯრები (ზემოდან ქვემოთ), მათი ჩარჩო VDD-თან შედარებით; ფანჯრის გადაადგილება = მხოლოდ ეს შეტყობინება |
+| `desk_layout` | ორივე (window owner → viewer) | `desk_w`, `desk_h`, `active` (owner-ის აქტიური ფანჯარა VDD-ზეა → viewer overlay-ს წინ წამოწევს), `windows` [`id`, `x`, `y`, `w`, `h`] — VDD-ზე მყოფი ფანჯრები (ზემოდან ქვემოთ); ფანჯრის გადაადგილება = მხოლოდ ეს შეტყობინება |
 | `focus_leave` | ორივე | `y_norm`. controller → controlled: „ინფუთი დავიბრუნე“; controlled → controller: „შენი კურსორი ჩემი კიდით დაბრუნდა“ |
 | `mouse_move` | ორივე (KVM controller → controlled) | `dx`, `dy` (relative) |
 | `mouse_button` | ორივე | `button` (`left`/`right`/`middle`/`x1`/`x2`), `down` (+ viewer → window owner-ზე `x_norm`, `y_norm`) |

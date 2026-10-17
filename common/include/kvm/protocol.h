@@ -195,6 +195,7 @@ struct DeskLayout {
     static constexpr std::string_view kType = "desk_layout";
     int desk_w = 0;
     int desk_h = 0;
+    bool active = false;  // an owner window on the VDD is in front: the viewer raises its overlay above its own windows
     std::vector<DeskWindow> windows;
 };
 
@@ -238,7 +239,7 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(DeskMove, x, y)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(DeskCursor, shape)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(DeskRect, x, y, w, h)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(DeskWindow, id, x, y, w, h)
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(DeskLayout, desk_w, desk_h, windows)
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(DeskLayout, desk_w, desk_h, active, windows)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(FrameHeader, seq, t_capture_us, width, height, codec, layer, x, y,
                                                 desk_w, desk_h, rects, window, alpha_bytes)
 

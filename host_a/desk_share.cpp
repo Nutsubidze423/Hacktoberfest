@@ -100,7 +100,10 @@ void DeskShare::on_windows(const std::vector<DeskTracker::Window>& windows) {
     display::Rect vdd = vdd_;
     bool live = false;
     region_.vdd_rect(vdd, live);
-    proto::DeskLayout layout{.desk_w = vdd.width(), .desk_h = vdd.height()};
+    // The active window is in front over there too: is the owner's foreground one of the VDD windows?
+    const HWND foreground = GetForegroundWindow();
+    const bool active = std::any_of(windows.begin(), windows.end(), [&](const auto& w) { return w.hwnd == foreground; });
+    proto::DeskLayout layout{.desk_w = vdd.width(), .desk_h = vdd.height(), .active = active};
     for (const auto& w : windows) {
         layout.windows.push_back({.id = reinterpret_cast<std::uint64_t>(w.hwnd),
                                   .x = w.frame.left - vdd.left,

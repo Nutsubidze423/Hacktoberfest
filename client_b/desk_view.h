@@ -96,16 +96,23 @@ private:
         int src_y = 0;
     };
 
+    // Which machine's windows are in front on this screen (desk mode is two z-orders merged into one):
+    // the owner's (the drawn overlay on top) or this PC's own (a local window the user raised).
+    enum class Front { Owner, Local };
+
     void ui_main(std::promise<void>* ready);
     void decode_main(std::stop_token stop);
     static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp);
     LRESULT handle(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp);
+    static void CALLBACK on_foreground_event(HWINEVENTHOOK, DWORD, HWND, LONG, LONG, DWORD, DWORD);
 
     bool make_surface();  // the DIB the size of the primary monitor
     void free_surface();
     void update();        // UI thread: applies the newest layout and pictures and redraws what changed
     void compose(const std::vector<Placed>& placed, const RECT& dirty);
     void hide();          // UI thread
+    void apply_z();       // UI thread: puts the overlay above or below this PC's own windows per front_
+    void on_local_foreground(HWND fg);  // UI thread: this PC raised one of its own windows
     bool on_input(UINT msg, WPARAM wp, LPARAM lp);  // UI thread; true = handled
     NormPoint norm(LPARAM lp) const;
 
@@ -139,6 +146,9 @@ private:
     std::vector<Placed> placed_;  // what is drawn now, bottom first
     bool first_update_ = true;
     bool visible_ = false;
+    Front front_ = Front::Owner;  // a window just dragged over starts in front
+    HWND local_foreground_ = nullptr;  // this PC's window to stay below while front_ == Local
+    HWINEVENTHOOK foreground_hook_ = nullptr;
     ViewerInput input_;
     int buttons_held_ = 0;
 
