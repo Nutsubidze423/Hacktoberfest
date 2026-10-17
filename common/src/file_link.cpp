@@ -99,12 +99,6 @@ files::Callbacks FileLink::callbacks() const {
                     reveal(saved);
                 }
             },
-        .on_send_progress =
-            [](std::uint64_t sent, std::uint64_t total) {
-                if (sent == total) {
-                    log::info("files: sent {:.1f} MB", total / 1e6);
-                }
-            },
         // The user is dragging these across: the drag goes on here from the cursor and the files
         // drop wherever the button goes up (KVM forwards the release from the other PC).
         .on_drag_received =
