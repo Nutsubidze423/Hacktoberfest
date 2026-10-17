@@ -129,7 +129,7 @@ Claude წაიკითხავს ამ ფაილს, იპოვის
 - [x] `input_capture.*`: hooks thread + `Ctrl+Alt+Shift+Q` (+ `tools/input_capture_test.cpp`)
 - [x] edge detection + suppress + Raw Input deltas; local test = `tools/kvm_local_test.exe` (`kvm_host.exe`-ს არ ეხება)
 - [x] `input_inject.*` (B): მოძრაობა, ღილაკები, `focus_enter` / `focus_leave` (+ `tools/input_inject_test.cpp`)
-- [ ] M1: მაუსი + კლავიატურა A → B ქსელით
+- [x] M1: მაუსი + კლავიატურა A → B ქსელით (ტესტი 2, `4d16b70`; სიგლუვე `8461a31`)
 - [ ] ფაზა 2: სქროლი (ჰორიზ. ჩათვლით), extended კლავიშები, გაჭედილი კლავიშების გასუფთავება
 
 ### თემო — ფანჯარა B-ზე და უკან (VDD + ვიდეო A მხარეს)
