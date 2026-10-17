@@ -235,6 +235,7 @@ LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 if (state && state->catching) {
                     state->catching = false;
                     hide_window(hwnd, *state);
+                    log::info("file_drop: no file drag arrived here, left the drag alone");
                 }
                 return 0;
             }

@@ -133,7 +133,11 @@ void FileLink::show_catcher_at_cursor() {
 }
 
 void FileLink::catch_drag(double y_norm, POINT at) {
-    if (!connected()) return;  // nothing to send to: leave the drag alone
+    if (!connected()) {
+        log::info("files: a drag reached the other PC's screen but there is no file connection to send it on");
+        return;  // nothing to send to: leave the drag alone
+    }
+    log::info("files: a drag reached the other PC's screen, trying to catch it at ({}, {})", at.x, at.y);
     drag_y_ = y_norm;
     drag_until_ = GetTickCount64() + kCatchWindowMs;
     catcher_->catch_now(at);  // only a drag that carries files is caught

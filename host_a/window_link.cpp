@@ -27,9 +27,12 @@ namespace kvm {
 namespace {
 
 using Clock = std::chrono::steady_clock;
-// After the link drops, desk mode waits this long before detaching the VDD: a quick reconnect
-// keeps every window where it is (detaching moves them all back to the real monitors).
-constexpr auto kDeskGrace = std::chrono::seconds(8);
+// After the link drops, desk mode waits this long before detaching the VDD: a quick reconnect (a
+// brief Wi-Fi blip) keeps every window where it is (detaching moves them all back to the real
+// monitors). Kept short so a real disconnect doesn't leave a phantom monitor the cursor can wander
+// into; the KVM wall blocks the cursor meanwhile, and on a real disconnect the windows should come
+// home anyway.
+constexpr auto kDeskGrace = std::chrono::seconds(3);
 constexpr auto kDeskPoll = std::chrono::milliseconds(30);  // cursor shape, VDD health
 constexpr auto kVddRecheck = std::chrono::seconds(1);       // the VDD moved (display settings)
 
