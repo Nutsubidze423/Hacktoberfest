@@ -1,5 +1,5 @@
 // kvm_host.exe — runs on A (owns the physical mouse/keyboard, streams a window).
-// Usage: kvm_host.exe [--config <path>]
+// Usage: kvm_host.exe [--config <path>] [--log <file>]
 
 #include <atomic>
 #include <chrono>
@@ -86,8 +86,11 @@ int wmain(int argc, wchar_t** argv) {
 
     std::optional<std::filesystem::path> config_path;
     for (int i = 1; i < argc; ++i) {
-        if (std::wstring_view(argv[i]) == L"--config" && i + 1 < argc) {
+        const std::wstring_view arg = argv[i];
+        if (arg == L"--config" && i + 1 < argc) {
             config_path = argv[++i];
+        } else if (arg == L"--log" && i + 1 < argc) {
+            kvm::log::open_file(argv[++i]);
         }
     }
 

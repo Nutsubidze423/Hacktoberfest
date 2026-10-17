@@ -42,9 +42,9 @@ if ($Firewall) {
     }
     if (-not (Get-NetFirewallRule -DisplayName 'KVM demo (TCP 50500-50501)' -ErrorAction SilentlyContinue)) {
         New-NetFirewallRule -DisplayName 'KVM demo (TCP 50500-50501)' -Direction Inbound -Protocol TCP `
-            -LocalPort 50500-50501 -Profile Private -Action Allow | Out-Null
+            -LocalPort 50500-50501 -RemoteAddress LocalSubnet -Profile Any -Action Allow | Out-Null
     }
-    Write-Host 'Firewall: TCP 50500-50501 open on Private networks.'
+    Write-Host 'Firewall: TCP 50500-50501 open for the local network (any profile).'
 }
 
 Write-Host ''

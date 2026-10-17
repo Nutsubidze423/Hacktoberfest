@@ -1,9 +1,11 @@
-// Minimal thread-safe console logging: kvm::log::info("connected to {}", ip);
+// Minimal thread-safe logging to stderr and optionally a file: kvm::log::info("connected to {}", ip);
 // Never call from inside a low-level hook callback.
 #pragma once
 
-#include <chrono>
+#include <windows.h>
+
 #include <cstdio>
+#include <filesystem>
 #include <format>
 #include <mutex>
 #include <string>
@@ -13,19 +15,42 @@ namespace kvm::log {
 
 namespace detail {
 
-inline std::mutex& mutex() {
-    static std::mutex m;
-    return m;
+struct State {
+    std::mutex mutex;
+    std::FILE* file = nullptr;
+};
+
+inline State& state() {
+    static State s;
+    return s;
 }
 
 inline void write(std::string_view level, const std::string& text) {
-    const auto now = std::chrono::floor<std::chrono::milliseconds>(std::chrono::system_clock::now());
-    const auto line = std::format("{:%H:%M:%S} [{}] {}\n", std::chrono::current_zone()->to_local(now), level, text);
-    std::lock_guard lock(mutex());
+    SYSTEMTIME t;
+    GetLocalTime(&t);
+    const auto line =
+        std::format("{:02}:{:02}:{:02}.{:03} [{}] {}\n", t.wHour, t.wMinute, t.wSecond, t.wMilliseconds, level, text);
+    auto& s = state();
+    std::lock_guard lock(s.mutex);
     std::fputs(line.c_str(), stderr);
+    if (s.file) {
+        std::fputs(line.c_str(), s.file);
+        std::fflush(s.file);
+    }
 }
 
 }  // namespace detail
+
+// Also append every log line to `path`. Returns false if the file cannot be opened.
+inline bool open_file(const std::filesystem::path& path) {
+    auto& s = detail::state();
+    std::lock_guard lock(s.mutex);
+    if (s.file) {
+        std::fclose(s.file);
+        s.file = nullptr;
+    }
+    return _wfopen_s(&s.file, path.c_str(), L"a") == 0 && s.file;
+}
 
 template <class... Args>
 void info(std::format_string<Args...> fmt, Args&&... args) {

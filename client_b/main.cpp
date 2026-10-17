@@ -1,5 +1,5 @@
 // kvm_client.exe — runs on B (receives input and the window stream from A).
-// Usage: kvm_client.exe [--host <A's IP>] [--config <path>]
+// Usage: kvm_client.exe [--host <A's IP>] [--config <path>] [--log <file>]
 
 #include <atomic>
 #include <chrono>
@@ -89,6 +89,8 @@ int wmain(int argc, wchar_t** argv) {
             config_path = argv[++i];
         } else if (arg == L"--host" && i + 1 < argc) {
             host_override = narrow(argv[++i]);
+        } else if (arg == L"--log" && i + 1 < argc) {
+            kvm::log::open_file(argv[++i]);
         }
     }
 
