@@ -36,8 +36,9 @@ and that PC stays fully usable with its own apps, mouse and keyboard.
 
 ## Install
 
-1. Download `SarkeSetup.exe` from the [releases](../../releases) page and run it on both PCs. It
-   installs Sarke, the virtual display driver and the firewall rules for the local network.
+1. Download [`SarkeSetup-1.1.0.0.exe`](releases/SarkeSetup-1.1.0.0.exe) from the `releases` folder
+   and run it on both PCs. It installs Sarke, the virtual display driver and the firewall rules for
+   the local network.
 2. Start Sarke on both PCs. It runs in the system tray and shows the PCs running Sarke on the
    network.
 3. On one PC, click the other PC in that list to connect. Turn on **Auto** to connect to it by
