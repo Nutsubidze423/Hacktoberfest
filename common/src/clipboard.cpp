@@ -29,13 +29,22 @@ using Microsoft::WRL::ComPtr;
 constexpr UINT kMsgApply = WM_APP + 1;  // complete content from the peer is waiting
 constexpr UINT kMsgStop = WM_APP + 2;
 constexpr UINT kMsgApplyFiles = WM_APP + 3;  // the peer's copied files arrived
+constexpr UINT kMsgResync = WM_APP + 4;      // a peer is attached: send it what it missed
 // How long an announced file copy waits for its files, and how long files that
 // arrived first wait for their announcement.
 constexpr auto kFilesExpectedFor = std::chrono::minutes(30);
 constexpr auto kFilesUnclaimedFor = std::chrono::seconds(10);
 constexpr UINT_PTR kSettleTimer = 1;
+constexpr UINT_PTR kApplyTimer = 2;
 // Apps often write several formats one after another; read once they're done.
 constexpr UINT kSettleMs = 80;
+// Another app holds the clipboard: try again every kRetryMs, kMaxTries times (~5 s).
+constexpr UINT kRetryMs = 150;
+constexpr int kMaxTries = 20;
+// After a reconnect, give the file channel a moment to connect too (copied files go on it).
+constexpr UINT kResyncMs = 500;
+// One Ctrl+C in Explorer can update the clipboard twice: the same files again this soon are not resent.
+constexpr auto kSameFilesFor = std::chrono::seconds(3);
 // Gap between the pieces of one big copy, so mouse and keyboard messages on the
 // same connection don't queue up behind it.
 constexpr auto kChunkGap = std::chrono::milliseconds(4);
@@ -359,16 +368,33 @@ struct ClipboardThread {
         switch (msg) {
             case WM_CLIPBOARDUPDATE:
                 // Our own write (content from the peer) must not travel back.
-                if (GetClipboardOwner() != h) SetTimer(h, kSettleTimer, kSettleMs, nullptr);
+                if (GetClipboardOwner() != h) {
+                    if (sync) sync->read_tries_ = 0;
+                    SetTimer(h, kSettleTimer, kSettleMs, nullptr);
+                }
                 return 0;
             case WM_TIMER:
                 if (wp == kSettleTimer) {
                     KillTimer(h, kSettleTimer);
                     if (sync) read_and_send(*sync, h);
+                } else if (wp == kApplyTimer) {
+                    KillTimer(h, kApplyTimer);
+                    if (sync) apply(*sync, h);
                 }
                 return 0;
             case kMsgApply:
-                if (sync) apply(*sync, h);
+                if (sync) {
+                    sync->apply_tries_ = 0;
+                    apply(*sync, h);
+                }
+                return 0;
+            case kMsgResync:
+                // Copied while the peer was away, or its sending broke off: it goes now.
+                if (sync && GetClipboardSequenceNumber() != sync->synced_clip_seq_ && GetClipboardOwner() != h) {
+                    log::info("clipboard: the other PC is back - sending what was copied meanwhile");
+                    sync->read_tries_ = 0;
+                    SetTimer(h, kSettleTimer, kResyncMs, nullptr);
+                }
                 return 0;
             case kMsgApplyFiles:
                 if (sync) apply_files(*sync, h);
@@ -385,17 +411,24 @@ struct ClipboardThread {
     static void read_and_send(ClipboardSync& sync, HWND h) {
         {
             std::lock_guard lock(sync.sink_mutex_);
-            if (!sync.sink_) return;  // nobody to send to
+            if (!sync.sink_) return;  // nobody to send to now: it goes on the next attach() (kMsgResync)
         }
         ClipboardSync::Content content;
         std::vector<std::filesystem::path> files;
+        std::uint32_t clip_seq = 0;
         {
             OpenedClipboard opened(h);
             if (!opened) {
-                log::warn("clipboard: could not open the clipboard (another app holds it)");
+                if (++sync.read_tries_ <= kMaxTries) {
+                    SetTimer(h, kSettleTimer, kRetryMs, nullptr);  // another app holds it: try again soon
+                } else {
+                    log::warn("clipboard: could not open the clipboard (another app holds it)");
+                }
                 return;
             }
             if (GetClipboardOwner() == h) return;
+            clip_seq = GetClipboardSequenceNumber();  // can't change while we hold it open
+            if (clip_seq == sync.synced_clip_seq_) return;  // the peer has this one already
             if (sync.options_.files && IsClipboardFormatAvailable(CF_HDROP)) {
                 files = dropped_files(GetClipboardData(CF_HDROP));
             } else if (sync.options_.text && IsClipboardFormatAvailable(CF_UNICODETEXT)) {
@@ -421,20 +454,33 @@ struct ClipboardThread {
             }
         }
         if (!files.empty()) {
-            send_files(sync, std::move(files));
+            const auto now = std::chrono::steady_clock::now();
+            if (files == sync.last_files_ && now - sync.last_files_at_ < kSameFilesFor) {
+                sync.synced_clip_seq_ = clip_seq;  // the same Ctrl+C updating the clipboard once more
+                return;
+            }
+            if (send_files(sync, files, clip_seq)) {
+                sync.last_files_ = std::move(files);
+                sync.last_files_at_ = now;
+            }
             return;
         }
-        if (content.kind.empty() || content.bytes.empty()) return;
+        if (content.kind.empty() || content.bytes.empty()) {
+            sync.synced_clip_seq_ = clip_seq;  // nothing we share (e.g. a format we don't know): don't retry it
+            return;
+        }
         if (content.bytes.size() > sync.options_.max_bytes) {
             log::warn("clipboard: copied {} of {} is too big to share (limit {})", content.kind,
                       size_text(content.bytes.size()), size_text(sync.options_.max_bytes));
+            sync.synced_clip_seq_ = clip_seq;
             return;
         }
-        sync.send_content(content);
+        sync.send_content(content, clip_seq);
     }
 
     // Files copied here: announce them to the peer, then hand them to the file channel.
-    static void send_files(ClipboardSync& sync, std::vector<std::filesystem::path> files) {
+    // False if they were not shared.
+    static bool send_files(ClipboardSync& sync, std::vector<std::filesystem::path> files, std::uint32_t clip_seq) {
         ClipboardSync::FilesCopied callback;
         {
             std::lock_guard lock(sync.incoming_mutex_);
@@ -442,20 +488,22 @@ struct ClipboardThread {
         }
         if (!callback) {
             log::info("clipboard: files were copied, but there is no file channel to send them");
-            return;
+            return false;
         }
         std::uint64_t bytes = 0;
         std::size_t count = 0;
         if (!within_limits(files, sync.options_.max_file_bytes, sync.options_.max_file_count, bytes, count)) {
             log::warn("clipboard: copied files are too big to share (limit {} / {} files) - drag them to the edge instead",
                       size_text(static_cast<std::size_t>(sync.options_.max_file_bytes)), sync.options_.max_file_count);
-            return;
+            sync.synced_clip_seq_ = clip_seq;
+            return false;
         }
         std::string names;
         for (const auto& f : files) names += to_utf8(f.filename().wstring()) + "\n";
-        sync.send_content({"files", std::vector<std::uint8_t>(names.begin(), names.end())});
+        sync.send_content({"files", std::vector<std::uint8_t>(names.begin(), names.end())}, clip_seq);
         log::info("clipboard: sharing {} copied file(s), {}, over the file channel", count, size_text(static_cast<std::size_t>(bytes)));
         callback(std::move(files));
+        return true;
     }
 
     // The peer's copied files arrived: put them on this clipboard for Explorer's paste.
@@ -466,16 +514,20 @@ struct ClipboardThread {
             files = std::exchange(sync.files_to_apply_, std::nullopt);
         }
         if (!files || files->empty()) return;
-        OpenedClipboard opened(h);
-        if (!opened) {
-            log::warn("clipboard: could not open the clipboard to paste the other PC's files");
-            return;
+        bool ok = false;
+        {
+            OpenedClipboard opened(h);
+            if (!opened) {
+                log::warn("clipboard: could not open the clipboard to paste the other PC's files");
+                return;
+            }
+            EmptyClipboard();  // makes this window the owner, so the change isn't echoed back
+            const DWORD copy = DROPEFFECT_COPY;  // paste copies them out of Downloads\KVM, never moves
+            ok = set_data(CF_HDROP, make_hdrop(*files));
+            set_data(RegisterClipboardFormatW(CFSTR_PREFERREDDROPEFFECT), make_global(&copy, sizeof(copy)));
         }
-        EmptyClipboard();  // makes this window the owner, so the change isn't echoed back
-        const DWORD copy = DROPEFFECT_COPY;  // paste copies them out of Downloads\KVM, never moves
-        const bool ok = set_data(CF_HDROP, make_hdrop(*files));
-        set_data(RegisterClipboardFormatW(CFSTR_PREFERREDDROPEFFECT), make_global(&copy, sizeof(copy)));
         if (ok) {
+            sync.synced_clip_seq_ = GetClipboardSequenceNumber();  // the peer has these: not sent back on reconnect
             log::info("clipboard: {} file(s) from the other PC are on the clipboard - Ctrl+V in Explorer to paste",
                       files->size());
         } else {
@@ -496,25 +548,39 @@ struct ClipboardThread {
             log::warn("clipboard: received an image that could not be decoded");
             return;
         }
-        OpenedClipboard opened(h);
-        if (!opened) {
-            log::warn("clipboard: could not open the clipboard to paste the other PC's copy");
-            return;
-        }
-        EmptyClipboard();  // makes this window the owner, so the change isn't echoed back
         bool ok = false;
-        if (content->kind == "text") {
-            const std::wstring w = to_wide({reinterpret_cast<const char*>(content->bytes.data()), content->bytes.size()});
-            ok = set_data(CF_UNICODETEXT, make_global(w.c_str(), (w.size() + 1) * sizeof(wchar_t)));
-            log::info("clipboard: text from the other PC ({} characters)", w.size());
-        } else {
-            const bool dib = set_data(CF_DIB, make_dib(*pixels));
-            const bool png = set_data(png_format(), make_global(content->bytes.data(), content->bytes.size()));
-            ok = dib || png;
-            log::info("clipboard: image from the other PC ({}x{}, {})", pixels->width, pixels->height,
-                      size_text(content->bytes.size()));
+        {
+            OpenedClipboard opened(h);
+            if (!opened) {
+                {
+                    std::lock_guard lock(sync.incoming_mutex_);
+                    if (!sync.to_apply_) sync.to_apply_ = std::move(content);  // unless a newer copy came meanwhile
+                }
+                if (++sync.apply_tries_ <= kMaxTries) {
+                    SetTimer(h, kApplyTimer, kRetryMs, nullptr);  // another app holds the clipboard: try again soon
+                } else {
+                    log::warn("clipboard: could not open the clipboard to paste the other PC's copy");
+                }
+                return;
+            }
+            EmptyClipboard();  // makes this window the owner, so the change isn't echoed back
+            if (content->kind == "text") {
+                const std::wstring w = to_wide({reinterpret_cast<const char*>(content->bytes.data()), content->bytes.size()});
+                ok = set_data(CF_UNICODETEXT, make_global(w.c_str(), (w.size() + 1) * sizeof(wchar_t)));
+                log::info("clipboard: text from the other PC ({} characters)", w.size());
+            } else {
+                const bool dib = set_data(CF_DIB, make_dib(*pixels));
+                const bool png = set_data(png_format(), make_global(content->bytes.data(), content->bytes.size()));
+                ok = dib || png;
+                log::info("clipboard: image from the other PC ({}x{}, {})", pixels->width, pixels->height,
+                          size_text(content->bytes.size()));
+            }
         }
-        if (!ok) log::warn("clipboard: could not put the other PC's copy on the clipboard");
+        if (ok) {
+            sync.synced_clip_seq_ = GetClipboardSequenceNumber();  // the peer has this: not sent back on reconnect
+        } else {
+            log::warn("clipboard: could not put the other PC's copy on the clipboard");
+        }
     }
 };
 
@@ -548,8 +614,11 @@ void ClipboardSync::stop() {
 }
 
 void ClipboardSync::attach(Sink sink) {
-    std::lock_guard lock(sink_mutex_);
-    sink_ = std::move(sink);
+    {
+        std::lock_guard lock(sink_mutex_);
+        sink_ = std::move(sink);
+    }
+    if (HWND h = static_cast<HWND>(hwnd_.load())) PostMessageW(h, kMsgResync, 0, 0);
 }
 
 void ClipboardSync::detach() {
@@ -558,8 +627,9 @@ void ClipboardSync::detach() {
     sink_ = nullptr;
 }
 
-void ClipboardSync::send_content(const Content& content) {
+void ClipboardSync::send_content(const Content& content, std::uint32_t clip_seq) {
     const std::uint32_t seq = next_seq_++;
+    sending_ = (static_cast<std::uint64_t>(seq) << 32) | clip_seq;
     latest_seq_ = seq;
     for (Chunk& c : split(seq, content.kind, content.bytes)) outgoing_.push(std::move(c));
     if (content.kind != "files") {
@@ -590,13 +660,28 @@ bool ClipboardSync::files_received(const std::vector<std::filesystem::path>& sav
 }
 
 void ClipboardSync::sender_main() {
+    std::uint32_t current = 0;  // the copy being sent...
+    bool intact = false;        // ...and every piece of it so far went out
     while (auto chunk = outgoing_.pop()) {
         if (chunk->seq != latest_seq_) continue;  // a newer copy replaced it
-        {
-            std::lock_guard lock(sink_mutex_);
-            if (sink_) sink_(*chunk);
+        if (chunk->seq != current) {
+            current = chunk->seq;
+            intact = chunk->offset == 0;
         }
-        if (chunk->offset + kChunkBytes < chunk->total) std::this_thread::sleep_for(kChunkGap);
+        bool sent = false;
+        {
+            // Checked again under the lock: after detach() (latest_seq_ = 0) no piece goes to the next
+            // connection, which would get only the rest of a copy.
+            std::lock_guard lock(sink_mutex_);
+            if (sink_ && chunk->seq == latest_seq_) sent = sink_(*chunk);
+        }
+        intact = intact && sent;
+        const bool last = chunk->offset + kChunkBytes >= chunk->total;
+        if (last && intact) {
+            const std::uint64_t s = sending_;
+            if ((s >> 32) == chunk->seq) synced_clip_seq_ = static_cast<std::uint32_t>(s);  // the peer has it all
+        }
+        if (!last) std::this_thread::sleep_for(kChunkGap);
     }
 }
 
@@ -667,6 +752,7 @@ void ClipboardSync::clipboard_thread_main() {
         started_.notify_all();
         return;
     }
+    synced_clip_seq_ = GetClipboardSequenceNumber();  // what was copied before we started isn't shared
     hwnd_ = h;
     started_ = 1;
     started_.notify_all();

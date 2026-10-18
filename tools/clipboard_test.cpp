@@ -1,7 +1,8 @@
 // Checks common/clipboard: base64 + chunking, then the real clipboard: copied
 // text and images are sent, the peer's content is pasted here (text, CF_DIB +
 // "PNG") without being echoed back, a newer copy cancels an older transfer,
-// size limit, detach.
+// size limit, detach; a copy made while detached (or cut off) goes on the next
+// attach, a busy clipboard is retried, the same files copied twice go once.
 // Uses this PC's clipboard; text that was on it is put back at the end.
 // Usage: clipboard_test.exe   (exit code 0 = all passed)
 
@@ -409,11 +410,68 @@ int main() {
         Sleep(300);
         take_sent();
 
-        // -- detached: nothing is sent
+        // -- one Ctrl+C in Explorer can update the clipboard twice: the files go once
+        int handovers = 0;
+        sync.set_on_files_copied([&](std::vector<fs::path>) {
+            std::lock_guard l(g_mu);
+            ++handovers;
+        });
+        set_files({dir / "a.txt"});
+        const auto first_copy = wait_content();
+        set_files({dir / "a.txt"});
+        Sleep(500);
+        const auto second_copy = take_sent();
+        {
+            std::lock_guard l(g_mu);
+            check(first_copy && first_copy->kind == "files" && second_copy.empty() && handovers == 1,
+                  "the same files copied twice at once are shared once (" + std::to_string(handovers) + ")");
+        }
+
+        // -- detached: nothing is sent...
         sync.detach();
-        set_text(L"not for anyone");
+        set_text(L"copied while away");
         Sleep(500);
         check(take_sent().empty(), "detached: copies are not sent");
+
+        // -- ...until the peer is back: then the copy it missed goes
+        sync.attach(sink);
+        const auto missed = wait_content();
+        check(missed && missed->kind == "text" && missed->bytes == bytes_of("copied while away"),
+              "attached again: the copy made while detached is sent");
+
+        // -- attached again with nothing new: nothing is sent
+        sync.detach();
+        sync.attach(sink);
+        Sleep(900);
+        check(take_sent().empty(), "attached again with nothing new: nothing is sent");
+
+        // -- the peer's copy, then a reconnect: not sent back
+        for (const auto& c : clip::split(3001, "text", bytes_of("peer copy"))) sync.receive(c);
+        check(wait_until([&] { return get_text() == L"peer copy"; }), "peer's text is on this clipboard");
+        sync.detach();
+        sync.attach(sink);
+        Sleep(900);
+        check(take_sent().empty(), "...and a reconnect doesn't send it back");
+
+        // -- a copy whose sending failed (the connection broke) goes again on reconnect
+        sync.attach([](const clip::Chunk&) { return false; });
+        set_text(L"cut off");
+        Sleep(500);
+        sync.detach();
+        take_sent();
+        sync.attach(sink);
+        const auto again = wait_content();
+        check(again && again->bytes == bytes_of("cut off"), "a copy whose sending failed goes again on reconnect");
+
+        // -- another app holds the clipboard when the peer's copy comes: it goes on once it's free
+        check(open_clip(), "holding the clipboard like another app");
+        for (const auto& c : clip::split(3002, "text", bytes_of("waited"))) sync.receive(c);
+        Sleep(700);
+        CloseClipboard();
+        check(wait_until([&] { return get_text() == L"waited"; }), "...the peer's copy is pasted once it's free");
+        Sleep(300);
+        check(take_sent().empty(), "...and is not echoed back");
+        sync.detach();
     }
 
     // -- size limit

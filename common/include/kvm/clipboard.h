@@ -82,6 +82,8 @@ public:
     bool start();
     void stop();
 
+    // A copy made while no peer was attached (or whose sending broke off) goes
+    // when one is attached again, so Ctrl+V over there still pastes it.
     void attach(Sink sink);
     void detach();
 
@@ -109,7 +111,8 @@ private:
 
     void clipboard_thread_main();
     void sender_main();
-    void send_content(const Content& content);  // clipboard thread
+    // Clipboard thread. clip_seq = GetClipboardSequenceNumber() of what is sent.
+    void send_content(const Content& content, std::uint32_t clip_seq);
 
     ClipboardOptions options_;
     std::atomic<void*> hwnd_{nullptr};
@@ -122,6 +125,16 @@ private:
     BlockingQueue<Chunk> outgoing_;
     std::atomic<std::uint32_t> next_seq_{1};
     std::atomic<std::uint32_t> latest_seq_{0};  // older unsent chunks are dropped
+    // GetClipboardSequenceNumber() of the content the peer has (we sent it all,
+    // or it came from the peer). A newer one goes on the next attach().
+    std::atomic<std::uint32_t> synced_clip_seq_{0};
+    std::atomic<std::uint64_t> sending_{0};  // (seq << 32) | clipboard sequence number being sent
+
+    // Clipboard thread only.
+    int read_tries_ = 0;   // the clipboard was busy when we wanted to read it
+    int apply_tries_ = 0;  // ...or to put the peer's copy on it
+    std::vector<std::filesystem::path> last_files_;  // the copied files sent last, and when
+    std::chrono::steady_clock::time_point last_files_at_{};
 
     std::mutex incoming_mutex_;
     std::uint32_t incoming_seq_ = 0;
