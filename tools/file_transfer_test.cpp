@@ -4,6 +4,7 @@
 //   3. A -> B over the same connection.
 //   4. Sending the same things again gives "big (2).bin" and "project (2)".
 //   5. A hostile peer ("../evil.txt", "C:/evil.txt", "CON"...) can't write outside the target.
+//   6. Desk mode: files dropped at a point reach on_dropped_at with it; a malformed point is ignored.
 // Everything happens in %TEMP%\kvm_file_test, which is deleted at the end.
 
 #include <winsock2.h>
@@ -16,6 +17,7 @@
 #include <filesystem>
 #include <format>
 #include <fstream>
+#include <functional>
 #include <iterator>
 #include <mutex>
 #include <random>
@@ -253,6 +255,97 @@ int main() {
         check(outside == 0 && !fs::exists(L"C:\\evil2.txt"), "nothing was written outside the target folder");
         check(files_below(dst_v) == std::vector<fs::path>{dst_v / L"ok.txt"}, "only ok.txt was saved");
         closesocket(raw);
+    }
+
+    kvm::log::info("6) desk mode: files dropped at a point on the other PC's screen");
+    {
+        std::mutex mutex;
+        std::condition_variable cv;
+        std::vector<std::string> calls;  // which callback ran, in order
+        std::vector<fs::path> arrived;   // what the last one got
+        const auto note = [&](std::string what, const std::vector<fs::path>& saved) {
+            {
+                std::lock_guard lock(mutex);
+                calls.push_back(std::move(what));
+                arrived = saved;
+            }
+            cv.notify_all();
+        };
+        const auto wait_calls = [&](std::size_t count) {
+            std::unique_lock lock(mutex);
+            return cv.wait_for(lock, 10s, [&] { return calls.size() >= count; });
+        };
+        const auto call = [&](std::size_t i) {
+            std::lock_guard lock(mutex);
+            return i < calls.size() ? calls[i] : std::string{};
+        };
+        const auto last_arrived = [&] {
+            std::lock_guard lock(mutex);
+            return arrived;
+        };
+        const kvm::files::Callbacks receiver_callbacks{
+            .on_received = [&](const std::vector<fs::path>& saved) { note("received", saved); },
+            .on_drag_received = [&](const std::vector<fs::path>& saved) { note("drag", saved); },
+            .on_dropped_at = [&](const std::vector<fs::path>& saved, int x, int y) {
+                note(std::format("dropped at ({}, {})", x, y), saved);
+            },
+        };
+        const auto accept_one = [&](std::uint16_t& port, std::unique_ptr<kvm::files::FileTransfer>& out,
+                                    const std::function<void()>& connect) {
+            const SOCKET listener = listen_loopback(port);
+            std::thread acceptor([&] {
+                const SOCKET s = accept(listener, nullptr, nullptr);
+                if (s != INVALID_SOCKET) out = std::make_unique<kvm::files::FileTransfer>(s, "R", receiver_callbacks, root / L"dst_r");
+            });
+            connect();
+            acceptor.join();
+            closesocket(listener);
+        };
+        std::vector<fs::path> temp_folders;  // the receiver's drag folders, removed at the end
+
+        std::uint16_t port = 0;
+        std::unique_ptr<kvm::files::FileTransfer> receiver, sender;
+        accept_one(port, receiver, [&] { sender = kvm::files::connect_files("127.0.0.1", port, {}, root / L"dst_s"); });
+        if (!receiver || !sender) {
+            kvm::log::error("could not connect the two sides");
+            return 1;
+        }
+        sender->send({src / L"hello.txt"}, false, kvm::files::FileTransfer::DropPoint{1234, 567});
+        wait_calls(1);
+        check(call(0) == "dropped at (1234, 567)", std::format("on_dropped_at got the point: \"{}\"", call(0)));
+        auto got = last_arrived();
+        check(got.size() == 1 && same_file(src / L"hello.txt", got[0]) && got[0].parent_path() != root / L"dst_r",
+              "the file arrived byte for byte into a temporary folder");
+        if (!got.empty()) temp_folders.push_back(got[0].parent_path());
+
+        sender->send({src / L"ფაილი.txt"}, true);
+        wait_calls(2);
+        check(call(1) == "drag", std::format("a plain drag after it has no point: \"{}\"", call(1)));
+        got = last_arrived();
+        if (!got.empty()) temp_folders.push_back(got[0].parent_path());
+
+        sender->send({src / L"hello.txt"});
+        wait_calls(3);
+        check(call(2) == "received", std::format("a plain send has no point either: \"{}\"", call(2)));
+
+        // A peer that sends a point that isn't one: treated as a plain drag, nothing breaks.
+        std::unique_ptr<kvm::files::FileTransfer> receiver2;
+        SOCKET raw = INVALID_SOCKET;
+        accept_one(port, receiver2, [&] { raw = connect_loopback(port); });
+        raw_send(raw, {{"type", "transfer_begin"}, {"drag", true}, {"drop_x", "left"}, {"drop_y", nullptr}});
+        raw_send(raw, {{"type", "file_begin"}, {"id", 1}, {"path", "odd.txt"}, {"size", 3}});
+        raw_send(raw, {{"type", "file_chunk"}, {"id", 1}, {"offset", 0}}, "odd");
+        raw_send(raw, {{"type", "file_end"}, {"id", 1}});
+        raw_send(raw, {{"type", "transfer_end"}, {"count", 1}});
+        wait_calls(4);
+        check(call(3) == "drag", std::format("a malformed point is ignored: \"{}\"", call(3)));
+        got = last_arrived();
+        if (!got.empty()) temp_folders.push_back(got[0].parent_path());
+        closesocket(raw);
+        receiver2.reset();
+        sender.reset();
+        receiver.reset();
+        for (const auto& folder : temp_folders) fs::remove_all(folder, ec);
     }
 
     fs::remove_all(root, ec);

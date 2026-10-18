@@ -363,6 +363,7 @@ int wmain(int argc, wchar_t** argv) {
 
         // Files (port 50502): drop window + Ctrl+Alt+Shift+F, received files land in Downloads\KVM.
         kvm::FileLink files;
+        files.set_desk_region(desk);  // desk mode: drags over the other screen drop over there
         if (kvm_link) {
             // Files dragged to the edge towards the other PC go across like on one desktop (Demetre's
             // D1 + Temo's T10): caught here, sent as a drag, the cursor follows them and the drag goes

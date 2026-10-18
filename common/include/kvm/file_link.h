@@ -22,6 +22,7 @@
 #include <memory>
 #include <mutex>
 
+#include "kvm/desk_region.h"
 #include "kvm/file_drag.h"
 #include "kvm/file_drop.h"
 #include "kvm/file_transfer.h"
@@ -62,10 +63,17 @@ public:
     using ReceivedClaim = std::function<bool(const std::vector<std::filesystem::path>&)>;
     void set_on_received_claim(ReceivedClaim claim);
 
+    // Desk mode: the virtual display (the other PC's screen) and this PC's windows on it. With it,
+    // files dragged over the other screen are caught by a cover over it and dropped over there where
+    // the user lets go, instead of landing on this PC's own desktop under the virtual display.
+    // Must outlive this FileLink; nullptr = no desk mode.
+    void set_desk_region(const desk::Region* region) { desk_region_ = region; }
+
 private:
     // Files dropped on the catcher window: a caught cross-PC drag, or a plain send.
     void on_catcher_drop(std::vector<std::filesystem::path> paths);
-    void send_now(std::vector<std::filesystem::path> paths, bool drag);
+    void send_now(std::vector<std::filesystem::path> paths, bool drag,
+                  std::optional<files::FileTransfer::DropPoint> drop = std::nullopt);
     bool connected();
 
     mutable std::mutex mutex_;
@@ -74,6 +82,7 @@ private:
     ReceivedClaim on_received_claim_;               // guarded by mutex_
     std::atomic<unsigned long long> drag_until_{0};  // GetTickCount64() until which a drop is a caught drag
     std::atomic<double> drag_y_{0.5};
+    const desk::Region* desk_region_ = nullptr;
     std::unique_ptr<files::FileDragSource> drag_source_;
     std::unique_ptr<files::FileDropCatcher> catcher_;
 };
