@@ -31,6 +31,7 @@
 #include <thread>
 #include <vector>
 
+#include "kvm/drag_image.h"
 #include "kvm/queue.h"
 
 namespace kvm::files {
@@ -46,6 +47,9 @@ struct Callbacks {
     // A drag transfer (send(..., true)) arrived into a temp folder: continue the drag here with
     // FileDragSource. Without this callback drag transfers go to on_received like any other.
     std::function<void(const std::vector<std::filesystem::path>& saved)> on_drag_received;
+    // A drag transfer started arriving (receive thread); on_drag_received follows when it's complete.
+    // image = the drag image the user sees on the other PC, if it came along.
+    std::function<void(std::optional<DragImage> image)> on_drag_begin;
 };
 
 // %USERPROFILE%\Downloads\KVM (the user's Downloads folder, wherever it was moved to).
@@ -66,7 +70,9 @@ public:
     // Queues files and folders (folders recursively); they are sent one transfer after another.
     // drag = the user is dragging them across: the peer saves them to a temp folder and continues
     // the drag there (on_drag_received). False if the channel is closed.
-    bool send(std::vector<std::filesystem::path> items, bool drag = false);
+    // image: with a drag, the picture the shell showed under the cursor here; the drag over there
+    // shows the same one (on_drag_begin).
+    bool send(std::vector<std::filesystem::path> items, bool drag = false, std::optional<DragImage> image = std::nullopt);
 
     bool is_open() const { return open_; }
     const std::string& peer() const { return peer_; }
@@ -87,6 +93,7 @@ private:
     struct Outgoing {
         std::vector<std::filesystem::path> items;
         bool drag = false;
+        std::optional<DragImage> image;
     };
     BlockingQueue<Outgoing> outgoing_;
     std::thread receiver_;

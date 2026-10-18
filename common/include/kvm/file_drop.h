@@ -24,9 +24,13 @@
 #include <chrono>
 #include <filesystem>
 #include <functional>
+#include <mutex>
+#include <optional>
 #include <string>
 #include <thread>
 #include <vector>
+
+#include "kvm/drag_image.h"
 
 namespace kvm::files {
 
@@ -56,11 +60,17 @@ public:
     // the files reach on_drop instead of falling onto this PC's desktop under the virtual display.
     void catch_over(RECT area, std::vector<RECT> holes);
 
+    // The drag image of the last drop (the picture the shell showed under the cursor), if the drag
+    // had one; it goes along so the drag shows the same picture on the other PC. Call it from on_drop.
+    std::optional<DragImage> take_drag_image();
+
     bool visible() const { return visible_; }
 
 private:
     void run();
 
+    std::mutex image_mutex_;
+    std::optional<DragImage> drag_image_;  // set by the drop target right before on_drop
     OnDrop on_drop_;
     std::wstring label_;
     std::atomic<HWND> hwnd_{nullptr};

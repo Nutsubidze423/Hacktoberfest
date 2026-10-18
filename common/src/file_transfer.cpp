@@ -98,6 +98,23 @@ int recv_message(SOCKET s, Message& out) {
     return 0;
 }
 
+// The drag image a transfer_begin carries (header image_w/h/x/y, payload = its pixels), if any.
+std::optional<DragImage> drag_image_from(const Message& m) {
+    const auto number = [&](const char* key) -> std::optional<int> {
+        const auto it = m.header.find(key);
+        if (it == m.header.end() || !it->is_number_integer()) return std::nullopt;
+        return it->get<int>();
+    };
+    const auto w = number("image_w"), h = number("image_h"), x = number("image_x"), y = number("image_y");
+    if (!w || !h || !x || !y || *w <= 0 || *h <= 0 || *w > 1024 || *h > 1024 ||
+        m.payload.size() != static_cast<std::size_t>(*w) * static_cast<std::size_t>(*h) * 4) {
+        return std::nullopt;
+    }
+    DragImage image{.width = *w, .height = *h, .cursor_x = *x, .cursor_y = *y};
+    image.bgra.assign(m.payload.begin(), m.payload.end());
+    return image;
+}
+
 }  // namespace
 
 fs::path default_target() {
@@ -159,8 +176,9 @@ void FileTransfer::close() {
     outgoing_.close();
 }
 
-bool FileTransfer::send(std::vector<fs::path> items, bool drag) {
-    return open_ && outgoing_.push(Outgoing{std::move(items), drag});
+bool FileTransfer::send(std::vector<fs::path> items, bool drag, std::optional<DragImage> image) {
+    if (!drag) image.reset();
+    return open_ && outgoing_.push(Outgoing{std::move(items), drag, std::move(image)});
 }
 
 void FileTransfer::send_loop() {
@@ -168,7 +186,21 @@ void FileTransfer::send_loop() {
     std::uint64_t next_id = 1;
     while (auto outgoing = outgoing_.pop()) {
         auto* items = &outgoing->items;
-        if (outgoing->drag && !send_message(sock_, {{"type", "transfer_begin"}, {"drag", true}})) {
+        nlohmann::json begin = {{"type", "transfer_begin"}, {"drag", true}};
+        const DragImage* image = outgoing->image ? &*outgoing->image : nullptr;
+        if (image && (image->bgra.size() > kChunkBytes ||
+                      image->bgra.size() != static_cast<std::size_t>(image->width) * image->height * 4)) {
+            image = nullptr;  // too big for one message (or malformed): the other PC draws its own
+        }
+        if (image) {
+            begin["image_w"] = image->width;
+            begin["image_h"] = image->height;
+            begin["image_x"] = image->cursor_x;
+            begin["image_y"] = image->cursor_y;
+        }
+        if (outgoing->drag &&
+            !send_message(sock_, begin, image ? reinterpret_cast<const char*>(image->bgra.data()) : nullptr,
+                          image ? image->bgra.size() : 0)) {
             if (open_) log::warn("files: sending to {} failed: {}", peer_, last_error_text());
             close();
             return;
@@ -276,6 +308,7 @@ void FileTransfer::receive_loop() {
                              std::format(L"{}-{}", GetCurrentProcessId(), ++drags);
                     std::error_code ec;
                     fs::remove_all(target, ec);
+                    if (callbacks_.on_drag_begin) callbacks_.on_drag_begin(drag_image_from(m));
                 }
             } else if (type == "file_begin") {
                 const auto id = m.header.at("id").get<std::uint64_t>();

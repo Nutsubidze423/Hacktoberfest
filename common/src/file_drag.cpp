@@ -3,8 +3,12 @@
 #include <ole2.h>
 #include <shlobj.h>
 
+#include <chrono>
+#include <cstring>
 #include <future>
 #include <optional>
+#include <string>
+#include <utility>
 
 #include "kvm/log.h"
 #include "kvm/win32_input.h"
@@ -67,6 +71,25 @@ public:
 private:
     HWND helper_;
 };
+
+// A 32-bit premultiplied DIB section with the picture, for IDragSourceHelper::InitializeFromBitmap.
+HBITMAP make_bitmap(const DragImage& picture) {
+    if (picture.width <= 0 || picture.height <= 0 ||
+        picture.bgra.size() != static_cast<std::size_t>(picture.width) * picture.height * 4) {
+        return nullptr;
+    }
+    BITMAPINFO info{};
+    info.bmiHeader.biSize = sizeof(info.bmiHeader);
+    info.bmiHeader.biWidth = picture.width;
+    info.bmiHeader.biHeight = -picture.height;  // top-down, as DragImage keeps the rows
+    info.bmiHeader.biPlanes = 1;
+    info.bmiHeader.biBitCount = 32;
+    info.bmiHeader.biCompression = BI_RGB;
+    void* bits = nullptr;
+    HBITMAP bitmap = CreateDIBSection(nullptr, &info, DIB_RGB_COLORS, &bits, nullptr, 0);
+    if (bitmap && bits) std::memcpy(bits, picture.bgra.data(), picture.bgra.size());
+    return bitmap;
+}
 
 // The same data object Explorer builds for these files: CF_HDROP and the shell formats, so any
 // folder, the desktop or an app can take the drop. All files must be in one folder.
@@ -142,7 +165,7 @@ FileDragSource::~FileDragSource() {
     if (thread_.joinable()) thread_.join();
 }
 
-bool FileDragSource::start(std::vector<fs::path> files, OnDone on_done) {
+bool FileDragSource::start(std::vector<fs::path> files, OnDone on_done, std::optional<DragImage> image) {
     const HWND h = hwnd_;
     if (!h || files.empty()) return false;
     {
@@ -150,15 +173,35 @@ bool FileDragSource::start(std::vector<fs::path> files, OnDone on_done) {
         if (dragging_) return false;
         pending_ = std::move(files);
         on_done_ = std::move(on_done);
+        image_ = std::move(image);
         dragging_ = true;
     }
     PostMessageW(h, kStartMessage, 0, 0);
     return true;
 }
 
+void FileDragSource::note_release(POINT at) {
+    std::lock_guard lock(mutex_);
+    if (!running_) early_release_ = at;
+}
+
+void FileDragSource::forget_release() {
+    std::lock_guard lock(mutex_);
+    if (!running_) early_release_.reset();
+}
+
+bool FileDragSource::starting() const {
+    std::lock_guard lock(mutex_);
+    return dragging_ && !running_;
+}
+
 void FileDragSource::on_start(HWND hwnd) {
     POINT cursor{};
     GetCursorPos(&cursor);
+    {
+        std::lock_guard lock(mutex_);
+        if (early_release_) cursor = *early_release_;  // the user let go already: start (and drop) there
+    }
     SetWindowPos(hwnd, HWND_TOPMOST, cursor.x - kSize / 2, cursor.y - kSize / 2, kSize, kSize,
                  SWP_NOACTIVATE | SWP_SHOWWINDOW);
     armed_ = true;
@@ -183,18 +226,50 @@ void FileDragSource::on_button_down(HWND hwnd) {
         finish(DROPEFFECT_NONE);
         return;
     }
-    // The shell's drag image for these files (icon or thumbnail, name, count) and the "Copy to ..."
-    // text drop targets show under it: the drag looks as when Explorer takes files from one monitor
-    // to another, not like a bare cursor. A null window lets the shell draw the image itself.
-    IDragSourceHelper2* image = nullptr;
-    if (SUCCEEDED(CoCreateInstance(CLSID_DragDropHelper, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&image)))) {
-        image->SetFlags(DSH_ALLOWDROPDESCRIPTIONTEXT);
-        POINT at{};
-        GetCursorPos(&at);
-        if (const HRESULT ih = image->InitializeFromWindow(nullptr, &at, data); FAILED(ih)) {
-            log::warn("file_drag: no drag image ({:#x})", static_cast<unsigned>(ih));
+    std::optional<POINT> drop_at;
+    std::optional<DragImage> picture;
+    {
+        std::lock_guard lock(mutex_);
+        running_ = true;
+        drop_at = std::exchange(early_release_, std::nullopt);
+        picture = std::exchange(image_, std::nullopt);
+    }
+    // The picture under the cursor and the "Copy to ..." text drop targets show beneath it: the one
+    // the other PC's Explorer drew for these files, so the drag looks exactly as it did there (as
+    // when files go from one monitor to another); else the shell's own picture of them.
+    IDragSourceHelper2* helper = nullptr;
+    if (SUCCEEDED(CoCreateInstance(CLSID_DragDropHelper, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&helper)))) {
+        helper->SetFlags(DSH_ALLOWDROPDESCRIPTIONTEXT);
+        bool shown = false;
+        if (picture) {
+            if (HBITMAP bitmap = make_bitmap(*picture)) {
+                SHDRAGIMAGE image{{picture->width, picture->height}, {picture->cursor_x, picture->cursor_y}, bitmap,
+                                  CLR_NONE};
+                shown = SUCCEEDED(helper->InitializeFromBitmap(&image, data));  // the helper owns it now
+                if (!shown) DeleteObject(bitmap);
+            }
         }
-        image->Release();
+        if (!shown) {
+            POINT at{};
+            GetCursorPos(&at);
+            if (const HRESULT ih = helper->InitializeFromWindow(nullptr, &at, data); FAILED(ih)) {
+                log::warn("file_drag: no drag image ({:#x})", static_cast<unsigned>(ih));
+            }
+        }
+        helper->Release();
+    }
+    if (drop_at) {
+        // The user let go before the drag got here: drop where they did, once the drag runs (a move
+        // lets it find the target there, then the button goes up).
+        log::info("file_drag: the button went up before the files arrived - dropping them at ({}, {})", drop_at->x,
+                  drop_at->y);
+        std::thread([at = *drop_at] {
+            std::this_thread::sleep_for(std::chrono::milliseconds(120));
+            input::move_cursor_abs(at.x + 1, at.y);
+            input::move_cursor_abs(at.x, at.y);
+            std::this_thread::sleep_for(std::chrono::milliseconds(80));
+            input::send_mouse_button(input::MouseButton::Left, false);
+        }).detach();
     }
     DropSource source(hwnd);
     DWORD effect = DROPEFFECT_NONE;
@@ -202,7 +277,17 @@ void FileDragSource::on_button_down(HWND hwnd) {
     data->Release();
     ShowWindow(hwnd, SW_HIDE);
     if (hr != DRAGDROP_S_DROP) effect = DROPEFFECT_NONE;
-    log::info("file_drag: {} item(s) {}", files.size(), effect != DROPEFFECT_NONE ? "dropped" : "not dropped");
+    // Where it ended, so a drop that didn't take can be told apart (no target there, or Esc).
+    POINT end{};
+    GetCursorPos(&end);
+    wchar_t cls[64]{};
+    if (const HWND under = WindowFromPoint(end)) GetClassNameW(GetAncestor(under, GA_ROOT), cls, 64);
+    const int n = WideCharToMultiByte(CP_UTF8, 0, cls, -1, nullptr, 0, nullptr, nullptr);
+    std::string over(n > 0 ? n - 1 : 0, '\0');
+    if (n > 1) WideCharToMultiByte(CP_UTF8, 0, cls, -1, over.data(), n, nullptr, nullptr);
+    log::info("file_drag: {} item(s) {} at ({}, {}) over a {} window ({:#x})", files.size(),
+              effect != DROPEFFECT_NONE ? "dropped" : "not dropped", end.x, end.y, over.empty() ? "?" : over,
+              static_cast<unsigned>(hr));
     finish(effect);
 }
 
@@ -212,6 +297,8 @@ void FileDragSource::finish(DWORD effect) {
         std::lock_guard lock(mutex_);
         done = std::move(on_done_);
         dragging_ = false;
+        running_ = false;
+        early_release_.reset();
     }
     if (done) done(effect);
 }

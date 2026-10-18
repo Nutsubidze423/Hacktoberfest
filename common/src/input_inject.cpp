@@ -203,12 +203,15 @@ void InputInject::move(int dx, int dy) {
 }
 
 void InputInject::button(proto::MouseButton b, bool down) {
+    // A left release without our press: the peer's file drag that goes on here ends.
+    const bool drag_release = !down && b == proto::MouseButton::Left && !buttons_down_.contains(b);
     if (down) {
         buttons_down_.insert(b);
     } else {
         buttons_down_.erase(b);
     }
     check(input::send_mouse_button(b, down));
+    if (drag_release && on_drag_release_) on_drag_release_();
 }
 
 void InputInject::key(const proto::Key& k) {

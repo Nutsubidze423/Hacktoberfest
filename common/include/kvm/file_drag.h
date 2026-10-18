@@ -23,8 +23,11 @@
 #include <filesystem>
 #include <functional>
 #include <mutex>
+#include <optional>
 #include <thread>
 #include <vector>
+
+#include "kvm/drag_image.h"
 
 namespace kvm::files {
 
@@ -40,9 +43,18 @@ public:
 
     // Starts dragging `files` from the cursor position. Returns at once; the drag runs on the
     // source's thread. False if a drag is already running or `files` is empty.
-    bool start(std::vector<std::filesystem::path> files, OnDone on_done = {});
+    // image: the picture to show under the cursor (the one the other PC's shell drew for these files,
+    // so the drag looks the same on both screens); without it the shell draws a generic one.
+    bool start(std::vector<std::filesystem::path> files, OnDone on_done = {}, std::optional<DragImage> image = std::nullopt);
 
     bool dragging() const { return dragging_; }
+
+    // The user let go (on the other PC) before this drag got running here, e.g. while the files were
+    // still arriving: when it starts it drops at once, at `at` (where the cursor was when they let
+    // go). Ignored once the drag runs: then the injected release drops it as usual.
+    void note_release(POINT at);
+    void forget_release();  // a new drag is on its way: an older early release doesn't count
+    bool starting() const;  // start() was called and the drag doesn't run yet
 
 private:
     static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp);
@@ -52,9 +64,12 @@ private:
 
     std::atomic<HWND> hwnd_{nullptr};
     std::atomic<bool> dragging_{false};
-    std::mutex mutex_;  // guards pending_ / on_done_
+    mutable std::mutex mutex_;  // guards pending_ / on_done_ / running_ / early_release_
     std::vector<std::filesystem::path> pending_;
     OnDone on_done_;
+    bool running_ = false;                // DoDragDrop is (about to be) running
+    std::optional<POINT> early_release_;  // note_release() before the drag ran
+    std::optional<DragImage> image_;      // start()'s image, for the next drag
     bool armed_ = false;  // on_start() pressed the button and waits for WM_LBUTTONDOWN (source thread)
     std::thread thread_;
 };

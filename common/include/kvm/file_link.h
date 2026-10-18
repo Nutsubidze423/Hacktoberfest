@@ -69,10 +69,16 @@ public:
     // Must outlive this FileLink; nullptr = no desk mode.
     void set_desk_region(const desk::Region* region) { desk_region_ = region; }
 
+    // The other PC's user let go of a file drag they carried over to this PC (KVM: a left release
+    // this PC didn't see pressed; KvmLink::set_on_drag_release). If the drag doesn't run here yet,
+    // e.g. the files are still arriving, it drops where the cursor is now as soon as it can.
+    void peer_released();
+
 private:
     // Files dropped on the catcher window: a caught cross-PC drag, or a plain send.
     void on_catcher_drop(std::vector<std::filesystem::path> paths);
-    void send_now(std::vector<std::filesystem::path> paths, bool drag);
+    void send_now(std::vector<std::filesystem::path> paths, bool drag,
+                  std::optional<files::DragImage> image = std::nullopt);
     bool connected();
 
     mutable std::mutex mutex_;
@@ -81,6 +87,8 @@ private:
     ReceivedClaim on_received_claim_;               // guarded by mutex_
     std::atomic<unsigned long long> drag_until_{0};  // GetTickCount64() until which a drop is a caught drag
     std::atomic<double> drag_y_{0.5};
+    mutable std::atomic<bool> drag_incoming_{false};          // a drag from the peer is arriving
+    mutable std::optional<files::DragImage> incoming_image_;  // its drag image; guarded by mutex_
     const desk::Region* desk_region_ = nullptr;
     std::unique_ptr<files::FileDragSource> drag_source_;
     std::unique_ptr<files::FileDropCatcher> catcher_;

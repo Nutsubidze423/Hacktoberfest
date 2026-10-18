@@ -6,7 +6,9 @@
 #include <shellapi.h>
 
 #include <chrono>
+#include <optional>
 #include <string>
+#include <utility>
 
 #include "kvm/log.h"
 
@@ -104,13 +106,32 @@ files::Callbacks FileLink::callbacks() const {
         .on_drag_received =
             [this](const std::vector<std::filesystem::path>& saved) {
                 log::info("files: drag from the other PC arrived ({} item(s)), continuing it here", saved.size());
+                std::optional<files::DragImage> image;
+                {
+                    std::lock_guard lock(mutex_);
+                    image = std::exchange(incoming_image_, std::nullopt);
+                }
+                drag_incoming_ = false;  // from now on the drag source itself knows whether it runs
                 // If the drag can't go on here or is cancelled, the files still land in Downloads\KVM.
-                if (!drag_source_->start(saved, [saved](DWORD effect) {
-                        log::info("files: drag {}", effect != DROPEFFECT_NONE ? "dropped" : "cancelled");
-                        if (effect == DROPEFFECT_NONE) reveal(keep_in_downloads(saved));
-                    })) {
+                if (!drag_source_->start(
+                        saved,
+                        [saved](DWORD effect) {
+                            log::info("files: drag {}", effect != DROPEFFECT_NONE ? "dropped" : "cancelled");
+                            if (effect == DROPEFFECT_NONE) reveal(keep_in_downloads(saved));
+                        },
+                        std::move(image))) {
                     reveal(keep_in_downloads(saved));  // a drag is still running
                 }
+            },
+        // The drag shows the other PC's picture of these files under the cursor, as it looked there.
+        .on_drag_begin =
+            [this](std::optional<files::DragImage> image) {
+                {
+                    std::lock_guard lock(mutex_);
+                    incoming_image_ = std::move(image);
+                }
+                drag_source_->forget_release();
+                drag_incoming_ = true;
             },
     };
 }
@@ -176,10 +197,22 @@ void FileLink::set_on_received_claim(ReceivedClaim claim) {
 }
 
 void FileLink::on_catcher_drop(std::vector<std::filesystem::path> paths) {
-    send_now(std::move(paths), /*drag=*/GetTickCount64() <= drag_until_.exchange(0));
+    const bool drag = GetTickCount64() <= drag_until_.exchange(0);
+    auto image = catcher_->take_drag_image();
+    send_now(std::move(paths), drag, drag ? std::move(image) : std::nullopt);
 }
 
-void FileLink::send_now(std::vector<std::filesystem::path> paths, bool drag) {
+void FileLink::peer_released() {
+    // A running drag gets the release itself (it was injected as usual); only one that is still on
+    // its way or starting needs to know where the user let go.
+    if (!drag_incoming_ && !drag_source_->starting()) return;
+    POINT at{};
+    GetCursorPos(&at);
+    log::info("files: the other PC let go at ({}, {}) before its drag ran here - it drops there", at.x, at.y);
+    drag_source_->note_release(at);
+}
+
+void FileLink::send_now(std::vector<std::filesystem::path> paths, bool drag, std::optional<files::DragImage> image) {
     std::shared_ptr<files::FileTransfer> channel;
     std::function<void(double)> on_drag_caught;
     {
@@ -194,7 +227,7 @@ void FileLink::send_now(std::vector<std::filesystem::path> paths, bool drag) {
     for (const auto& p : paths) {
         log::info("files: {} {}", drag ? "dragging across" : "sending", utf8(p));
     }
-    channel->send(std::move(paths), drag);
+    channel->send(std::move(paths), drag, std::move(image));
     if (drag && on_drag_caught) on_drag_caught(drag_y_);  // the cursor follows the files
 }
 

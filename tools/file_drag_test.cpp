@@ -19,6 +19,7 @@
 #include <fstream>
 #include <future>
 #include <mutex>
+#include <optional>
 #include <string_view>
 #include <thread>
 #include <vector>
@@ -140,6 +141,29 @@ int main() {
         check(same, std::format("the catcher got both paths ({} item(s))", dropped.size()));
     }
     check(!drag.dragging(), "the drag is over");
+    {
+        // The shell's drag image came along with the drop (it goes to the other PC with the files).
+        const auto image = catcher.take_drag_image();
+        check(image && image->width > 0 && image->height > 0 &&
+                  image->bgra.size() == static_cast<std::size_t>(image->width) * image->height * 4,
+              std::format("the drop carries the drag image ({}x{})", image ? image->width : 0, image ? image->height : 0));
+        if (image) {
+            // For a look: %TEMP%\kvm_drag_image.bmp (top-down 32-bit).
+            BITMAPFILEHEADER fh{};
+            BITMAPINFOHEADER ih{sizeof(ih)};
+            ih.biWidth = image->width;
+            ih.biHeight = -image->height;
+            ih.biPlanes = 1;
+            ih.biBitCount = 32;
+            fh.bfType = 0x4D42;
+            fh.bfOffBits = sizeof(fh) + sizeof(ih);
+            fh.bfSize = fh.bfOffBits + static_cast<DWORD>(image->bgra.size());
+            std::ofstream out(fs::temp_directory_path() / L"kvm_drag_image.bmp", std::ios::binary);
+            out.write(reinterpret_cast<const char*>(&fh), sizeof(fh));
+            out.write(reinterpret_cast<const char*>(&ih), sizeof(ih));
+            out.write(reinterpret_cast<const char*>(image->bgra.data()), static_cast<std::streamsize>(image->bgra.size()));
+        }
+    }
 
     // 1b) The user keeps moving the mouse while the files arrive (as in the two-PC test): the press
     // that starts the drag must still land on the drag window, not on whatever the cursor passes.
@@ -195,15 +219,20 @@ int main() {
         std::promise<DWORD> b_done;
         auto b_result = b_done.get_future();
         kvm::files::Callbacks b_callbacks;
+        std::optional<kvm::files::DragImage> b_image;  // the drag image that came with the files
+        b_callbacks.on_drag_begin = [&](std::optional<kvm::files::DragImage> image) { b_image = std::move(image); };
         b_callbacks.on_drag_received = [&](const std::vector<fs::path>& saved) {
-            drag_on_b.start(saved, [&](DWORD effect) { b_done.set_value(effect); });  // B: the drag goes on here
+            drag_on_b.start(saved, [&](DWORD effect) { b_done.set_value(effect); }, b_image);  // B: the drag goes on here
         };
         auto b = kvm::files::connect_files("127.0.0.1", port, b_callbacks, dir / L"b_in");
         acceptor.join();
         closesocket(listener);
 
         // A: an invisible catcher hands the dragged files to the drag transfer.
-        kvm::files::FileDropCatcher catcher_a([&](std::vector<fs::path> paths) { a->send(std::move(paths), true); });
+        kvm::files::FileDropCatcher* catcher_a_ptr = nullptr;  // the drop runs once it's set
+        kvm::files::FileDropCatcher catcher_a(
+            [&](std::vector<fs::path> paths) { a->send(std::move(paths), true, catcher_a_ptr->take_drag_image()); });
+        catcher_a_ptr = &catcher_a;
         // B: stands for any folder on B where the user lets go.
         std::vector<fs::path> landed;
         std::mutex landed_mutex;
@@ -234,6 +263,8 @@ int main() {
 
             for (int i = 0; i < 30 && !drag_on_b.dragging(); ++i) std::this_thread::sleep_for(100ms);
             check(drag_on_b.dragging(), "B: the files arrived and the drag goes on at the cursor");
+            check(b_image && b_image->width > 0, std::format("B: A's drag image came along ({}x{})", b_image ? b_image->width : 0,
+                                                             b_image ? b_image->height : 0));
             folder_on_b.show_at(folder, 10s);
             std::this_thread::sleep_for(200ms);
             move_in_steps(edge, folder);  // the user keeps moving on B...
@@ -367,6 +398,38 @@ int main() {
             std::lock_guard lock(catch_mutex);
             check(c_ok && caught.size() == files.size(), "3c: catch_now() after catch_over() still catches");
         }
+        kvm::input::move_cursor_abs(cursor_before.x, cursor_before.y);
+    }
+
+    kvm::log::info("4) the other PC's user let go before the drag got here: it drops where they did");
+    {
+        std::vector<fs::path> got;
+        std::mutex got_mutex;
+        kvm::files::FileDropCatcher folder(
+            [&](std::vector<fs::path> paths) {
+                std::lock_guard lock(got_mutex);
+                got = std::move(paths);
+            },
+            L"where the user let go (test)");
+        const POINT there{center.x + 250, center.y + 120};
+        folder.show_at(there, 10s);
+        std::this_thread::sleep_for(200ms);
+        kvm::input::move_cursor_abs(center.x - 250, center.y);  // the cursor has moved on since
+        std::this_thread::sleep_for(100ms);
+        kvm::files::FileDragSource late;
+        late.note_release(there);
+        std::promise<DWORD> done4;
+        auto result4 = done4.get_future();
+        late.start(files, [&](DWORD effect) { done4.set_value(effect); });
+        if (result4.wait_for(3s) != std::future_status::ready) {
+            press_escape();
+            kvm::input::send_mouse_button(kvm::input::MouseButton::Left, false);
+        }
+        const DWORD effect4 = result4.wait_for(1s) == std::future_status::ready ? result4.get() : DROPEFFECT_NONE;
+        std::this_thread::sleep_for(200ms);
+        std::lock_guard lock(got_mutex);
+        check(effect4 != DROPEFFECT_NONE && got.size() == files.size(),
+              std::format("4: dropped by itself where the button went up (effect {}, {} item(s))", effect4, got.size()));
         kvm::input::move_cursor_abs(cursor_before.x, cursor_before.y);
     }
 

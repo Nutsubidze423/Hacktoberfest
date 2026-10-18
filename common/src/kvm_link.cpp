@@ -63,6 +63,11 @@ void KvmLink::switch_to_peer(double y_norm) {
     if (capture_) capture_->switch_to_remote(y_norm);
 }
 
+void KvmLink::set_on_drag_release(std::function<void()> callback) {
+    std::lock_guard lock(inject_mutex_);
+    inject_.set_on_drag_release(std::move(callback));
+}
+
 void KvmLink::set_on_emergency(std::function<void()> callback) {
     on_emergency_ = std::move(callback);
     if (capture_) capture_->set_on_emergency(on_emergency_);

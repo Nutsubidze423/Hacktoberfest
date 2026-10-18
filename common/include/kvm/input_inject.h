@@ -62,6 +62,10 @@ public:
     // This PC's own desk Region (its VDD, lent to the peer); nullptr = none. Must outlive this.
     void set_desk(const desk::Region* region) { desk_region_ = region; }
 
+    // The peer let go of a left button it didn't press here: the end of a file drag it carried over
+    // (FileLink continues it here). Runs on the thread that calls handle(); keep it short.
+    void set_on_drag_release(std::function<void()> callback) { on_drag_release_ = std::move(callback); }
+
 private:
     void enter(double y_norm);
     void enter_desk();
@@ -91,6 +95,7 @@ private:
     } received_;  // per stay on B, for the log
     std::set<proto::MouseButton> buttons_down_;
     std::set<std::tuple<std::uint16_t, std::uint16_t, bool>> keys_down_;  // vk, scan, extended
+    std::function<void()> on_drag_release_;
 };
 
 }  // namespace kvm::client

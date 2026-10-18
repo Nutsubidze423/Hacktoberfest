@@ -285,12 +285,15 @@ int wmain(int argc, wchar_t** argv) {
             kvm_link->set_on_drag_at_edge(
                 [&files](double y, kvm::display::Point at) { files.catch_drag(y, POINT{at.x, at.y}); });
             files.set_on_drag_caught([&kvm_link](double y) { kvm_link->switch_to_peer(y); });
+            // The other PC's user let go of a drag they carried here before it ran: it drops there.
+            kvm_link->set_on_drag_release([&files] { files.peer_released(); });
         }
         // Unhook before `files` goes away (declared after it, so destroyed first).
         struct DragReset {
             kvm::KvmLink* link;
             ~DragReset() {
                 if (link) link->set_on_drag_at_edge(nullptr);
+                if (link) link->set_on_drag_release(nullptr);
             }
         } drag_reset{kvm_link ? &*kvm_link : nullptr};
         if (clip_on) {

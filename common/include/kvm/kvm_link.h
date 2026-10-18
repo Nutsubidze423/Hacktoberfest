@@ -87,6 +87,10 @@ public:
     // Called after Ctrl+Alt+Shift+Q (e.g. desk mode off, VDD detached).
     void set_on_emergency(std::function<void()> callback);
 
+    // The peer let go of the left button of a file drag it carried over to this PC (see
+    // InputInject::set_on_drag_release): FileLink::peer_released(). Set before sessions start.
+    void set_on_drag_release(std::function<void()> callback);
+
     bool controlling_peer() const { return capture_ && capture_->remote(); }
     bool controlled_by_peer() const { return inject_.active(); }
     // Ctrl+Alt+Shift+Q was pressed here: this PC no longer sends its input.

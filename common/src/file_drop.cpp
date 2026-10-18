@@ -2,13 +2,17 @@
 
 #include <ole2.h>
 #include <shellapi.h>
+#include <shlobj.h>
 #include <shellscalingapi.h>
 #include <windowsx.h>
 
 #include <algorithm>
+#include <cstring>
+#include <format>
 #include <future>
 #include <memory>
 #include <optional>
+#include <utility>
 
 #include "kvm/log.h"
 #include "kvm/win32_input.h"
@@ -56,12 +60,46 @@ std::vector<fs::path> files_in(IDataObject* data) {
     return out;
 }
 
+// The drag image the shell keeps in the data object ("DragImageBits", written by IDragSourceHelper,
+// i.e. by Explorer). The same on 32- and 64-bit Windows: a 24-byte header - SIZE size, POINT cursor
+// offset, a 32-bit bitmap handle, COLORREF colour key - then the premultiplied 32-bit pixels,
+// bottom-up. nullopt if the drag has none.
+std::optional<DragImage> drag_image_in(IDataObject* data) {
+    static const CLIPFORMAT format = static_cast<CLIPFORMAT>(RegisterClipboardFormatW(L"DragImageBits"));
+    constexpr std::size_t kHeaderBytes = 24;
+    FORMATETC f{format, nullptr, DVASPECT_CONTENT, -1, TYMED_HGLOBAL};
+    STGMEDIUM medium{};
+    if (!format || FAILED(data->GetData(&f, &medium))) return std::nullopt;
+    std::optional<DragImage> out;
+    const SIZE_T size = GlobalSize(medium.hGlobal);
+    if (const auto* p = static_cast<const std::uint8_t*>(GlobalLock(medium.hGlobal))) {
+        std::int32_t head[4]{};  // width, height, cursor x, cursor y
+        if (size >= kHeaderBytes) std::memcpy(head, p, sizeof(head));
+        const int w = head[0], h = head[1];
+        const std::size_t pixels = static_cast<std::size_t>(w > 0 ? w : 0) * static_cast<std::size_t>(h > 0 ? h : 0) * 4;
+        if (w > 0 && h > 0 && w <= 1024 && h <= 1024 && size >= kHeaderBytes + pixels) {
+            DragImage image{.width = w, .height = h, .cursor_x = head[2], .cursor_y = head[3]};
+            image.bgra.resize(pixels);
+            const std::size_t row = static_cast<std::size_t>(w) * 4;
+            const std::uint8_t* bits = p + kHeaderBytes;
+            for (int y = 0; y < h; ++y) std::memcpy(image.bgra.data() + y * row, bits + (h - 1 - y) * row, row);
+            out = std::move(image);
+        } else if (w != 0 || h != 0) {  // 0x0: the drag has no picture
+            log::warn("file_drop: drag image not understood ({} bytes, {}x{})", size, w, h);
+        }
+        GlobalUnlock(medium.hGlobal);
+    }
+    ReleaseStgMedium(&medium);
+    return out;
+}
+
 // Accepts drags that carry files (CF_HDROP) and hands their paths over on drop. Called by OLE on the
 // catcher's thread.
 class DropTarget final : public IDropTarget {
 public:
-    DropTarget(HWND hwnd, FileDropCatcher::OnDrop* on_drop, std::atomic<bool>* catching)
-        : hwnd_(hwnd), on_drop_(on_drop), catching_(catching) {}
+    DropTarget(HWND hwnd, FileDropCatcher::OnDrop* on_drop, std::atomic<bool>* catching, std::mutex* image_mutex,
+               std::optional<DragImage>* image)
+        : hwnd_(hwnd), on_drop_(on_drop), catching_(catching), image_mutex_(image_mutex), image_(image) {}
 
     HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void** out) override {
         if (riid == IID_IUnknown || riid == IID_IDropTarget) {
@@ -103,7 +141,13 @@ public:
         *effect = paths.empty() ? DROPEFFECT_NONE : DROPEFFECT_COPY;  // never a move: the source keeps its files
         PostMessageW(hwnd_, kHideMessage, 0, 0);
         if (!paths.empty()) {
-            log::info("file_drop: {} item(s) dropped", paths.size());
+            auto image = drag_image_in(data);
+            log::info("file_drop: {} item(s) dropped{}", paths.size(),
+                      image ? std::format(", drag image {}x{}", image->width, image->height) : "");
+            {
+                std::lock_guard lock(*image_mutex_);
+                *image_ = std::move(image);
+            }
             if (*on_drop_) (*on_drop_)(std::move(paths));
         }
         return S_OK;
@@ -117,6 +161,8 @@ private:
     HWND hwnd_;
     FileDropCatcher::OnDrop* on_drop_;
     std::atomic<bool>* catching_;
+    std::mutex* image_mutex_;
+    std::optional<DragImage>* image_;
     ULONG refs_ = 1;
     bool has_files_ = false;
     bool dragging_ = false;
@@ -361,7 +407,7 @@ FileDropCatcher::FileDropCatcher(OnDrop on_drop, std::wstring label)
             return;
         }
         SetLayeredWindowAttributes(hwnd, 0, 235, LWA_ALPHA);
-        state->target = new DropTarget(hwnd, &on_drop_, &state->catching);
+        state->target = new DropTarget(hwnd, &on_drop_, &state->catching, &image_mutex_, &drag_image_);
         if (FAILED(RegisterDragDrop(hwnd, state->target))) log::error("file_drop: RegisterDragDrop failed");
         hwnd_ = hwnd;
         signal.reset();  // the constructor may return now
@@ -394,6 +440,11 @@ void FileDropCatcher::hide() {
 
 void FileDropCatcher::catch_now(POINT screen_point) {
     if (const HWND h = hwnd_) PostMessageW(h, kCatchMessage, 0, MAKELPARAM(screen_point.x, screen_point.y));
+}
+
+std::optional<DragImage> FileDropCatcher::take_drag_image() {
+    std::lock_guard lock(image_mutex_);
+    return std::exchange(drag_image_, std::nullopt);
 }
 
 void FileDropCatcher::catch_over(RECT area, std::vector<RECT> holes) {
