@@ -149,6 +149,8 @@ build\x64-release\client_b\kvm_client.exe --host <A-ს IP>
 ```
 ლოკალური ტესტი ერთ კომპიუტერზე: ჯერ `kvm_host.exe`, მერე `kvm_client.exe --host 127.0.0.1` — ორივე ლოგში უნდა გამოჩნდეს `connected` და ყოველ 5 წმ-ში `link: rtt ...`.
 exe-ები static-ია: A-ზე ან B-ზე გადასატანად საკმარისია `.exe` + `config.json` (VS-ის დაყენება საჭირო არ არის).
+
+**ინსტალერი** (სხვა PC-ზე დასაყენებლად): `powershell -ExecutionPolicy Bypass -File tools\make_installer.ps1` → `dist\SarkeSetup-<ვერსია>.exe`. ერთი ფაილი აყენებს ყველაფერს: Sarke (`Program Files\Sarke`), VDD დრაივერი (`installer\vdd`, `tools\sarke_driver.cpp`), firewall-ის წესები, Start menu, სურვილისამებრ autostart და Defender-ის გამონაკლისი. დაინსტალირებული Sarke-ს config და ლოგები `%LOCALAPPDATA%\Sarke`-შია. ვერსია: `resources\version.h` (ყოველ ახალ ინსტალერზე გაზარდე). საჭიროა Inno Setup 6 (`winget install JRSoftware.InnoSetup`); სკრიპტი: `installer\sarke.iss`.
 Windows Firewall-ში დაუშვი `kvm_host.exe` პორტებზე 50500–50501 (Private network).
 
 ## ჩეკლისტი (საერთო milestone-ები; დეტალური — docs/PLAN.md)

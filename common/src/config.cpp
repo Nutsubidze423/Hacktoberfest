@@ -1,5 +1,6 @@
 #include "kvm/config.h"
 
+#include <cstdlib>
 #include <fstream>
 #include <stdexcept>
 
@@ -36,7 +37,19 @@ std::optional<std::filesystem::path> find_config_file() {
             return candidate;
         }
     }
+    if (auto user = user_config_file(); !user.empty() && std::filesystem::exists(user)) return user;
     return std::nullopt;
+}
+
+std::filesystem::path user_config_file() {
+    wchar_t* local = nullptr;
+    std::size_t length = 0;
+    std::filesystem::path out;
+    if (_wdupenv_s(&local, &length, L"LOCALAPPDATA") == 0 && local && *local) {
+        out = std::filesystem::path(local) / L"Sarke" / kConfigName;
+    }
+    std::free(local);
+    return out;
 }
 
 Config load_config(const std::optional<std::filesystem::path>& path) {

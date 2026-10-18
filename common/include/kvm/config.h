@@ -22,8 +22,12 @@ struct Config {
 };
 
 // Looks for config.json in the working directory, then next to the executable and up to
-// three parent directories of it (so build\x64-release\host_a\kvm_host.exe finds the repo copy).
+// three parent directories of it (so build\x64-release\host_a\kvm_host.exe finds the repo copy),
+// then user_config_file() (an installed Sarke: Program Files can't be written).
 std::optional<std::filesystem::path> find_config_file();
+
+// %LOCALAPPDATA%\Sarke\config.json: where an installed Sarke keeps this user's settings.
+std::filesystem::path user_config_file();
 
 // Loads the given file, or the one found by find_config_file(). Missing file or fields
 // fall back to defaults; a malformed file throws std::runtime_error.

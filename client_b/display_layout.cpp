@@ -255,6 +255,8 @@ ConfigState read_config(const std::optional<std::filesystem::path>& path) {
         st.path = *path;
     } else if (auto found = find_config_file()) {
         st.path = *found;
+    } else if (auto user = user_config_file(); !user.empty()) {
+        st.path = std::move(user);  // installed: ensure_config() creates it there, writable for the user
     } else {
         st.path = executable_dir() / L"config.json";
     }

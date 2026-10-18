@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.25)
-project(kvm_demo LANGUAGES CXX)
+project(kvm_demo LANGUAGES CXX RC)
 
 if(NOT WIN32)
   message(FATAL_ERROR "kvm_demo builds on Windows only")
@@ -39,3 +39,13 @@ add_subdirectory(common)
 add_subdirectory(host_a)
 add_subdirectory(client_b)
 add_subdirectory(tools)
+
+# Icon and version of Sarke's executables (resources/sarke.rc; the version is in resources/version.h).
+function(sarke_resources target which)
+  target_sources(${target} PRIVATE ${CMAKE_SOURCE_DIR}/resources/sarke.rc)
+  target_compile_definitions(${target} PRIVATE ${which})
+endfunction()
+sarke_resources(kvm_host SARKE_EXE_HOST)
+sarke_resources(kvm_client SARKE_EXE_CLIENT)
+sarke_resources(sarke SARKE_EXE_LAUNCHER)
+sarke_resources(sarke_driver SARKE_EXE_DRIVER)
