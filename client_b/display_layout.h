@@ -59,10 +59,9 @@ bool remember_peer(const Peer& peer, const std::optional<std::filesystem::path>&
 
 // ---- sides --------------------------------------------------------------------------------------
 
-// Sides kvm_host / kvm_client accept today. The edge, injection and desk code handle all four, but
-// host_a/main.cpp and client_b/main.cpp (Luka) still reject "top"/"bottom" (the host turns KVM off,
-// the client quits) - flip this once they accept them (docs/PLAN.md, Sandro's handoff).
-inline constexpr bool kVerticalSidesAccepted = false;
+// Sides kvm_host / kvm_client accept: all four (the edge, injection, desk and VDD code handle top and
+// bottom too, and both main.cpp accept them since Luka's display polish).
+inline constexpr bool kVerticalSidesAccepted = true;
 bool side_accepted(Side side);
 
 // config.json client_side for "the other PC is on `peer_side` of this PC", and back.

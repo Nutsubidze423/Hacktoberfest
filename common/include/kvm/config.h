@@ -13,7 +13,7 @@ struct Config {
     std::uint16_t control_port = 50500;
     std::uint16_t video_port = 50501;
     std::uint16_t file_port = 50502;
-    std::string client_side = "right";  // where B stands relative to A: "left" or "right"
+    std::string client_side = "right";  // where B stands relative to A: "left", "right", "top" or "bottom"
     int jpeg_quality = 75;
     int max_fps = 30;
     // Desk mode: the other PC's screen is one more monitor, windows are dragged across (needs the

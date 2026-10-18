@@ -95,11 +95,15 @@ void KvmLink::take_back() {
         if (!inject_.active()) return;
         inject_.release_all();
     }
-    // The peer's cursor goes home at the height ours is at now.
+    // The peer's cursor goes home where ours is now along the shared edge: the height for a peer on
+    // the left or right, the x position for one above or below.
     const auto vd = display::virtual_desktop();
     POINT pt{};
     GetCursorPos(&pt);
-    const double y_norm = vd.height() > 0 ? std::clamp((pt.y - vd.top + 0.5) / vd.height(), 0.0, 1.0) : 0.5;
+    const bool along_x = options_.peer_side == display::Side::Top || options_.peer_side == display::Side::Bottom;
+    const int len = along_x ? vd.width() : vd.height();
+    const int at = along_x ? pt.x - vd.left : pt.y - vd.top;
+    const double y_norm = len > 0 ? std::clamp((at + 0.5) / len, 0.0, 1.0) : 0.5;
     log::info("kvm: this PC's own mouse moved - taking it back from the other PC");
     send(proto::FocusLeave{.y_norm = y_norm});
     if (capture_) capture_->set_suspended(false);

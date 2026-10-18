@@ -256,8 +256,8 @@ int wmain(int argc, wchar_t** argv) {
 
         // client_side says where B stands next to A, so A is on the opposite side of B.
         const auto side = kvm::display::parse_side(cfg.client_side);
-        if (!side || (*side != kvm::display::Side::Left && *side != kvm::display::Side::Right)) {
-            kvm::log::error("config: client_side must be \"left\" or \"right\", got \"{}\"", cfg.client_side);
+        if (!side) {
+            kvm::log::error("config: client_side must be \"left\", \"right\", \"top\" or \"bottom\", got \"{}\"", cfg.client_side);
             return 1;
         }
         const auto host_side = kvm::display::opposite(*side);

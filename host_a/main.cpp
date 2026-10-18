@@ -308,8 +308,9 @@ int wmain(int argc, wchar_t** argv) {
 
         // KVM: hooks run for the whole process; sessions attach/detach the client.
         const auto side = kvm::display::parse_side(cfg.client_side);
-        if (opt.kvm_enabled && (!side || (*side != kvm::display::Side::Left && *side != kvm::display::Side::Right))) {
-            kvm::log::error("config: client_side must be \"left\" or \"right\", got \"{}\" - KVM disabled", cfg.client_side);
+        if (opt.kvm_enabled && !side) {
+            kvm::log::error("config: client_side must be \"left\", \"right\", \"top\" or \"bottom\", got \"{}\" - KVM disabled",
+                            cfg.client_side);
             opt.kvm_enabled = false;
         }
         // Desk mode (Temo): A's virtual display = B's screen; the KVM hooks and WindowLink share it.

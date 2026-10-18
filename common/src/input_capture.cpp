@@ -225,8 +225,13 @@ struct CaptureThread {
         SetCursorPos(at.x, at.y);
     }
 
+    // Where p is along the VDD's edge toward this PC (0..1): the height for a peer on the left or
+    // right, the x position for one above or below.
     static double vdd_y_norm(input::Point p) {
-        return vdd.height() > 0 ? std::clamp((p.y - vdd.top + 0.5) / vdd.height(), 0.0, 1.0) : 0.5;
+        const bool along_x = cap->options_.client_side == display::Side::Top || cap->options_.client_side == display::Side::Bottom;
+        const int len = along_x ? vdd.width() : vdd.height();
+        const int at = along_x ? p.x - vdd.left : p.y - vdd.top;
+        return len > 0 ? std::clamp((at + 0.5) / len, 0.0, 1.0) : 0.5;
     }
 
     // The cursor left the VDD back toward our own monitors (the inner edge, the one facing our
