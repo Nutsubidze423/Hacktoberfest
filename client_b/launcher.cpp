@@ -6,6 +6,7 @@
 #include <shlobj.h>
 
 #include <algorithm>
+#include <cctype>
 #include <cstdlib>
 #include <deque>
 #include <exception>
@@ -13,6 +14,7 @@
 #include <fstream>
 #include <mutex>
 #include <regex>
+#include <set>
 #include <thread>
 #include <utility>
 
@@ -22,6 +24,7 @@
 #include "kvm/config.h"
 #include "kvm/discovery.h"
 #include "kvm/log.h"
+#include "kvm/protocol.h"
 #include "toast.h"
 #include "tray_icon.h"
 #include "ui_tokens_tmp.h"
@@ -39,12 +42,20 @@ constexpr wchar_t kWindowClass[] = L"SarkeLauncherWindow";
 constexpr wchar_t kMutexName[] = L"Local\\Sarke.Launcher";
 constexpr UINT kMsgLines = WM_APP + 20;     // the reader queued lines
 constexpr UINT kMsgReaderDone = WM_APP + 21;  // the app's output closed (it exited)
+constexpr UINT kMsgDevices = WM_APP + 22;     // the scanner updated the PCs on the network
 constexpr UINT kMsgRemoteShow = WM_APP + 30;     // from a second sarke.exe
 constexpr UINT kMsgRemoteQuit = WM_APP + 31;     // sarke.exe --quit
 constexpr UINT kMsgRemoteRestart = WM_APP + 32;  // sarke.exe --restart
 constexpr UINT_PTR kKillTimer = 1;           // the app didn't stop after Ctrl+Break: end it
+constexpr UINT_PTR kConnectTimer = 2;        // the client didn't reach the PC it was told to: host again
 constexpr UINT kStopGraceMs = 9000;          // the app waits up to 4.5 s to bring windows home
+constexpr UINT kConnectTimeoutMs = 15000;
 constexpr auto kProblemToastGap = std::chrono::seconds(10);
+// The device list: every PC running Sarke as the host answers discovery (UDP 50503).
+constexpr auto kScanEvery = std::chrono::milliseconds(2500);
+constexpr auto kScanWait = std::chrono::milliseconds(1200);
+constexpr auto kForgetAfter = std::chrono::seconds(8);         // not seen for this long: off the list
+constexpr auto kAutoRetryBlock = std::chrono::seconds(30);     // after an auto-connect that failed
 
 // Menu ids.
 enum : UINT {
@@ -62,6 +73,9 @@ enum : UINT {
     kCmdRoleClient = 71,
     kCmdRestart = 80,
     kCmdQuit = 90,
+    kCmdDeviceBase = 100,  // + index into menu_devices_: connect to that PC
+    kCmdAutoBase = 200,    // + index into menu_auto_: toggle "Connect automatically"
+    kMaxMenuDevices = 50,
 };
 struct Choice {
     int value;
@@ -110,6 +124,23 @@ fs::path launcher_dir() {
 }
 
 const wchar_t* role_word(Role r) { return r == Role::Host ? L"host" : L"client"; }
+
+// Computer names compare without case (Windows treats them that way).
+std::string lower(std::string_view s) {
+    std::string out(s);
+    for (char& c : out) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    return out;
+}
+
+bool same_name(std::string_view a, std::string_view b) { return lower(a) == lower(b); }
+
+// This PC's name as kvm_host announces it (main.cpp's hello).
+std::string computer_name() {
+    wchar_t name[256]{};
+    DWORD len = 256;
+    if (!GetComputerNameExW(ComputerNameDnsHostname, name, &len)) return {};
+    return narrow(std::wstring_view(name, len));
+}
 
 std::wstring scale_text(double scale) { return std::format(L"{}%", std::lround(scale * 100)); }
 
@@ -169,7 +200,16 @@ Settings load_settings(const std::optional<fs::path>& file) {
     }
     if (const auto it = j.find("notify_connected"); it != j.end() && it->is_boolean()) s.notify_connected = *it;
     if (const auto it = j.find("notify_lost"); it != j.end() && it->is_boolean()) s.notify_lost = *it;
+    if (const auto it = j.find("auto_connect"); it != j.end() && it->is_array()) {
+        for (const auto& name : *it) {
+            if (name.is_string() && !name.get<std::string>().empty()) s.auto_connect.push_back(name.get<std::string>());
+        }
+    }
     return s;
+}
+
+bool auto_connect_now(std::string_view self, std::string_view peer, std::chrono::steady_clock::duration seen_for) {
+    return lower(self) < lower(peer) || seen_for >= kAutoConnectYield;
 }
 
 bool save_settings(const Settings& s, const std::optional<fs::path>& file) {
@@ -180,6 +220,7 @@ bool save_settings(const Settings& s, const std::optional<fs::path>& file) {
     if (s.role) j["role"] = *s.role == Role::Host ? "host" : "client";
     j["notify_connected"] = s.notify_connected;
     j["notify_lost"] = s.notify_lost;
+    j["auto_connect"] = s.auto_connect;
     fs::path tmp = path;
     tmp += L".tmp";
     {
@@ -222,9 +263,31 @@ private:
     static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp);
     LRESULT handle_message(UINT msg, WPARAM wp, LPARAM lp);
 
+    // A PC on the network, as the scanner sees it.
+    struct Device {
+        discovery::Host host;
+        std::chrono::steady_clock::time_point first_seen;
+        std::chrono::steady_clock::time_point last_seen;
+    };
+    // The PC this one connects to as the client (chosen in the list, or automatically).
+    struct Target {
+        std::string name;
+        std::string ip;
+        bool automatic = false;
+    };
+
     void decide_role();
-    void switch_role(Role want);  // tray "Connect to the other PC" / the Displays window's Host/Client
+    void switch_role(Role want, const std::wstring& why = {});
     void keep_peer_side(Role from, Role to);
+    void scan_loop(std::stop_token stop, HWND notify);
+    void on_devices();
+    void maybe_auto_connect();
+    void connect_to(const discovery::Host& host, bool automatic);
+    void disconnect();
+    void pick_device();  // the Displays window's Connect button
+    std::vector<TrayIcon::MenuItem> device_items();
+    bool auto_listed(std::string_view name) const;
+    void toggle_auto(const std::string& name);
     bool start_app();
     void stop_app(bool restart);
     void end_app_now();
@@ -272,9 +335,22 @@ private:
     std::optional<double> rtt_ms_;
     std::wstring last_problem_;
     std::chrono::steady_clock::time_point last_problem_toast_{};
+
+    std::string self_name_;
+    std::optional<Target> target_;
+    std::vector<Device> devices_;            // UI thread's copy of the scan
+    std::vector<discovery::Host> menu_devices_;  // what the open menu's device ids stand for
+    std::vector<std::string> menu_auto_;     // what its "Connect automatically" ids stand for
+    std::set<std::string> suppressed_;       // lower-case names the user disconnected from: no auto-connect until they go away
+    std::chrono::steady_clock::time_point auto_block_until_{};
+    std::mutex scan_mutex_;
+    std::vector<Device> scanned_;            // written by the scanner thread
+    std::jthread scanner_;                   // last: stops before the members it uses go away
 };
 
 App::~App() {
+    scanner_.request_stop();
+    if (scanner_.joinable()) scanner_.join();
     if (process_) end_app_now();
     if (reader_.joinable()) reader_.join();
     if (job_) CloseHandle(job_);
@@ -327,9 +403,17 @@ int App::run() {
                                 .quit = [this] { on_command(kCmdQuit); }});
     tray_.set_menu([this] { return build_menu(); }, [this](UINT id) { on_command(id); });
     displays_.set_applied_handler([this] { restart(L"to use the new side"); });
-    // The Host/Client toggle in the Displays window connects / disconnects, like the tray item.
-    displays_.set_role_change_handler([this](Role r) { switch_role(r); });
+    // The Displays window's Connect button lists the PCs on the network; Disconnect makes this the host.
+    displays_.set_role_change_handler([this](Role r) {
+        if (r == Role::Client) {
+            pick_device();
+        } else {
+            disconnect();
+        }
+    });
 
+    self_name_ = computer_name();
+    scanner_ = std::jthread([this, hwnd = hwnd_](std::stop_token stop) { scan_loop(stop, hwnd); });
     decide_role();
     if (start_app()) {
         notify(L"Sarke is running", std::format(L"{} · settings are in the tray", role_ == Role::Host ? L"Host" : L"Client"),
@@ -350,31 +434,178 @@ int App::run() {
 
 void App::decide_role() {
     const auto last = settings_.role;
-    if (options_.role) {
-        role_ = *options_.role;
-    } else if (settings_.role) {
-        role_ = *settings_.role;  // the role picked last time (e.g. the laptop stays the client)
-    } else {
-        // Every PC starts as the host, ready for the other one to join - no network guessing. To
-        // join, pick "Connect to the other PC" in the tray menu on one of them (it becomes the
-        // client and finds the host on the network). Two hosts simply wait until one connects.
-        role_ = Role::Host;
-        log::info("launcher: starting as the host; use the tray menu to connect to another PC");
-    }
-    if (last && *last != role_) keep_peer_side(*last, role_);  // e.g. --client on a PC that was the host
+    // Every PC starts as the host: ready for another one to join, and listed on the other PCs (only
+    // hosts answer discovery). The user picks a PC to connect to ("Connect to" in the tray, or the
+    // Displays window's Connect button), and only PCs marked "Connect automatically" are joined on
+    // their own. --client still starts as the client (it finds the host by itself).
+    role_ = options_.role.value_or(Role::Host);
+    if (role_ == Role::Host) log::info("launcher: starting as the host; pick a PC under \"Connect to\" to join it");
+    if (last && *last != role_) keep_peer_side(*last, role_);  // the client last time: the side stays put
     settings_.role = role_;
     save_settings(settings_);
 }
 
-void App::switch_role(Role want) {
+void App::switch_role(Role want, const std::wstring& why) {
+    if (want == Role::Host) target_.reset();
     if (want == role_) return;
+    KillTimer(hwnd_, kConnectTimer);
     keep_peer_side(role_, want);
     role_ = want;
     settings_.role = want;
     save_settings(settings_);
     displays_.follow_role(want);
     peer_name_.clear();
-    restart(want == Role::Client ? L"Connecting to the other PC" : L"This PC is the host now");
+    restart(!why.empty() ? why : want == Role::Client ? L"Connecting to the other PC" : L"This PC is the host now");
+}
+
+// ---- the PCs on the network ---------------------------------------------------------------------
+
+void App::scan_loop(std::stop_token stop, HWND notify) {
+    while (!stop.stop_requested()) {
+        const auto started = std::chrono::steady_clock::now();
+        auto hosts = discovery::find(kScanWait);
+        std::erase_if(hosts, [&](const discovery::Host& h) {
+            return h.protocol_version != proto::kProtocolVersion || same_name(h.name, self_name_);
+        });
+        const auto now = std::chrono::steady_clock::now();
+        {
+            std::lock_guard lock(scan_mutex_);
+            for (const auto& h : hosts) {
+                const auto it = std::find_if(scanned_.begin(), scanned_.end(),
+                                             [&](const Device& d) { return same_name(d.host.name, h.name); });
+                if (it == scanned_.end()) {
+                    scanned_.push_back({.host = h, .first_seen = now, .last_seen = now});
+                } else {
+                    it->host = h;  // its IP or busy state may have changed
+                    it->last_seen = now;
+                }
+            }
+            std::erase_if(scanned_, [&](const Device& d) { return now - d.last_seen > kForgetAfter; });
+            std::sort(scanned_.begin(), scanned_.end(),
+                      [](const Device& a, const Device& b) { return lower(a.host.name) < lower(b.host.name); });
+        }
+        PostMessageW(notify, kMsgDevices, 0, 0);
+        while (!stop.stop_requested() && std::chrono::steady_clock::now() < started + kScanEvery) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
+    }
+}
+
+void App::on_devices() {
+    {
+        std::lock_guard lock(scan_mutex_);
+        devices_ = scanned_;
+    }
+    // A PC the user disconnected from may connect automatically again once it has gone away.
+    std::erase_if(suppressed_, [&](const std::string& name) {
+        return std::none_of(devices_.begin(), devices_.end(), [&](const Device& d) { return lower(d.host.name) == name; });
+    });
+    maybe_auto_connect();
+}
+
+bool App::auto_listed(std::string_view name) const {
+    return std::any_of(settings_.auto_connect.begin(), settings_.auto_connect.end(),
+                       [&](const std::string& n) { return same_name(n, name); });
+}
+
+void App::maybe_auto_connect() {
+    // Only an idle host joins on its own: nobody is connected to it and it isn't switching.
+    if (role_ != Role::Host || link_ == Link::Linked || !process_ || stopping_ || quitting_) return;
+    const auto now = std::chrono::steady_clock::now();
+    if (now < auto_block_until_) return;
+    for (const auto& d : devices_) {
+        if (d.host.busy || !auto_listed(d.host.name) || suppressed_.contains(lower(d.host.name))) continue;
+        if (!auto_connect_now(self_name_, d.host.name, now - d.first_seen)) continue;
+        log::info("launcher: {} is on the network - connecting automatically", d.host.name);
+        connect_to(d.host, /*automatic=*/true);
+        return;
+    }
+}
+
+void App::connect_to(const discovery::Host& host, bool automatic) {
+    target_ = Target{.name = host.name, .ip = host.ip, .automatic = automatic};
+    const std::wstring why = L"Connecting to " + widen(host.name);
+    if (role_ == Role::Client) {
+        peer_name_.clear();
+        restart(why);  // another PC than now: kvm_client starts again with the new --host
+    } else {
+        switch_role(Role::Client, why);
+    }
+}
+
+void App::disconnect() {
+    if (target_) suppressed_.insert(lower(target_->name));  // don't join it again by itself right away
+    switch_role(Role::Host);
+}
+
+void App::toggle_auto(const std::string& name) {
+    auto& list = settings_.auto_connect;
+    if (auto_listed(name)) {
+        std::erase_if(list, [&](const std::string& n) { return same_name(n, name); });
+        notify(L"Connect automatically: off", widen(name) + L" is joined only when you pick it.", Toast::Kind::Info);
+    } else {
+        list.push_back(name);
+        suppressed_.erase(lower(name));
+        notify(L"Connect automatically: on", L"Sarke joins " + widen(name) + L" whenever it is on the network.",
+               Toast::Kind::Info);
+    }
+    save_settings(settings_);
+    maybe_auto_connect();
+}
+
+std::vector<TrayIcon::MenuItem> App::device_items() {
+    using Item = TrayIcon::MenuItem;
+    std::vector<Item> m;
+    menu_devices_.clear();
+    menu_auto_.clear();
+    const bool linked_to_target = role_ == Role::Client && target_;
+    for (const auto& d : devices_) {
+        if (menu_devices_.size() >= kMaxMenuDevices) break;
+        const bool current = linked_to_target && same_name(target_->name, d.host.name);
+        std::wstring text = widen(d.host.name) + ui::kSeparator + widen(d.host.ip);
+        if (current) {
+            text += std::wstring(ui::kSeparator) + (link_ == Link::Linked ? L"connected" : L"connecting…");
+        } else if (d.host.busy) {
+            text += std::wstring(ui::kSeparator) + L"busy (another PC is connected)";
+        }
+        m.push_back({.id = kCmdDeviceBase + static_cast<UINT>(menu_devices_.size()), .text = text, .checked = current,
+                     .radio = true, .enabled = !current && !d.host.busy});
+        menu_devices_.push_back(d.host);
+    }
+    if (linked_to_target && std::none_of(devices_.begin(), devices_.end(),
+                                         [&](const Device& d) { return same_name(d.host.name, target_->name); })) {
+        // Our host missed the last scan (a lost answer): it is still ours, so list it.
+        m.push_back({.text = widen(target_->name) + ui::kSeparator + widen(target_->ip) + ui::kSeparator +
+                             (link_ == Link::Linked ? L"connected" : L"connecting…"),
+                     .checked = true, .radio = true, .enabled = false});
+    }
+    if (m.empty()) m.push_back({.text = L"No other PC found yet — start Sarke there, same Wi-Fi", .enabled = false});
+
+    // "Connect automatically": the PCs seen now plus the ones remembered.
+    std::vector<std::string> names;
+    for (const auto& d : devices_) names.push_back(d.host.name);
+    if (target_) names.push_back(target_->name);
+    for (const auto& n : settings_.auto_connect) names.push_back(n);
+    for (const auto& n : names) {
+        if (std::none_of(menu_auto_.begin(), menu_auto_.end(), [&](const std::string& x) { return same_name(x, n); }) &&
+            menu_auto_.size() < kMaxMenuDevices) {
+            menu_auto_.push_back(n);
+        }
+    }
+    if (!menu_auto_.empty()) {
+        m.push_back({.separator = true});
+        m.push_back({.text = L"Connect automatically when it's on the network:", .enabled = false});
+        for (std::size_t i = 0; i < menu_auto_.size(); ++i) {
+            m.push_back({.id = kCmdAutoBase + static_cast<UINT>(i), .text = widen(menu_auto_[i]),
+                         .checked = auto_listed(menu_auto_[i])});
+        }
+    }
+    return m;
+}
+
+void App::pick_device() {
+    const UINT cmd = tray_.pick(device_items());
+    if (cmd != 0) on_command(cmd);
 }
 
 // config.json client_side says where the client stands next to the host, so the same value means
@@ -440,6 +671,8 @@ bool App::start_app() {
     SetHandleInformation(stdin_write_, HANDLE_FLAG_INHERIT, 0);
 
     std::wstring cmd = std::format(L"\"{}\" --config \"{}\"", exe->wstring(), config_path_.wstring());
+    // The PC picked in the list: connect to exactly that one (not the first host that answers).
+    if (role_ == Role::Client && target_) cmd += L" --host \"" + widen(target_->ip) + L"\"";
     for (const auto& arg : options_.app_args) cmd += L" \"" + arg + L"\"";
     STARTUPINFOW si{};
     si.cb = sizeof(si);
@@ -474,6 +707,8 @@ bool App::start_app() {
     reader_ = std::thread([this, out_read] { reader_loop(out_read); });
     log::info("launcher: started {} (pid {})", narrow(exe->wstring()), pid_);
     set_link(role_ == Role::Host ? Link::Waiting : Link::Starting);
+    // A client that can't reach its PC (gone, or it became a client too) goes back to being the host.
+    if (role_ == Role::Client && target_) SetTimer(hwnd_, kConnectTimer, kConnectTimeoutMs, nullptr);
     return true;
 }
 
@@ -532,6 +767,7 @@ void App::handle(const Event& e) {
             using T = std::decay_t<decltype(ev)>;
             if constexpr (std::is_same_v<T, Connected>) {
                 const bool was_linked = link_ == Link::Linked;
+                KillTimer(hwnd_, kConnectTimer);
                 peer_name_ = ev.name;
                 if (!ev.address.empty()) peer_address_ = ev.address;
                 peer_ = {.hostname = ev.name, .width = ev.width, .height = ev.height, .scale = ev.scale};
@@ -545,6 +781,10 @@ void App::handle(const Event& e) {
             } else if constexpr (std::is_same_v<T, LinkUp>) {
                 peer_address_ = ev.address;
             } else if constexpr (std::is_same_v<T, SessionEnded>) {
+                // The client keeps retrying its PC; if it doesn't come back, this PC is the host again.
+                if (role_ == Role::Client && target_ && link_ == Link::Linked) {
+                    SetTimer(hwnd_, kConnectTimer, kConnectTimeoutMs, nullptr);
+                }
                 if (link_ == Link::Linked) {
                     set_link(Link::Lost);
                     if (settings_.notify_lost) {
@@ -648,7 +888,11 @@ void App::update_tray() {
     std::wstring word = std::wstring(role_ == Role::Host ? L"Host" : L"Client") + ui::kSeparator;
     switch (link_) {
     case Link::Starting: word += L"Starting"; break;
-    case Link::Waiting: word += role_ == Role::Host ? L"Waiting for the other PC" : L"Looking for the host"; break;
+    case Link::Waiting:
+        word += role_ == Role::Host ? L"Waiting for the other PC"
+                : target_          ? L"Connecting to " + widen(target_->name)
+                                   : L"Looking for the host";
+        break;
     case Link::Linked:
         word += L"Linked to " + widen(peer_name_);
         if (rtt_ms_) word += std::format(L"{}{} ms", ui::kSeparator, std::lround(*rtt_ms_));
@@ -703,11 +947,11 @@ std::vector<TrayIcon::MenuItem> App::build_menu() {
     m.push_back({.id = kCmdOpenFiles, .text = L"Open received files"});
     m.push_back({.id = kCmdOpenConfig, .text = L"Open config.json"});
     m.push_back({.id = kCmdShowLog, .text = L"Show log", .enabled = !log_path_.empty()});
-    // Every PC runs as a host; one explicit action makes this PC connect to the other as the client.
-    if (role_ == Role::Host) {
-        m.push_back({.id = kCmdRoleClient, .text = L"Connect to the other PC"});
-    } else {
-        m.push_back({.id = kCmdRoleHost, .text = L"Disconnect (make this PC the host)"});
+    // Every PC runs as a host and lists the others; picking one makes this PC its client.
+    m.push_back({.text = L"Connect to", .submenu = device_items()});
+    if (role_ == Role::Client) {
+        const std::wstring who = target_ ? widen(target_->name) : std::wstring(L"the other PC");
+        m.push_back({.id = kCmdRoleHost, .text = L"Disconnect from " + who + L" (make this PC the host)"});
     }
     m.push_back({.separator = true});
     m.push_back({.id = kCmdRestart, .text = process_ ? L"Restart Sarke" : L"Start Sarke"});
@@ -724,6 +968,16 @@ void App::on_command(UINT id) {
     if (id >= kCmdFpsBase && id < kCmdFpsBase + std::size(kFrameRates)) {
         const auto& f = kFrameRates[id - kCmdFpsBase];
         change_config("max_fps", f.value, std::wstring(L"Frame rate: ") + f.text);
+        return;
+    }
+    if (id >= kCmdDeviceBase && id < kCmdDeviceBase + menu_devices_.size()) {
+        const discovery::Host host = menu_devices_[id - kCmdDeviceBase];
+        log::info("launcher: connecting to {} ({}) - picked by the user", host.name, host.ip);
+        connect_to(host, /*automatic=*/false);
+        return;
+    }
+    if (id >= kCmdAutoBase && id < kCmdAutoBase + menu_auto_.size()) {
+        toggle_auto(menu_auto_[id - kCmdAutoBase]);
         return;
     }
     switch (id) {
@@ -759,8 +1013,10 @@ void App::on_command(UINT id) {
         if (!log_path_.empty()) ShellExecuteW(nullptr, L"open", L"notepad.exe", (L"\"" + log_path_.wstring() + L"\"").c_str(), nullptr, SW_SHOWNORMAL);
         break;
     case kCmdRoleHost:
+        disconnect();
+        break;
     case kCmdRoleClient:
-        switch_role(id == kCmdRoleHost ? Role::Host : Role::Client);
+        pick_device();
         break;
     case kCmdRestart:
         if (process_) {
@@ -817,6 +1073,9 @@ LRESULT App::handle_message(UINT msg, WPARAM wp, LPARAM lp) {
     case kMsgReaderDone:
         on_reader_done();
         return 0;
+    case kMsgDevices:
+        on_devices();
+        return 0;
     case kMsgRemoteQuit:
         on_command(kCmdQuit);
         return 0;
@@ -832,6 +1091,16 @@ LRESULT App::handle_message(UINT msg, WPARAM wp, LPARAM lp) {
             KillTimer(hwnd_, kKillTimer);
             log::warn("launcher: the app didn't stop within {} ms, ending it", kStopGraceMs);
             end_app_now();
+        } else if (wp == kConnectTimer) {
+            KillTimer(hwnd_, kConnectTimer);
+            if (role_ == Role::Client && link_ != Link::Linked && target_) {
+                const std::wstring who = widen(target_->name);
+                log::info("launcher: {} didn't answer - this PC is the host again", target_->name);
+                if (target_->automatic) auto_block_until_ = std::chrono::steady_clock::now() + kAutoRetryBlock;
+                notify(L"Couldn't connect to " + who, L"It may have gone off the network. This PC is the host again.",
+                       Toast::Kind::Lost);
+                switch_role(Role::Host, L"This PC is the host again");
+            }
         }
         return 0;
     case WM_QUERYENDSESSION:

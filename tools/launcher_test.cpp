@@ -82,12 +82,23 @@ void files() {
 
     const auto settings = dir / L"settings.json";
     auto s = launcher::load_settings(settings);
-    check(!s.role && s.notify_connected && s.notify_lost, "no settings.json: defaults");
+    check(!s.role && s.notify_connected && s.notify_lost && s.auto_connect.empty(), "no settings.json: defaults");
     s.role = layout::Role::Client;
     s.notify_lost = false;
+    s.auto_connect = {"DESKTOP-7Q0UR7J", "laptop"};
     check(launcher::save_settings(s, settings), "save settings");
     const auto back = launcher::load_settings(settings);
-    check(back.role == layout::Role::Client && back.notify_connected && !back.notify_lost, "settings round trip");
+    check(back.role == layout::Role::Client && back.notify_connected && !back.notify_lost &&
+              back.auto_connect == std::vector<std::string>{"DESKTOP-7Q0UR7J", "laptop"},
+          "settings round trip (auto-connect list too)");
+
+    // Both PCs list each other: only one of them may connect at once (else both become clients).
+    using namespace std::chrono_literals;
+    check(launcher::auto_connect_now("alpha", "Beta", 0s) && !launcher::auto_connect_now("beta", "Alpha", 0s),
+          "auto-connect: the name that sorts first connects at once (no case)");
+    check(!launcher::auto_connect_now("beta", "alpha", launcher::kAutoConnectYield - 1s) &&
+              launcher::auto_connect_now("beta", "alpha", launcher::kAutoConnectYield),
+          "auto-connect: the other one connects after kAutoConnectYield");
 
     const auto cfg = dir / L"config.json";
     check(layout::ensure_config(cfg).empty() && std::filesystem::exists(cfg), "ensure_config creates the file");

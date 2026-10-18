@@ -56,6 +56,10 @@ public:
     // Builds the menu each time it opens (so it shows the current state); on_command gets the id.
     void set_menu(std::function<std::vector<MenuItem>()> build, std::function<void(UINT)> on_command);
 
+    // Shows `items` as a popup menu at the mouse cursor (e.g. under a button) and returns the id the
+    // user picked, 0 if none. UI thread; blocks until the menu closes.
+    UINT pick(const std::vector<MenuItem>& items);
+
     // Shows Sarke's notification card (top-right); clicking it runs Actions::open.
     void notify(std::wstring_view title, std::wstring_view text, Toast::Kind kind = Toast::Kind::Info);
 

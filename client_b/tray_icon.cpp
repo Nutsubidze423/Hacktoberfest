@@ -194,6 +194,19 @@ void fill_menu(HMENU menu, const std::vector<TrayIcon::MenuItem>& items) {
 
 }  // namespace
 
+UINT TrayIcon::pick(const std::vector<MenuItem>& items) {
+    unique_menu menu(CreatePopupMenu());
+    if (!menu || !hwnd_) return 0;
+    fill_menu(menu.get(), items);
+    POINT at{};
+    GetCursorPos(&at);
+    SetForegroundWindow(hwnd_);  // so the menu closes when the user clicks elsewhere
+    const UINT cmd = static_cast<UINT>(
+        TrackPopupMenuEx(menu.get(), TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_NONOTIFY, at.x, at.y, hwnd_, nullptr));
+    PostMessageW(hwnd_, WM_NULL, 0, 0);
+    return cmd;
+}
+
 void TrayIcon::show_menu(int x, int y) {
     unique_menu menu(CreatePopupMenu());
     if (!menu) {

@@ -417,8 +417,10 @@ int wmain(int argc, wchar_t** argv) {
             if (!conn) {
                 continue;  // stop() or a transient accept error
             }
+            if (discovery) discovery->set_busy(true);  // other PCs list this one as taken meanwhile
             run_session(*conn, kvm_link ? &*kvm_link : nullptr, clip_on ? &clip : nullptr, video, opt,
                         side.value_or(kvm::display::Side::Right), windows);
+            if (discovery) discovery->set_busy(false);
         }
         hotkeys.stop();
         file_server.stop();

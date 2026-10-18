@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <array>
+#include <map>
 #include <stdexcept>
 #include <string_view>
 
@@ -105,14 +106,10 @@ Responder::~Responder() {
 }
 
 void Responder::run() {
-    const std::string answer = nlohmann::json{{"type", kAnswer},
-                                              {"name", name_},
-                                              {"control_port", control_port_},
-                                              {"protocol_version", proto::kProtocolVersion}}
-                                   .dump();
     std::array<char, kMaxDatagram> buf{};
-    std::string last_ip;  // log one line per asker and 10 s, not one per query and broadcast address
-    auto last_log = std::chrono::steady_clock::time_point{};
+    // One log line per asker and minute, not one per query: Sarke on every PC of the network asks
+    // every few seconds to keep its device list current.
+    std::map<std::string, std::chrono::steady_clock::time_point> last_log;
     while (running_) {
         sockaddr_in from{};
         int from_len = sizeof(from);
@@ -125,13 +122,20 @@ void Responder::run() {
         if (j.is_discarded() || !j.is_object() || j.value("type", "") != kQuery) {
             continue;
         }
+        const std::string answer = nlohmann::json{{"type", kAnswer},
+                                                  {"name", name_},
+                                                  {"control_port", control_port_},
+                                                  {"protocol_version", proto::kProtocolVersion},
+                                                  {"busy", busy_.load()}}
+                                       .dump();
         sendto(sock_, answer.data(), static_cast<int>(answer.size()), 0, reinterpret_cast<const sockaddr*>(&from),
                from_len);
         const auto now = std::chrono::steady_clock::now();
-        if (const std::string ip = ip_of(from); ip != last_ip || now - last_log > std::chrono::seconds(10)) {
+        const std::string ip = ip_of(from);
+        if (const auto it = last_log.find(ip); it == last_log.end() || now - it->second > std::chrono::minutes(1)) {
             log::info("discovery: answered {}", ip);
-            last_ip = ip;
-            last_log = now;
+            if (last_log.size() > 64) last_log.clear();
+            last_log[ip] = now;
         }
     }
 }
@@ -190,7 +194,8 @@ std::vector<Host> find(std::chrono::milliseconds wait, std::uint16_t port) {
         Host h{.name = j.value("name", ""),
                .ip = ip_of(from),
                .control_port = j.value<std::uint16_t>("control_port", 0),
-               .protocol_version = j.value("protocol_version", 0)};
+               .protocol_version = j.value("protocol_version", 0),
+               .busy = j.value("busy", false)};
         if (h.control_port == 0) continue;
         if (std::none_of(hosts.begin(), hosts.end(), [&](const Host& x) { return x.ip == h.ip; })) {
             hosts.push_back(std::move(h));

@@ -100,7 +100,7 @@ tools/
 - პორტი **50500** — control + input: `[u32 len][JSON]`, big-endian.
 - პორტი **50501** — ვიდეო: `[u32 header_len][u32 payload_len][header JSON][payload]`, big-endian.
 - პორტი **50502** — ფაილები (თემო, `common/.../file_transfer.*`): იგივე framing, header-ები `file_begin` / `file_chunk` / `file_end` / `transfer_end`.
-- პორტი **50503** (UDP) — discovery (ლუკა, `common/.../discovery.*`): B ქსელში ეძებს (`kvm_discover`, broadcast), A პასუხობს (`kvm_here`: სახელი, პორტი, ვერსია). config `"host_ip": "auto"` (ნაგულისხმევი) = IP-ს ჩაწერა არ სჭირდება; `--host <IP>` ხელით.
+- პორტი **50503** (UDP) — discovery (ლუკა, `common/.../discovery.*`): B ქსელში ეძებს (`kvm_discover`, broadcast), A პასუხობს (`kvm_here`: სახელი, პორტი, ვერსია, `busy` — client-ი უკვე მიერთებულია). Sarke (launcher) ყოველ 2.5 წმ-ში სკანირებს და tray-ში „Connect to ▸“ სიას აჩვენებს; ყოველი PC host-ად იწყებს, ავტომატურად უერთდება მხოლოდ „Connect automatically“-ით მონიშნულს (`settings.json` → `auto_connect`). config `"host_ip": "auto"` (ნაგულისხმევი) = IP-ს ჩაწერა არ სჭირდება; `--host <IP>` ხელით.
 - `TCP_NODELAY` ორივე სოკეტზე.
 
 შეტყობინებები (`type` ველით):
