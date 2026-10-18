@@ -20,6 +20,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "device_picker.h"
 #include "display_settings.h"
 #include "kvm/config.h"
 #include "kvm/discovery.h"
@@ -73,9 +74,6 @@ enum : UINT {
     kCmdRoleClient = 71,
     kCmdRestart = 80,
     kCmdQuit = 90,
-    kCmdDeviceBase = 100,  // + index into menu_devices_: connect to that PC
-    kCmdAutoBase = 200,    // + index into menu_auto_: toggle "Connect automatically"
-    kMaxMenuDevices = 50,
 };
 struct Choice {
     int value;
@@ -284,8 +282,9 @@ private:
     void maybe_auto_connect();
     void connect_to(const discovery::Host& host, bool automatic);
     void disconnect();
-    void pick_device();  // the Displays window's Connect button
-    std::vector<TrayIcon::MenuItem> device_items();
+    void pick_device();  // "Connect to another PC…" (tray) and the Displays window's Connect button
+    std::vector<DevicePicker::Row> picker_rows();
+    void refresh_picker();
     bool auto_listed(std::string_view name) const;
     void toggle_auto(const std::string& name);
     bool start_app();
@@ -339,8 +338,9 @@ private:
     std::string self_name_;
     std::optional<Target> target_;
     std::vector<Device> devices_;            // UI thread's copy of the scan
-    std::vector<discovery::Host> menu_devices_;  // what the open menu's device ids stand for
-    std::vector<std::string> menu_auto_;     // what its "Connect automatically" ids stand for
+    DevicePicker picker_;
+    std::vector<discovery::Host> picker_hosts_;  // what the picker's rows stand for
+    std::vector<std::string> picker_names_;
     std::set<std::string> suppressed_;       // lower-case names the user disconnected from: no auto-connect until they go away
     std::chrono::steady_clock::time_point auto_block_until_{};
     std::mutex scan_mutex_;
@@ -500,6 +500,7 @@ void App::on_devices() {
     std::erase_if(suppressed_, [&](const std::string& name) {
         return std::none_of(devices_.begin(), devices_.end(), [&](const Device& d) { return lower(d.host.name) == name; });
     });
+    refresh_picker();
     maybe_auto_connect();
 }
 
@@ -553,59 +554,55 @@ void App::toggle_auto(const std::string& name) {
     maybe_auto_connect();
 }
 
-std::vector<TrayIcon::MenuItem> App::device_items() {
-    using Item = TrayIcon::MenuItem;
-    std::vector<Item> m;
-    menu_devices_.clear();
-    menu_auto_.clear();
-    const bool linked_to_target = role_ == Role::Client && target_;
+// The picker's rows: the PCs seen now, ours (even if a scan missed it), then remembered ones that
+// are away (so "Auto" can be switched off for them too). picker_hosts_ / picker_names_ match the rows.
+std::vector<DevicePicker::Row> App::picker_rows() {
+    using State = DevicePicker::Row::State;
+    std::vector<DevicePicker::Row> rows;
+    picker_hosts_.clear();
+    picker_names_.clear();
+    const auto listed = [&](std::string_view name) {
+        return std::any_of(picker_names_.begin(), picker_names_.end(), [&](const std::string& n) { return same_name(n, name); });
+    };
+    const auto add = [&](const discovery::Host& host, State state) {
+        rows.push_back({.name = widen(host.name), .ip = widen(host.ip), .state = state, .auto_connect = auto_listed(host.name)});
+        picker_hosts_.push_back(host);
+        picker_names_.push_back(host.name);
+    };
+    const bool have_target = role_ == Role::Client && target_.has_value();
+    const State ours = link_ == Link::Linked ? State::Connected : State::Connecting;
     for (const auto& d : devices_) {
-        if (menu_devices_.size() >= kMaxMenuDevices) break;
-        const bool current = linked_to_target && same_name(target_->name, d.host.name);
-        std::wstring text = widen(d.host.name) + ui::kSeparator + widen(d.host.ip);
-        if (current) {
-            text += std::wstring(ui::kSeparator) + (link_ == Link::Linked ? L"connected" : L"connecting…");
-        } else if (d.host.busy) {
-            text += std::wstring(ui::kSeparator) + L"busy (another PC is connected)";
-        }
-        m.push_back({.id = kCmdDeviceBase + static_cast<UINT>(menu_devices_.size()), .text = text, .checked = current,
-                     .radio = true, .enabled = !current && !d.host.busy});
-        menu_devices_.push_back(d.host);
+        const bool current = have_target && same_name(target_->name, d.host.name);
+        add(d.host, current ? ours : d.host.busy ? State::Busy : State::Free);
     }
-    if (linked_to_target && std::none_of(devices_.begin(), devices_.end(),
-                                         [&](const Device& d) { return same_name(d.host.name, target_->name); })) {
-        // Our host missed the last scan (a lost answer): it is still ours, so list it.
-        m.push_back({.text = widen(target_->name) + ui::kSeparator + widen(target_->ip) + ui::kSeparator +
-                             (link_ == Link::Linked ? L"connected" : L"connecting…"),
-                     .checked = true, .radio = true, .enabled = false});
+    if (have_target && !listed(target_->name)) add({.name = target_->name, .ip = target_->ip}, ours);
+    for (const auto& name : settings_.auto_connect) {
+        if (!listed(name)) add({.name = name}, State::Offline);
     }
-    if (m.empty()) m.push_back({.text = L"No other PC found yet — start Sarke there, same Wi-Fi", .enabled = false});
-
-    // "Connect automatically": the PCs seen now plus the ones remembered.
-    std::vector<std::string> names;
-    for (const auto& d : devices_) names.push_back(d.host.name);
-    if (target_) names.push_back(target_->name);
-    for (const auto& n : settings_.auto_connect) names.push_back(n);
-    for (const auto& n : names) {
-        if (std::none_of(menu_auto_.begin(), menu_auto_.end(), [&](const std::string& x) { return same_name(x, n); }) &&
-            menu_auto_.size() < kMaxMenuDevices) {
-            menu_auto_.push_back(n);
-        }
-    }
-    if (!menu_auto_.empty()) {
-        m.push_back({.separator = true});
-        m.push_back({.text = L"Connect automatically when it's on the network:", .enabled = false});
-        for (std::size_t i = 0; i < menu_auto_.size(); ++i) {
-            m.push_back({.id = kCmdAutoBase + static_cast<UINT>(i), .text = widen(menu_auto_[i]),
-                         .checked = auto_listed(menu_auto_[i])});
-        }
-    }
-    return m;
+    return rows;
 }
 
 void App::pick_device() {
-    const UINT cmd = tray_.pick(device_items());
-    if (cmd != 0) on_command(cmd);
+    picker_.show(picker_rows(), {
+                                    .connect =
+                                        [this](std::size_t i) {
+                                            if (i >= picker_hosts_.size()) return;
+                                            const discovery::Host host = picker_hosts_[i];
+                                            log::info("launcher: connecting to {} ({}) - picked by the user", host.name, host.ip);
+                                            connect_to(host, /*automatic=*/false);
+                                        },
+                                    .toggle_auto =
+                                        [this](std::size_t i) {
+                                            if (i >= picker_names_.size()) return;
+                                            toggle_auto(picker_names_[i]);
+                                            refresh_picker();
+                                        },
+                                    .disconnect = [this] { disconnect(); },
+                                });
+}
+
+void App::refresh_picker() {
+    if (picker_.is_open()) picker_.update(picker_rows());
 }
 
 // config.json client_side says where the client stands next to the host, so the same value means
@@ -879,9 +876,13 @@ void App::on_reader_done() {
 }
 
 void App::set_link(Link link) {
+    const bool was_linked = link_ == Link::Linked;
     link_ = link;
     if (link != Link::Linked) rtt_ms_.reset();
+    // The link dropped (or the app stopped): the Displays window must not keep saying "Connected to ...".
+    if (was_linked && link != Link::Linked && peer_.known()) displays_.set_peer(peer_, /*connected=*/false);
     update_tray();
+    refresh_picker();
 }
 
 void App::update_tray() {
@@ -948,7 +949,7 @@ std::vector<TrayIcon::MenuItem> App::build_menu() {
     m.push_back({.id = kCmdOpenConfig, .text = L"Open config.json"});
     m.push_back({.id = kCmdShowLog, .text = L"Show log", .enabled = !log_path_.empty()});
     // Every PC runs as a host and lists the others; picking one makes this PC its client.
-    m.push_back({.text = L"Connect to", .submenu = device_items()});
+    m.push_back({.id = kCmdRoleClient, .text = L"Connect to another PC…"});
     if (role_ == Role::Client) {
         const std::wstring who = target_ ? widen(target_->name) : std::wstring(L"the other PC");
         m.push_back({.id = kCmdRoleHost, .text = L"Disconnect from " + who + L" (make this PC the host)"});
@@ -968,16 +969,6 @@ void App::on_command(UINT id) {
     if (id >= kCmdFpsBase && id < kCmdFpsBase + std::size(kFrameRates)) {
         const auto& f = kFrameRates[id - kCmdFpsBase];
         change_config("max_fps", f.value, std::wstring(L"Frame rate: ") + f.text);
-        return;
-    }
-    if (id >= kCmdDeviceBase && id < kCmdDeviceBase + menu_devices_.size()) {
-        const discovery::Host host = menu_devices_[id - kCmdDeviceBase];
-        log::info("launcher: connecting to {} ({}) - picked by the user", host.name, host.ip);
-        connect_to(host, /*automatic=*/false);
-        return;
-    }
-    if (id >= kCmdAutoBase && id < kCmdAutoBase + menu_auto_.size()) {
-        toggle_auto(menu_auto_[id - kCmdAutoBase]);
         return;
     }
     switch (id) {
