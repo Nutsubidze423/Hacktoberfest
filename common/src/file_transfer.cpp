@@ -159,8 +159,8 @@ void FileTransfer::close() {
     outgoing_.close();
 }
 
-bool FileTransfer::send(std::vector<fs::path> items, bool drag, std::optional<DropPoint> drop) {
-    return open_ && outgoing_.push(Outgoing{std::move(items), drag || drop.has_value(), drop});
+bool FileTransfer::send(std::vector<fs::path> items, bool drag) {
+    return open_ && outgoing_.push(Outgoing{std::move(items), drag});
 }
 
 void FileTransfer::send_loop() {
@@ -168,12 +168,7 @@ void FileTransfer::send_loop() {
     std::uint64_t next_id = 1;
     while (auto outgoing = outgoing_.pop()) {
         auto* items = &outgoing->items;
-        nlohmann::json begin = {{"type", "transfer_begin"}, {"drag", true}};
-        if (outgoing->drop) {
-            begin["drop_x"] = outgoing->drop->x;
-            begin["drop_y"] = outgoing->drop->y;
-        }
-        if (outgoing->drag && !send_message(sock_, begin)) {
+        if (outgoing->drag && !send_message(sock_, {{"type", "transfer_begin"}, {"drag", true}})) {
             if (open_) log::warn("files: sending to {} failed: {}", peer_, last_error_text());
             close();
             return;
@@ -251,7 +246,6 @@ void FileTransfer::receive_loop() {
     std::size_t received = 0;
     std::uint64_t received_bytes = 0;
     bool drag = false;          // this transfer continues a drag here
-    std::optional<DropPoint> drop;  // desk mode: dropped onto this screen at this point
     fs::path target = target_;  // where this transfer goes: target_, or a fresh temp folder for a drag
     std::uint32_t drags = 0;
 
@@ -276,12 +270,6 @@ void FileTransfer::receive_loop() {
             const std::string type = m.header.value("type", "");
             if (type == "transfer_begin") {
                 drag = m.header.value("drag", false);
-                drop.reset();
-                const auto x = m.header.find("drop_x");
-                const auto y = m.header.find("drop_y");
-                if (x != m.header.end() && y != m.header.end() && x->is_number_integer() && y->is_number_integer()) {
-                    drop = DropPoint{x->get<int>(), y->get<int>()};
-                }
                 if (drag) {
                     // A fresh folder per drag: the drop on this PC copies from it, names never clash.
                     target = fs::temp_directory_path() / L"Sarke" / L"drag" /
@@ -363,9 +351,7 @@ void FileTransfer::receive_loop() {
                 log::info("files: received {} file(s), {} from {} into {}{}", received, megabytes(received_bytes),
                           peer_, utf8(target), drag ? " (drag)" : "");
                 if (!saved.empty()) {
-                    if (drop && callbacks_.on_dropped_at) {
-                        callbacks_.on_dropped_at(saved, drop->x, drop->y);
-                    } else if (drag && callbacks_.on_drag_received) {
+                    if (drag && callbacks_.on_drag_received) {
                         callbacks_.on_drag_received(saved);
                     } else if (callbacks_.on_received) {
                         callbacks_.on_received(saved);
@@ -376,7 +362,6 @@ void FileTransfer::receive_loop() {
                 received = 0;
                 received_bytes = 0;
                 drag = false;
-                drop.reset();
                 target = target_;
             } else {
                 log::warn("files: unknown message \"{}\" from {}, ignored", type.substr(0, 50), peer_);

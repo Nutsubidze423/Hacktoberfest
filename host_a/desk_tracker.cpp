@@ -112,7 +112,10 @@ BOOL CALLBACK collect(HWND hwnd, LPARAM lp) {
     // Click-through overlays (game bars, screen tools) that cover the screen would swallow every click.
     if ((ex & WS_EX_LAYERED) && (ex & WS_EX_TRANSPARENT) && area(visible) * 10 >= area(ctx.vdd) * 9) return TRUE;
 
-    ctx.found.push_back({.hwnd = hwnd, .frame = frame, .rect = visible, .cls = to_utf8(cls), .title = title_of(hwnd)});
+    // Clicks belong to the window over its whole window rect, which takes in the invisible resize
+    // borders just outside the visible frame: its edges can be dragged to resize it, as on a monitor.
+    const display::Rect hit = intersect({wr.left, wr.top, wr.right, wr.bottom}, ctx.vdd);
+    ctx.found.push_back({.hwnd = hwnd, .frame = frame, .rect = hit, .cls = to_utf8(cls), .title = title_of(hwnd)});
     return TRUE;
 }
 

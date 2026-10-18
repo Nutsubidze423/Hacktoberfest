@@ -21,6 +21,7 @@ namespace {
 constexpr wchar_t kClassName[] = L"KvmDeskView";
 constexpr UINT kMsgUpdate = WM_APP + 1;
 constexpr UINT kMsgSave = WM_APP + 2;  // wparam = const std::wstring* path; returns 1 on success
+constexpr int kResizeRimDp = 8;        // Windows' invisible resize border outside a window's frame
 
 // The WinEvent callback runs on the UI thread that registered the hook, so the DeskView on that
 // thread can be found without a user-data parameter (there is one DeskView per UI thread).
@@ -341,6 +342,9 @@ void DeskView::update() {
     const int sw = screen_.right - screen_.left;
     const int sh = screen_.bottom - screen_.top;
     const RECT clip{0, 0, std::min(layout_.desk_w, sw), std::min(layout_.desk_h, sh)};
+    // The owner's windows have invisible resize borders just outside their frame; a rim of that width
+    // around each picture takes clicks there, so this PC's mouse can drag their edges too.
+    const int rim = MulDiv(kResizeRimDp, static_cast<int>(GetDpiForWindow(hwnd_)), 96);
     std::vector<Placed> placed;
     for (auto it = layout_.windows.rbegin(); it != layout_.windows.rend(); ++it) {
         const auto pic = pictures_.find(it->id);
@@ -349,7 +353,9 @@ void DeskView::update() {
                         it->y + pic->second.y + pic->second.height};
         RECT r{};
         if (!IntersectRect(&r, &full, &clip)) continue;
-        placed.push_back({.id = it->id, .rect = r, .src_x = r.left - full.left, .src_y = r.top - full.top});
+        RECT hit{r.left - rim, r.top - rim, r.right + rim, r.bottom + rim};
+        IntersectRect(&hit, &hit, &clip);
+        placed.push_back({.id = it->id, .rect = r, .hit = hit, .src_x = r.left - full.left, .src_y = r.top - full.top});
     }
 
     // Redraw only what changed: windows that moved, appeared, vanished or got a new picture.
@@ -362,14 +368,14 @@ void DeskView::update() {
     };
     for (const auto& p : placed) {
         const Placed* before = find(placed_, p.id);
-        if (!before || !EqualRect(&before->rect, &p.rect) || before->src_x != p.src_x || before->src_y != p.src_y ||
-            new_pictures.contains(p.id)) {
-            unite(dirty, p.rect);
-            if (before) unite(dirty, before->rect);
+        if (!before || !EqualRect(&before->rect, &p.rect) || !EqualRect(&before->hit, &p.hit) ||
+            before->src_x != p.src_x || before->src_y != p.src_y || new_pictures.contains(p.id)) {
+            unite(dirty, p.hit);
+            if (before) unite(dirty, before->hit);
         }
     }
     for (const auto& p : placed_) {
-        if (!find(placed, p.id)) unite(dirty, p.rect);
+        if (!find(placed, p.id)) unite(dirty, p.hit);
     }
     // The order changed (a window came to the front): redraw where they overlap.
     bool set_changed = placed.size() != placed_.size();
@@ -377,8 +383,8 @@ void DeskView::update() {
         for (size_t i = 0; i < placed.size(); ++i) {
             if (placed[i].id != placed_[i].id) {
                 set_changed = true;
-                unite(dirty, placed[i].rect);
-                unite(dirty, placed_[i].rect);
+                unite(dirty, placed[i].hit);
+                unite(dirty, placed_[i].hit);
             }
         }
     }
@@ -417,7 +423,21 @@ void DeskView::compose(const std::vector<Placed>& placed, const RECT& dirty) {
     for (int y = dirty.top; y < dirty.bottom; ++y) {
         std::memset(bits_ + y * pitch + static_cast<size_t>(dirty.left) * 4, 0, static_cast<size_t>(dirty.right - dirty.left) * 4);
     }
+    // Alpha 1 (premultiplied, colour 0) where nothing is drawn yet: invisible, but it takes clicks.
+    const auto fill_rim = [&](RECT strip) {
+        if (!IntersectRect(&strip, &strip, &dirty)) return;
+        for (int y = strip.top; y < strip.bottom; ++y) {
+            std::uint8_t* px = bits_ + y * pitch + static_cast<size_t>(strip.left) * 4;
+            for (int x = strip.left; x < strip.right; ++x, px += 4) {
+                if (px[3] == 0) px[3] = 1;
+            }
+        }
+    };
     for (const auto& p : placed) {  // bottom first: each one over what is below it
+        fill_rim({p.hit.left, p.hit.top, p.hit.right, p.rect.top});        // above
+        fill_rim({p.hit.left, p.rect.bottom, p.hit.right, p.hit.bottom});  // below
+        fill_rim({p.hit.left, p.rect.top, p.rect.left, p.rect.bottom});    // left
+        fill_rim({p.rect.right, p.rect.top, p.hit.right, p.rect.bottom});  // right
         RECT r{};
         if (!IntersectRect(&r, &p.rect, &dirty)) continue;
         const Picture& pic = pictures_.at(p.id);
@@ -453,9 +473,9 @@ void DeskView::hide() {
     if (bits_) {
         const size_t pitch = static_cast<size_t>(screen_.right - screen_.left) * 4;
         for (const auto& p : placed_) {
-            for (int y = p.rect.top; y < p.rect.bottom; ++y) {
-                std::memset(bits_ + y * pitch + static_cast<size_t>(p.rect.left) * 4, 0,
-                            static_cast<size_t>(p.rect.right - p.rect.left) * 4);
+            for (int y = p.hit.top; y < p.hit.bottom; ++y) {
+                std::memset(bits_ + y * pitch + static_cast<size_t>(p.hit.left) * 4, 0,
+                            static_cast<size_t>(p.hit.right - p.hit.left) * 4);
             }
         }
     }

@@ -46,10 +46,6 @@ struct Callbacks {
     // A drag transfer (send(..., true)) arrived into a temp folder: continue the drag here with
     // FileDragSource. Without this callback drag transfers go to on_received like any other.
     std::function<void(const std::vector<std::filesystem::path>& saved)> on_drag_received;
-    // Files dropped onto the other PC's screen in desk mode (send(..., drop)) arrived into a temp
-    // folder: put them where they were dropped. `x`/`y` are physical pixels relative to this PC's
-    // primary monitor. Without this callback they go to on_drag_received / on_received.
-    std::function<void(const std::vector<std::filesystem::path>& saved, int x, int y)> on_dropped_at;
 };
 
 // %USERPROFILE%\Downloads\KVM (the user's Downloads folder, wherever it was moved to).
@@ -70,13 +66,7 @@ public:
     // Queues files and folders (folders recursively); they are sent one transfer after another.
     // drag = the user is dragging them across: the peer saves them to a temp folder and continues
     // the drag there (on_drag_received). False if the channel is closed.
-    // drop = desk mode: the files were dropped onto the other PC's screen at that point (its primary
-    // monitor's pixels); the peer puts them there (on_dropped_at).
-    struct DropPoint {
-        int x = 0;
-        int y = 0;
-    };
-    bool send(std::vector<std::filesystem::path> items, bool drag = false, std::optional<DropPoint> drop = std::nullopt);
+    bool send(std::vector<std::filesystem::path> items, bool drag = false);
 
     bool is_open() const { return open_; }
     const std::string& peer() const { return peer_; }
@@ -97,7 +87,6 @@ private:
     struct Outgoing {
         std::vector<std::filesystem::path> items;
         bool drag = false;
-        std::optional<DropPoint> drop;
     };
     BlockingQueue<Outgoing> outgoing_;
     std::thread receiver_;

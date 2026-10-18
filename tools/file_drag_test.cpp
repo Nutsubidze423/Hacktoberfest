@@ -1,10 +1,10 @@
 // file_drag_test: both halves of the cross-PC file drag with real OLE drag and drop (T10).
 // FileDragSource continues a drag with two temp files ("arrived from the other PC") from the cursor,
 // SendInput moves the mouse onto a FileDropCatcher in this process and lets go: the catcher must get
-// both paths and the source must report a drop. Then desk mode's cover(): a drop over it reports the
-// point, a drop on a hole (this PC's own window) goes to that window, and it goes away by itself. The
-// mouse moves around the screen center for a few seconds and goes back afterwards. Stops itself with
-// Esc if anything hangs.
+// both paths and the source must report a drop. Then desk mode's catch_over(): a drag that keeps
+// moving still drops onto it, and a drag over a hole (this PC's own window) is left to that window.
+// The mouse moves around the screen center for a few seconds and goes back afterwards. If anything
+// hangs it presses Esc (which also reaches the window in front).
 //
 //   file_drag_test.exe
 
@@ -255,128 +255,118 @@ int main() {
         kvm::input::move_cursor_abs(cursor_before.x, cursor_before.y);
     }
 
-    kvm::log::info("3) desk mode: cover() over the other PC's screen (the area around the center)");
+    kvm::log::info("3) desk mode: catch_over() the other PC's screen (the area around the center)");
     {
         const RECT area{center.x - 400, center.y - 200, center.x + 400, center.y + 200};
         const RECT hole{center.x + 150, center.y - 100, center.x + 390, center.y + 100};  // this PC's own window
         const POINT in_hole{(hole.left + hole.right) / 2, (hole.top + hole.bottom) / 2};
-        std::mutex cover_mutex;
-        std::vector<fs::path> covered, plain, own;
-        POINT where{-1, -1};
-        kvm::files::FileDropCatcher cover(
+        std::mutex catch_mutex;
+        std::vector<fs::path> caught, own;
+        kvm::files::FileDropCatcher catcher_over(
             [&](std::vector<fs::path> paths) {
-                std::lock_guard lock(cover_mutex);
-                plain = std::move(paths);
+                std::lock_guard lock(catch_mutex);
+                caught = std::move(paths);
             },
-            L"cover (test)");
+            L"catch over (test)");
         kvm::files::FileDropCatcher own_window(
             [&](std::vector<fs::path> paths) {
-                std::lock_guard lock(cover_mutex);
+                std::lock_guard lock(catch_mutex);
                 own = std::move(paths);
             },
             L"own window (test)");
-        const auto on_drop_at = [&](std::vector<fs::path> paths, POINT pt) {
-            std::lock_guard lock(cover_mutex);
-            covered = std::move(paths);
-            where = pt;
-        };
-        const auto drag_and_release = [&](POINT from, POINT to, bool cover_first) {
+
+        // 3a) The user keeps moving fast after the catcher came up: the files still drop onto it.
+        {
+            const POINT from{center.x - 600, center.y};
+            const POINT spot{center.x - 300, center.y + 50};
             kvm::input::move_cursor_abs(from.x, from.y);
             std::this_thread::sleep_for(150ms);
-            std::promise<DWORD> cover_done;
-            auto cover_result = cover_done.get_future();
+            std::promise<DWORD> a_done;
+            auto a_result = a_done.get_future();
             kvm::files::FileDragSource source;  // stands for Explorer's drag on this PC
-            source.start(files, [&](DWORD effect) { cover_done.set_value(effect); });
+            source.start(files, [&](DWORD effect) { a_done.set_value(effect); });
             std::this_thread::sleep_for(300ms);
-            if (cover_first) {
-                cover.cover(area, {hole}, on_drop_at);
-                std::this_thread::sleep_for(200ms);
-            }
-            move_in_steps(from, to);
-            if (!cover_first) {
-                // The drag is already over the other screen when the cover comes: the user may let go
-                // at once, without moving again.
-                cover.cover(area, {hole}, on_drop_at);
-                std::this_thread::sleep_for(150ms);
-            }
-            kvm::input::send_mouse_button(kvm::input::MouseButton::Left, false);
-            if (cover_result.wait_for(3s) != std::future_status::ready) {
+            move_in_steps(from, spot);
+            catcher_over.catch_over(area, {hole});
+            std::atomic<bool> moving{true};
+            std::thread mover([&] {  // keeps moving around inside the area, away from the first point
+                for (int i = 0; moving; ++i) {
+                    kvm::input::move_cursor_abs(spot.x + (i % 20) * 12, spot.y - (i % 7) * 15);
+                    std::this_thread::sleep_for(4ms);
+                }
+            });
+            const bool a_finished = a_result.wait_for(3s) == std::future_status::ready;
+            moving = false;
+            mover.join();
+            if (!a_finished) {
                 press_escape();
                 kvm::input::send_mouse_button(kvm::input::MouseButton::Left, false);
             }
-            const DWORD effect = cover_result.wait_for(1s) == std::future_status::ready ? cover_result.get() : DROPEFFECT_NONE;
+            const DWORD a_effect = a_result.wait_for(1s) == std::future_status::ready ? a_result.get() : DROPEFFECT_NONE;
             std::this_thread::sleep_for(300ms);
-            return effect;
-        };
-
-        // 3a) Released over the other screen right after the cover came: on_drop_at gets the point.
-        const POINT spot{center.x - 100, center.y + 50};
-        const DWORD effect_a = drag_and_release({center.x - 600, center.y}, spot, /*cover_first=*/false);
-        {
-            std::lock_guard lock(cover_mutex);
-            check(effect_a == DROPEFFECT_COPY, std::format("3a: dropped onto the cover as a copy (effect {})", effect_a));
-            check(covered.size() == files.size() && plain.empty(), std::format("3a: on_drop_at got the files ({})", covered.size()));
-            check(std::abs(where.x - spot.x) <= 2 && std::abs(where.y - spot.y) <= 2,
-                  std::format("3a: at the release point ({}, {}) ~ ({}, {})", where.x, where.y, spot.x, spot.y));
+            std::lock_guard lock(catch_mutex);
+            check(a_effect != DROPEFFECT_NONE, std::format("3a: the moving drag dropped onto catch_over() (effect {})", a_effect));
+            check(caught.size() == files.size(), std::format("3a: the catcher got the files ({})", caught.size()));
         }
-        check(!cover.visible(), "3a: the cover is gone after the drop");
+        check(!catcher_over.visible(), "3a: the catcher is gone after the drop");
 
-        // 3b) Released over this PC's own window on the other screen: that window takes the drop.
+        // 3b) Over this PC's own window on the other screen: that window takes the drop, not the catcher.
         {
-            std::lock_guard lock(cover_mutex);
-            covered.clear();
-        }
-        own_window.show_at(in_hole, 10s);
-        std::this_thread::sleep_for(200ms);
-        const DWORD effect_b = drag_and_release({center.x - 600, center.y}, in_hole, /*cover_first=*/true);
-        {
-            std::lock_guard lock(cover_mutex);
-            check(effect_b != DROPEFFECT_NONE && own.size() == files.size() && covered.empty(),
-                  std::format("3b: the own window got the drop, not the cover ({} vs {})", own.size(), covered.size()));
+            {
+                std::lock_guard lock(catch_mutex);
+                caught.clear();
+            }
+            own_window.show_at(in_hole, 10s);
+            std::this_thread::sleep_for(200ms);
+            const POINT from{center.x - 600, center.y};
+            kvm::input::move_cursor_abs(from.x, from.y);
+            std::this_thread::sleep_for(150ms);
+            std::promise<DWORD> b_done;
+            auto b_result = b_done.get_future();
+            kvm::files::FileDragSource source;
+            source.start(files, [&](DWORD effect) { b_done.set_value(effect); });
+            std::this_thread::sleep_for(300ms);
+            move_in_steps(from, in_hole);
+            catcher_over.catch_over(area, {hole});
+            std::this_thread::sleep_for(400ms);  // no file drag enters the catcher: it steps aside
+            check(!catcher_over.visible(), "3b: the catcher left the drag alone over the hole");
+            kvm::input::send_mouse_button(kvm::input::MouseButton::Left, false);  // the user lets go there
+            if (b_result.wait_for(3s) != std::future_status::ready) {
+                press_escape();
+                kvm::input::send_mouse_button(kvm::input::MouseButton::Left, false);
+            }
+            std::this_thread::sleep_for(300ms);
+            std::lock_guard lock(catch_mutex);
+            check(own.size() == files.size() && caught.empty(),
+                  std::format("3b: the own window got the drop, not the catcher ({} vs {})", own.size(), caught.size()));
         }
         own_window.hide();
-        for (int i = 0; i < 10 && cover.visible(); ++i) std::this_thread::sleep_for(100ms);
-        check(!cover.visible(), "3b: the cover is gone once the button is up");
 
-        // 3c) The drag comes back to this PC's own screen and drops there (no Esc here: it would go to
-        // whatever window is in front, e.g. the editor this test runs from).
+        // 3c) After catch_over() a plain catch_now() box is a small rectangle again.
         {
-            std::lock_guard lock(cover_mutex);
-            covered.clear();
-            own.clear();
+            std::lock_guard lock(catch_mutex);
+            caught.clear();
         }
-        const POINT home{center.x - 600, center.y};  // outside the cover's area
-        own_window.show_at(home, 10s);
-        std::this_thread::sleep_for(200ms);
-        kvm::input::move_cursor_abs(home.x, home.y);
+        const POINT edge{center.x - 300, center.y};
+        kvm::input::move_cursor_abs(center.x - 600, center.y);
         std::this_thread::sleep_for(150ms);
         std::promise<DWORD> c_done;
         auto c_result = c_done.get_future();
         kvm::files::FileDragSource source_c;
         source_c.start(files, [&](DWORD effect) { c_done.set_value(effect); });
         std::this_thread::sleep_for(300ms);
-        move_in_steps(home, spot);
-        cover.cover(area, {hole}, on_drop_at);
-        std::this_thread::sleep_for(200ms);
-        check(cover.visible(), "3c: the cover is up while the button is down");
-        own_window.show_at(home, 10s);  // it hid itself after the drag left it (as on a real screen, a folder is there)
-        std::this_thread::sleep_for(150ms);
-        move_in_steps(spot, home);
-        std::this_thread::sleep_for(300ms);
-        check(cover.visible(), "3c: ...and stays while the drag is back on this PC's screen");
-        kvm::input::send_mouse_button(kvm::input::MouseButton::Left, false);
-        if (c_result.wait_for(3s) != std::future_status::ready) {
+        move_in_steps({center.x - 600, center.y}, edge);
+        catcher_over.catch_now(edge);
+        const bool c_ok = c_result.wait_for(3s) == std::future_status::ready && c_result.get() != DROPEFFECT_NONE;
+        if (!c_ok) {
             press_escape();
             kvm::input::send_mouse_button(kvm::input::MouseButton::Left, false);
         }
-        for (int i = 0; i < 10 && cover.visible(); ++i) std::this_thread::sleep_for(100ms);
+        std::this_thread::sleep_for(300ms);
         {
-            std::lock_guard lock(cover_mutex);
-            check(own.size() == files.size() && covered.empty(),
-                  std::format("3c: dropped on this PC's screen, not sent ({} vs {})", own.size(), covered.size()));
+            std::lock_guard lock(catch_mutex);
+            check(c_ok && caught.size() == files.size(), "3c: catch_now() after catch_over() still catches");
         }
-        check(!cover.visible(), "3c: the cover is gone after the drag ended elsewhere");
-        own_window.hide();
         kvm::input::move_cursor_abs(cursor_before.x, cursor_before.y);
     }
 

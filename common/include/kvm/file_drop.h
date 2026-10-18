@@ -50,13 +50,11 @@ public:
     // files) while the user's hand stays on the button and KVM carries the drag to the other PC.
     void catch_now(POINT screen_point);
 
-    // Desk mode: an invisible drop target over `area` (the virtual display = the other PC's screen,
-    // physical pixels) except `holes` (this PC's own windows on it, which take their drops as usual),
-    // until the left button is up and no drag is over it. A file drag the user releases over it goes
-    // to `on_drop_at` with the drop point (catcher thread), instead of onto this PC's own desktop that
-    // lies under the virtual display. Nothing is faked: the user's own release drops it.
-    using OnDropAt = std::function<void(std::vector<std::filesystem::path>, POINT where)>;
-    void cover(RECT area, std::vector<RECT> holes, OnDropAt on_drop_at);
+    // Desk mode's catch_now(): the invisible catcher covers `area` (the virtual display = the other
+    // PC's screen, physical pixels) except `holes` (this PC's own windows on it, which take their
+    // drops as usual). Wherever the cursor moves before the release, it is still over the catcher, so
+    // the files reach on_drop instead of falling onto this PC's desktop under the virtual display.
+    void catch_over(RECT area, std::vector<RECT> holes);
 
     bool visible() const { return visible_; }
 

@@ -92,6 +92,7 @@ private:
     struct Placed {
         std::uint64_t id = 0;
         RECT rect{};  // on the surface, clipped
+        RECT hit{};   // rect plus an invisible rim (alpha 1) that takes clicks for the owner's resize borders
         int src_x = 0;
         int src_y = 0;
     };

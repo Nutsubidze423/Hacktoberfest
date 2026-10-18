@@ -6,7 +6,6 @@
 #include <windowsx.h>
 
 #include <algorithm>
-#include <format>
 #include <future>
 #include <memory>
 #include <optional>
@@ -24,12 +23,10 @@ constexpr wchar_t kClassName[] = L"KvmFileDropCatcher";
 constexpr UINT kShowMessage = WM_APP + 1;  // wParam = timeout in ms, lParam = MAKELPARAM(x, y)
 constexpr UINT kHideMessage = WM_APP + 2;
 constexpr UINT kCatchMessage = WM_APP + 3;  // lParam = MAKELPARAM(x, y)
-constexpr UINT kCoverMessage = WM_APP + 4;  // lParam = CoverRequest* (the catcher thread deletes it)
+constexpr UINT kCatchOverMessage = WM_APP + 4;  // lParam = CatchOverRequest* (the catcher thread deletes it)
 constexpr UINT_PTR kHideTimer = 1;
 constexpr UINT_PTR kReleaseTimer = 2;
 constexpr UINT_PTR kGiveUpTimer = 3;
-constexpr UINT_PTR kCoverTimer = 4;
-constexpr UINT kCoverPollMs = 100;  // cover mode ends once the left button is up and no drag is over us
 constexpr int kCatchSizePx = 96;  // roomy: the cursor may slide along the edge before the release
 constexpr UINT kCatchTimeoutMs = 1500;
 constexpr UINT kReleaseAfterMs = 30;  // after the file drag entered the catcher
@@ -63,9 +60,8 @@ std::vector<fs::path> files_in(IDataObject* data) {
 // catcher's thread.
 class DropTarget final : public IDropTarget {
 public:
-    DropTarget(HWND hwnd, FileDropCatcher::OnDrop* on_drop, std::atomic<bool>* catching, std::atomic<bool>* covering,
-               FileDropCatcher::OnDropAt* on_drop_at)
-        : hwnd_(hwnd), on_drop_(on_drop), catching_(catching), covering_(covering), on_drop_at_(on_drop_at) {}
+    DropTarget(HWND hwnd, FileDropCatcher::OnDrop* on_drop, std::atomic<bool>* catching)
+        : hwnd_(hwnd), on_drop_(on_drop), catching_(catching) {}
 
     HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void** out) override {
         if (riid == IID_IUnknown || riid == IID_IDropTarget) {
@@ -98,23 +94,17 @@ public:
     }
     HRESULT STDMETHODCALLTYPE DragLeave() override {
         dragging_ = false;
-        // Cover mode stays while the button is down (the drag may come back): kCoverTimer ends it.
-        if (!*covering_) SetTimer(hwnd_, kHideTimer, kAfterLeaveMs, nullptr);
+        SetTimer(hwnd_, kHideTimer, kAfterLeaveMs, nullptr);
         return S_OK;
     }
-    HRESULT STDMETHODCALLTYPE Drop(IDataObject* data, DWORD, POINTL pt, DWORD* effect) override {
+    HRESULT STDMETHODCALLTYPE Drop(IDataObject* data, DWORD, POINTL, DWORD* effect) override {
         dragging_ = false;
         auto paths = files_in(data);
         *effect = paths.empty() ? DROPEFFECT_NONE : DROPEFFECT_COPY;  // never a move: the source keeps its files
-        const bool covering = *covering_;
         PostMessageW(hwnd_, kHideMessage, 0, 0);
         if (!paths.empty()) {
-            log::info("file_drop: {} item(s) dropped{}", paths.size(), covering ? std::format(" at ({}, {})", pt.x, pt.y) : "");
-            if (covering && *on_drop_at_) {
-                (*on_drop_at_)(std::move(paths), POINT{pt.x, pt.y});
-            } else if (*on_drop_) {
-                (*on_drop_)(std::move(paths));
-            }
+            log::info("file_drop: {} item(s) dropped", paths.size());
+            if (*on_drop_) (*on_drop_)(std::move(paths));
         }
         return S_OK;
     }
@@ -127,8 +117,6 @@ private:
     HWND hwnd_;
     FileDropCatcher::OnDrop* on_drop_;
     std::atomic<bool>* catching_;
-    std::atomic<bool>* covering_;
-    FileDropCatcher::OnDropAt* on_drop_at_;
     ULONG refs_ = 1;
     bool has_files_ = false;
     bool dragging_ = false;
@@ -137,37 +125,29 @@ private:
 struct WindowState {
     std::wstring label;
     std::atomic<bool>* visible = nullptr;
-    std::atomic<bool> catching = false;  // catch_now() is waiting for a file drag to enter
-    std::atomic<bool> covering = false;  // cover(): over the VDD until the drag ends
-    FileDropCatcher::OnDropAt on_drop_at;  // cover()'s callback (catcher thread only)
+    std::atomic<bool> catching = false;  // catch_now() / catch_over() is waiting for a file drag to enter
+    bool shaped = false;                 // catch_over() gave the window a region (holes)
     DropTarget* target = nullptr;
     HFONT font = nullptr;
     UINT font_dpi = 0;
 };
 
-// Leaves cover() mode: the next show_at() / catch_now() is a plain box again.
-void end_cover(HWND hwnd, WindowState& state) {
-    KillTimer(hwnd, kCoverTimer);
-    if (state.covering) {
-        state.covering = false;
-        SetWindowRgn(hwnd, nullptr, FALSE);
-    }
+// Back to a plain rectangle after catch_over().
+void unshape(HWND hwnd, WindowState& state) {
+    if (!state.shaped) return;
+    state.shaped = false;
+    SetWindowRgn(hwnd, nullptr, FALSE);
 }
 
 void hide_window(HWND hwnd, WindowState& state) {
     KillTimer(hwnd, kHideTimer);
     ShowWindow(hwnd, SW_HIDE);
-    end_cover(hwnd, state);
+    unshape(hwnd, state);
     *state.visible = false;
 }
 
-// The left button as the user knows it (GetAsyncKeyState sees the physical buttons).
-bool left_button_down() {
-    return (GetAsyncKeyState(GetSystemMetrics(SM_SWAPBUTTON) ? VK_RBUTTON : VK_LBUTTON) & 0x8000) != 0;
-}
-
 void show_window(HWND hwnd, WindowState& state, POINT pt, UINT timeout_ms) {
-    end_cover(hwnd, state);
+    unshape(hwnd, state);
     const HMONITOR monitor = MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST);
     MONITORINFO info{};
     info.cbSize = sizeof(info);
@@ -196,8 +176,23 @@ void show_window(HWND hwnd, WindowState& state, POINT pt, UINT timeout_ms) {
 
 // An invisible catcher right under the cursor, then the left button goes up there: the running drag
 // drops onto it. alpha 1 keeps it invisible but still hit-testable for the drop.
+// The window is in place (invisible: alpha 1 keeps it hit-testable for the drop): wait for the file
+// drag. A drag only picks a new drop target when the mouse moves, so nudge it at `at` (the cursor) to
+// make the catcher the target. If it's a file drag, DragEnter arms kReleaseTimer; otherwise
+// kGiveUpTimer leaves the drag (a window or a text selection) alone.
+void start_catching(HWND hwnd, WindowState& state, POINT at) {
+    *state.visible = true;
+    SetTimer(hwnd, kHideTimer, kCatchTimeoutMs, nullptr);
+    state.catching = true;
+    input::move_cursor_abs(at.x + 1, at.y);
+    input::move_cursor_abs(at.x, at.y);
+    SetTimer(hwnd, kGiveUpTimer, kGiveUpMs, nullptr);
+}
+
+// An invisible catcher right under the cursor, then the left button goes up there: the running drag
+// drops onto it.
 void catch_window(HWND hwnd, WindowState& state, POINT pt) {
-    end_cover(hwnd, state);
+    unshape(hwnd, state);
     const HMONITOR monitor = MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST);
     MONITORINFO info{};
     info.cbSize = sizeof(info);
@@ -209,32 +204,18 @@ void catch_window(HWND hwnd, WindowState& state, POINT pt) {
                              static_cast<int>(m.bottom) - kCatchSizePx);
     SetLayeredWindowAttributes(hwnd, 0, 1, LWA_ALPHA);
     SetWindowPos(hwnd, HWND_TOPMOST, x, y, kCatchSizePx, kCatchSizePx, SWP_NOACTIVATE | SWP_SHOWWINDOW);
-    *state.visible = true;
-    SetTimer(hwnd, kHideTimer, kCatchTimeoutMs, nullptr);
-    // A drag only picks a new drop target when the mouse moves: nudge it so the catcher becomes the
-    // target. If it's a file drag, DragEnter arms kReleaseTimer; otherwise kGiveUpTimer leaves the
-    // drag (a window or a text selection) alone.
-    state.catching = true;
-    input::move_cursor_abs(pt.x + 1, pt.y);
-    input::move_cursor_abs(pt.x, pt.y);
-    SetTimer(hwnd, kGiveUpTimer, kGiveUpMs, nullptr);
+    start_catching(hwnd, state, pt);
 }
 
-struct CoverRequest {
+struct CatchOverRequest {
     RECT area;
     std::vector<RECT> holes;
-    FileDropCatcher::OnDropAt on_drop_at;
 };
 
-// Desk mode: an invisible drop target over the whole VDD (the other PC's screen) except this PC's own
-// windows on it, which keep taking drops themselves. Nothing is faked: the user's own release drops
-// the files onto it wherever over the other screen they let go, and the drop point goes along.
-void cover_window(HWND hwnd, WindowState& state, CoverRequest& req) {
-    KillTimer(hwnd, kHideTimer);  // an earlier show_at() / catch_now() must not hide the cover mid-drag
-    KillTimer(hwnd, kGiveUpTimer);
-    KillTimer(hwnd, kReleaseTimer);
-    state.catching = false;
-    state.on_drop_at = std::move(req.on_drop_at);
+// Desk mode's catch_window(): the catcher covers the whole VDD (the other PC's screen) except this
+// PC's own windows on it, which keep taking drops themselves. However the cursor moves until the
+// release, it is still over the catcher, so the files can't fall onto this PC's desktop under the VDD.
+void catch_over_window(HWND hwnd, WindowState& state, const CatchOverRequest& req) {
     const RECT& a = req.area;
     HRGN region = CreateRectRgn(0, 0, a.right - a.left, a.bottom - a.top);
     for (const RECT& h : req.holes) {
@@ -242,19 +223,13 @@ void cover_window(HWND hwnd, WindowState& state, CoverRequest& req) {
         CombineRgn(region, region, hole, RGN_DIFF);
         DeleteObject(hole);
     }
-    SetLayeredWindowAttributes(hwnd, 0, 1, LWA_ALPHA);  // invisible, but still a drop target
-    SetWindowRgn(hwnd, region, FALSE);                   // the window owns the region from now on
+    SetLayeredWindowAttributes(hwnd, 0, 1, LWA_ALPHA);
+    SetWindowRgn(hwnd, region, FALSE);  // the window owns the region from now on
+    state.shaped = true;
     SetWindowPos(hwnd, HWND_TOPMOST, a.left, a.top, a.right - a.left, a.bottom - a.top, SWP_NOACTIVATE | SWP_SHOWWINDOW);
-    state.covering = true;
-    *state.visible = true;
-    SetTimer(hwnd, kCoverTimer, kCoverPollMs, nullptr);
-    // A drag only picks a new drop target when the mouse moves: nudge it, so even a release right
-    // now drops onto the cover and not onto this PC's desktop under it.
     POINT cur{};
-    if (GetCursorPos(&cur)) {
-        input::move_cursor_abs(cur.x + 1, cur.y);
-        input::move_cursor_abs(cur.x, cur.y);
-    }
+    GetCursorPos(&cur);
+    start_catching(hwnd, state, cur);
 }
 
 void paint(HWND hwnd, WindowState& state) {
@@ -292,9 +267,9 @@ LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         case kCatchMessage:
             if (state) catch_window(hwnd, *state, POINT{GET_X_LPARAM(lp), GET_Y_LPARAM(lp)});
             return 0;
-        case kCoverMessage: {
-            std::unique_ptr<CoverRequest> req(reinterpret_cast<CoverRequest*>(lp));
-            if (state && req) cover_window(hwnd, *state, *req);
+        case kCatchOverMessage: {
+            std::unique_ptr<CatchOverRequest> req(reinterpret_cast<CatchOverRequest*>(lp));
+            if (state && req) catch_over_window(hwnd, *state, *req);
             return 0;
         }
         case WM_TIMER:
@@ -303,11 +278,6 @@ LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 KillTimer(hwnd, kGiveUpTimer);
                 if (state) state->catching = false;
                 input::send_mouse_button(input::MouseButton::Left, false);  // the file drag drops onto us
-                return 0;
-            }
-            if (wp == kCoverTimer) {
-                // The drag ended somewhere else (e.g. back on this PC's own screen): step aside.
-                if (state && !left_button_down() && !(state->target && state->target->dragging())) hide_window(hwnd, *state);
                 return 0;
             }
             if (wp == kGiveUpTimer) {
@@ -391,7 +361,7 @@ FileDropCatcher::FileDropCatcher(OnDrop on_drop, std::wstring label)
             return;
         }
         SetLayeredWindowAttributes(hwnd, 0, 235, LWA_ALPHA);
-        state->target = new DropTarget(hwnd, &on_drop_, &state->catching, &state->covering, &state->on_drop_at);
+        state->target = new DropTarget(hwnd, &on_drop_, &state->catching);
         if (FAILED(RegisterDragDrop(hwnd, state->target))) log::error("file_drop: RegisterDragDrop failed");
         hwnd_ = hwnd;
         signal.reset();  // the constructor may return now
@@ -426,11 +396,11 @@ void FileDropCatcher::catch_now(POINT screen_point) {
     if (const HWND h = hwnd_) PostMessageW(h, kCatchMessage, 0, MAKELPARAM(screen_point.x, screen_point.y));
 }
 
-void FileDropCatcher::cover(RECT area, std::vector<RECT> holes, OnDropAt on_drop_at) {
+void FileDropCatcher::catch_over(RECT area, std::vector<RECT> holes) {
     const HWND h = hwnd_;
     if (!h) return;
-    auto* req = new CoverRequest{area, std::move(holes), std::move(on_drop_at)};
-    if (!PostMessageW(h, kCoverMessage, 0, reinterpret_cast<LPARAM>(req))) delete req;
+    auto req = std::make_unique<CatchOverRequest>(CatchOverRequest{area, std::move(holes)});
+    if (PostMessageW(h, kCatchOverMessage, 0, reinterpret_cast<LPARAM>(req.get()))) req.release();  // the catcher thread owns it now
 }
 
 }  // namespace kvm::files
