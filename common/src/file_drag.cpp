@@ -72,6 +72,22 @@ private:
     HWND helper_;
 };
 
+// What the drop target did, as it wrote it into the data object ("Performed DropEffect").
+DWORD performed_effect(IDataObject* data) {
+    static const CLIPFORMAT format = static_cast<CLIPFORMAT>(RegisterClipboardFormatW(CFSTR_PERFORMEDDROPEFFECT));
+    FORMATETC f{format, nullptr, DVASPECT_CONTENT, -1, TYMED_HGLOBAL};
+    STGMEDIUM medium{};
+    DWORD effect = DROPEFFECT_NONE;
+    if (SUCCEEDED(data->GetData(&f, &medium))) {
+        if (const auto* p = static_cast<const DWORD*>(GlobalLock(medium.hGlobal))) {
+            if (GlobalSize(medium.hGlobal) >= sizeof(DWORD)) effect = *p;
+            GlobalUnlock(medium.hGlobal);
+        }
+        ReleaseStgMedium(&medium);
+    }
+    return effect;
+}
+
 // A 32-bit premultiplied DIB section with the picture, for IDragSourceHelper::InitializeFromBitmap.
 HBITMAP make_bitmap(const DragImage& picture) {
     if (picture.width <= 0 || picture.height <= 0 ||
@@ -274,6 +290,11 @@ void FileDragSource::on_button_down(HWND hwnd) {
     DropSource source(hwnd);
     DWORD effect = DROPEFFECT_NONE;
     const HRESULT hr = SHDoDragDrop(hwnd, data, &source, DROPEFFECT_COPY | DROPEFFECT_MOVE, &effect);
+    if (hr == DRAGDROP_S_DROP && effect == DROPEFFECT_NONE) {
+        // An optimized move: Explorer moved the files itself (same drive) and says so in the data
+        // object, while the effect stays "none" so the source doesn't delete them a second time.
+        effect = performed_effect(data);
+    }
     data->Release();
     ShowWindow(hwnd, SW_HIDE);
     if (hr != DRAGDROP_S_DROP) effect = DROPEFFECT_NONE;
