@@ -115,7 +115,7 @@ Claude წაიკითხავს ამ ფაილს, იპოვის
 - [x] M0: CMake + presets + vcpkg, ცარიელი `kvm_host` / `kvm_client`, `.gitignore` (build/), `tools/setup_env.ps1`
 - [ ] M0: `protocol.h` — ყველა შეტყობინება, გუნდთან ერთად გაყინული (დაწერილია + `tools/protocol_test.cpp`; რჩება გუნდის review)
 - [x] `queue.h` (`BlockingQueue`, `LatestSlot`) + `tools/queue_test.cpp`, `log.h`, `config.h`
-- [x] `net.*`: `Connection`, `Server`, `connect()` + ხელახალი დაკავშირება (B: ყოველ 1 წმ-ში), dead-link 5 წმ
+- [x] `net.*`: `Connection`, `Server`, `connect()` + ხელახალი დაკავშირება (B: ყოველ 1 წმ-ში), dead-link 10 წმ (hotspot-ის შეფერხებებისთვის)
 - [x] `hello` (+ ვერსიის შემოწმება), `ping`/`pong` + clock offset (min-RTT, NTP-ს მსგავსად)
 - [x] ping ტესტი — `kvm_host`/`kvm_client` ყოველ 5 წმ-ში წერენ rtt-ს; Python ფაილები წაშლილია
 - [x] ვიდეოს არხი 50501: `video.h` (`FrameChannel`, `VideoServer`, `connect_video`) + `tools/video_test.cpp`; `kvm_host --test-video` (სატესტო სტრიმი, B ლოგავს fps/Mbit/latency)

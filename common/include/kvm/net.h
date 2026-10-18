@@ -38,7 +38,9 @@ std::int64_t steady_now_us();
 namespace kvm::net {
 
 inline constexpr auto kPingInterval = std::chrono::seconds(1);
-inline constexpr auto kDeadAfter = std::chrono::seconds(5);
+// Phone hotspots stall for several seconds now and then; a session that survives a stall keeps the
+// virtual display, its windows and the clipboard in place. A closed connection is noticed at once.
+inline constexpr auto kDeadAfter = std::chrono::seconds(10);
 
 // Call once per process before any socket use (Server/connect do it for you). Thread-safe.
 void ensure_winsock();
