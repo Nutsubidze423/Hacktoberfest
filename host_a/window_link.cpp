@@ -17,6 +17,7 @@
 #include "frame_router.h"
 #include "kvm/log.h"
 #include "remote_input.h"
+#include "vdd_modes.h"
 #include "virtual_display.h"
 #include "window_mover.h"
 #include "window_picker.h"
@@ -427,6 +428,16 @@ void WindowLink::desk_main(std::stop_token stop) {
     const auto start = [&](int w, int h, double scale) {
         stop_at.reset();
         if (!vdd || disabled) return;
+        // The VDD must be exactly the other screen's size (1:1 mapping): add a missing mode to the
+        // driver once. Not while windows sit on the VDD: restarting the driver would drop them.
+        if (!share && !vdd->attached() && vdd_modes::ensure(w, h)) {
+            if (auto again = VirtualDisplay::find()) {
+                vdd = std::move(again);
+                device = to_utf8(vdd->device());
+                region.set_vdd({.device = device});
+            }
+            if (vdd->attached()) vdd->detach();  // Windows may have extended onto it on its return
+        }
         const SIZE want = vdd->best_mode(w, h);
         if (share && want.cx == size.cx && want.cy == size.cy && vdd->attached()) {
             vdd->set_scale(scale);

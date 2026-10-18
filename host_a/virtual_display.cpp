@@ -214,13 +214,17 @@ SIZE VirtualDisplay::best_mode(int width, int height) const {
         modes.push_back({static_cast<LONG>(dm.dmPelsWidth), static_cast<LONG>(dm.dmPelsHeight)});
     }
     if (modes.empty()) return {width, height};
-    const auto distance = [&](const SIZE& m) {
-        // Same width first (the edge the cursor crosses keeps its length), then nearest height.
-        return (m.cx == width ? 0LL : 1'000'000LL) + std::llabs(static_cast<long long>(m.cx) - width) +
+    // Exact first. Otherwise the largest mode that fits inside the other screen: desk mode maps the
+    // VDD 1:1 onto it, so a bigger mode would put windows beyond its edge where nobody sees them,
+    // while a smaller one only leaves a strip out of reach. Nothing fits: the nearest size.
+    const auto fits = [&](const SIZE& m) { return m.cx <= width && m.cy <= height; };
+    const auto rank = [&](const SIZE& m) {
+        if (m.cx == width && m.cy == height) return -1LL;
+        if (fits(m)) return 1'000'000'000LL - static_cast<long long>(m.cx) * m.cy;
+        return 2'000'000'000LL + std::llabs(static_cast<long long>(m.cx) - width) +
                std::llabs(static_cast<long long>(m.cy) - height);
     };
-    return *std::min_element(modes.begin(), modes.end(),
-                             [&](const SIZE& a, const SIZE& b) { return distance(a) < distance(b); });
+    return *std::min_element(modes.begin(), modes.end(), [&](const SIZE& a, const SIZE& b) { return rank(a) < rank(b); });
 }
 
 bool VirtualDisplay::match_peer(int width, int height, display::Side side) {
