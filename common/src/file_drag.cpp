@@ -183,9 +183,22 @@ void FileDragSource::on_button_down(HWND hwnd) {
         finish(DROPEFFECT_NONE);
         return;
     }
+    // The shell's drag image for these files (icon or thumbnail, name, count) and the "Copy to ..."
+    // text drop targets show under it: the drag looks as when Explorer takes files from one monitor
+    // to another, not like a bare cursor. A null window lets the shell draw the image itself.
+    IDragSourceHelper2* image = nullptr;
+    if (SUCCEEDED(CoCreateInstance(CLSID_DragDropHelper, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&image)))) {
+        image->SetFlags(DSH_ALLOWDROPDESCRIPTIONTEXT);
+        POINT at{};
+        GetCursorPos(&at);
+        if (const HRESULT ih = image->InitializeFromWindow(nullptr, &at, data); FAILED(ih)) {
+            log::warn("file_drag: no drag image ({:#x})", static_cast<unsigned>(ih));
+        }
+        image->Release();
+    }
     DropSource source(hwnd);
     DWORD effect = DROPEFFECT_NONE;
-    const HRESULT hr = DoDragDrop(data, &source, DROPEFFECT_COPY | DROPEFFECT_MOVE, &effect);
+    const HRESULT hr = SHDoDragDrop(hwnd, data, &source, DROPEFFECT_COPY | DROPEFFECT_MOVE, &effect);
     data->Release();
     ShowWindow(hwnd, SW_HIDE);
     if (hr != DRAGDROP_S_DROP) effect = DROPEFFECT_NONE;
