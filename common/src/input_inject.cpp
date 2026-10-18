@@ -153,6 +153,12 @@ void InputInject::desk_move(int x, int y) {
     check(input::move_cursor_abs(px, py));
 }
 
+void InputInject::set_host_side(display::Side side) {
+    if (host_side_ == side) return;
+    host_side_ = side;
+    if (active_ && !desk_) edge_ = display::OuterEdge(real_monitors(), host_side_);  // its cursor leaves there now
+}
+
 void InputInject::enter(double y_norm) {
     edge_ = display::OuterEdge(real_monitors(), host_side_);
     const auto p = display::inward(edge_.point(y_norm), host_side_, kEnterInset);

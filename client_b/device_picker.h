@@ -1,7 +1,7 @@
 // "Connect to another PC" (owner: Temo): the PCs running Sarke on this network, as a Sarke card
 // (docs/DESIGN.md 2 tokens: tile, radius md, Google Sans / Geist Mono) instead of a plain menu.
-// Opens at the mouse cursor (the tray icon or the Displays window's Connect button) and closes when
-// it loses focus, on Esc, or after a pick.
+// Opens at the mouse cursor (the tray icon or the Displays window's Connect button), or above the tray
+// when Sarke starts, and closes when it loses focus, on Esc, or after a pick.
 //
 //   kvm::DevicePicker picker;
 //   picker.show(rows, {.connect = [&](std::size_t i) { ... }, .toggle_auto = ..., .disconnect = ...});
@@ -15,6 +15,7 @@
 
 #include <cstddef>
 #include <functional>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -42,7 +43,8 @@ public:
     DevicePicker(const DevicePicker&) = delete;
     DevicePicker& operator=(const DevicePicker&) = delete;
 
-    void show(std::vector<Row> rows, Actions actions);
+    // At `anchor` (screen pixels; only a click outside closes it), else at the mouse cursor.
+    void show(std::vector<Row> rows, Actions actions, std::optional<POINT> anchor = std::nullopt);
     void update(std::vector<Row> rows);  // no-op while closed
     bool is_open() const { return hwnd_ != nullptr && IsWindowVisible(hwnd_); }
     void close();
@@ -77,6 +79,13 @@ private:
     Actions actions_;
     Hit hover_;
     bool tracking_leave_ = false;
+    // Opened at the cursor (a click on the tray icon / Connect): closes like a menu when it loses the
+    // focus. Opened by itself (Sarke started): only a click outside it closes it, as the app starting
+    // at the same time may take the focus.
+    bool close_on_blur_ = true;
+    // It was the foreground window since it opened. Windows may refuse that (another program has the
+    // focus): then it can't lose focus, so a click outside it closes it.
+    bool had_focus_ = false;
     ui::TextStyles text_;
     UINT text_dpi_ = 0;
     ui::LayeredSurface canvas_;

@@ -276,6 +276,13 @@ ConfigState read_config(const std::optional<std::filesystem::path>& path) {
     }
     if (const auto it = j.find("client_side"); it != j.end() && it->is_string()) st.client_side = it->get<std::string>();
     if (const auto it = j.find("host_ip"); it != j.end() && it->is_string()) st.host_ip = it->get<std::string>();
+    if (const auto peers = j.find("peers"); peers != j.end() && peers->is_object()) {
+        for (const auto& [name, place] : peers->items()) {
+            if (const auto side = place.find("side"); place.is_object() && side != place.end() && side->is_string()) {
+                st.peer_sides[name] = side->get<std::string>();
+            }
+        }
+    }
     return st;
 }
 

@@ -11,6 +11,7 @@
 #pragma once
 
 #include <filesystem>
+#include <map>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -92,6 +93,8 @@ struct ConfigState {
     std::string client_side;         // as written, "" if missing (the apps default to "right")
     std::string host_ip;             // "" if missing
     std::string error;               // non-empty: the file exists but can't be read / parsed
+    // "peers": where each PC this one has met stands, seen from here (kvm/layout_sync.h), by name.
+    std::map<std::string, std::string> peer_sides;
 };
 
 // The config.json kvm_host / kvm_client would use (kvm::find_config_file()), or `path` if given.

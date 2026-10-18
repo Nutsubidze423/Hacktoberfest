@@ -32,6 +32,8 @@
 #include "kvm/file_transfer.h"
 #include "kvm/hotkeys.h"
 #include "kvm/kvm_link.h"
+#include "kvm/launcher_commands.h"
+#include "kvm/layout_sync.h"
 #include "kvm/log.h"
 #include "kvm/net.h"
 #include "kvm/protocol.h"
@@ -204,7 +206,8 @@ void match_vdd_to_peer(int width, int height, kvm::display::Side side) {
 }
 
 void run_session(kvm::net::Connection& conn, kvm::KvmLink* kvm, kvm::clip::ClipboardSync* clip, VideoSlot& video,
-                 const Options& opt, kvm::display::Side client_side, kvm::WindowLink& windows) {
+                 const Options& opt, kvm::display::Side client_side, kvm::WindowLink& windows,
+                 kvm::layout_sync::Session& places, kvm::CurrentPeer& current_peer) {
     const auto hello = handshake(conn);
     if (!hello) {
         return;
@@ -212,6 +215,17 @@ void run_session(kvm::net::Connection& conn, kvm::KvmLink* kvm, kvm::clip::Clipb
     kvm::log::info("client '{}' connected from {}: screen {}x{}, dpi scale {:.2f}", hello->hostname, conn.peer(),
                    hello->screen_w, hello->screen_h, hello->dpi_scale);
     conn.send(make_hello(opt.desk));
+    // Where this client stands, kept per PC and the same on both: before KVM and desk mode use it.
+    conn.send(places.begin(hello->hostname));
+    current_peer.set([&conn](const proto::Message& m) { return conn.send_json(proto::encode(m)); });
+    struct PeerReset {
+        kvm::layout_sync::Session& places;
+        kvm::CurrentPeer& peer;
+        ~PeerReset() {
+            peer.set(nullptr);
+            places.end();
+        }
+    } peer_reset{places, current_peer};
     if (!opt.desk) match_vdd_to_peer(hello->screen_w, hello->screen_h, client_side);  // desk mode sizes it itself
 
     // KVM + clipboard use conn while the session lasts. detach() blocks until they
@@ -248,6 +262,10 @@ void run_session(kvm::net::Connection& conn, kvm::KvmLink* kvm, kvm::clip::Clipb
                 // windows: B's viewer controls A's window (remote_input), or B's window streams here
             } else if (const auto* c = std::get_if<proto::Clipboard>(&*msg); c && clip) {
                 clip->receive(to_chunk(*c));
+            } else if (const auto* l = std::get_if<proto::Layout>(&*msg)) {
+                places.on_message(*l);  // the client's view of where it stands, if newer
+            } else if (std::holds_alternative<proto::Identify>(*msg)) {
+                kvm::log::info("identify: the other PC shows its screen numbers - showing this PC's too");
             } else {
                 kvm::log::info("from client: {}", proto::encode(*msg).dump());
             }
@@ -358,6 +376,18 @@ int wmain(int argc, wchar_t** argv) {
                 if (link) link->set_on_emergency(nullptr);
             }
         } emergency_reset{kvm_link ? &*kvm_link : nullptr};
+
+        // Where each client stands: kept per PC in config.json and the same on both PCs (each session
+        // agrees on it), applied to the KVM edges and the VDD while running. The launcher's Displays
+        // window moves it ("layout ...") and asks for Identify on both PCs ("identify").
+        kvm::layout_sync::Session places(kvm::config_file_in_use(opt.config_path), /*this_is_host=*/true,
+                                         [&](kvm::display::Side s) {
+                                             if (kvm_link) kvm_link->set_peer_side(s);
+                                             windows.set_peer_side(s);
+                                         });
+        kvm::CurrentPeer current_peer;
+        kvm::LauncherCommands commands(
+            [&](const std::string& line) { kvm::handle_launcher_command(line, places, current_peer); });
         VideoSlot video;
         std::jthread video_acceptor([&] { accept_video_loop(video_server, video, windows); });
 
@@ -419,7 +449,7 @@ int wmain(int argc, wchar_t** argv) {
             }
             if (discovery) discovery->set_busy(true);  // other PCs list this one as taken meanwhile
             run_session(*conn, kvm_link ? &*kvm_link : nullptr, clip_on ? &clip : nullptr, video, opt,
-                        side.value_or(kvm::display::Side::Right), windows);
+                        side.value_or(kvm::display::Side::Right), windows, places, current_peer);
             if (discovery) discovery->set_busy(false);
         }
         hotkeys.stop();

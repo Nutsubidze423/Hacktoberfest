@@ -120,6 +120,8 @@ tools/
 | `stream_stop` | ორივე | `hwnd`. owner → viewer: შეჩერდა; viewer → owner: „დამიბრუნე“ |
 | `remote_mouse_move` | viewer → window owner (ორივე) | `x_norm`, `y_norm` (სტრიმულ ფანჯარაში, 0..1) |
 | `clipboard` | ორივე | `seq`, `kind` (`text`/`png`), `total`, `offset`, `data` (base64, ≤ 32 KB) — ერთი კოპირება რამდენიმე ნაწილად |
+| `layout` | ორივე (hello-ს მერე და Displays → Apply-ზე) | `you_are` (`left`/`right`/`top`/`bottom` — სად დგას **მიმღები** გამგზავნის მიმართ), `set_at` (ms, როდის დააყენა მომხმარებელმა; 0 = არასოდეს). უფრო ახალი იგებს, თანაბარზე — host. თითოეული PC ინახავს config.json `"peers": {სახელი: {side, set_at}}` — ყველა კავშირს თავისი პოზიცია (`common/.../layout_sync.*`) |
+| `identify` | ორივე | — მეორე PC-ც აჩვენებს თავისი ეკრანების ნომრებს |
 | `ping` / `pong` | ორივე | `t` (+ `pong`-ში `t_peer` — clock offset-ისთვის) |
 | `frame` (50501 header) | window owner → viewer (ორივე, ერთი TCP არხი) | `seq`, `t_capture_us`, `width`, `height`, `codec`; desk mode: `layer:"desk"`, `window` (ერთი ფანჯრის სურათი, WGC window capture), `x`, `y` (ფანჯრის ჩარჩოში), `alpha_bytes` (payload = JPEG 4:4:4 + alpha runs `[u8 a][u16 n]` — მომრგვალებული კუთხეები) |
 

@@ -28,6 +28,7 @@ constexpr UINT kMsgStop = WM_APP + 5;
 constexpr UINT kMsgCooldown = WM_APP + 6;  // suspension ended
 constexpr UINT kMsgSuspended = WM_APP + 7; // suspension started
 constexpr UINT kMsgDeskChanged = WM_APP + 8;  // the desk Region's VDD changed
+constexpr UINT kMsgSide = WM_APP + 9;         // set_client_side(); wparam = display::Side
 
 // While the peer controls this PC, this much of our own mouse movement within
 // kTakeoverWindowMs means "I want my PC back" (touchpad noise stays below it).
@@ -687,6 +688,17 @@ struct CaptureThread {
                 }
                 return 0;
             case kMsgDeskChanged: refresh_monitors(); return 0;
+            case kMsgSide: {
+                // Only here, on the hook thread, which is the only one reading it.
+                const auto side = static_cast<display::Side>(wp);
+                if (cap->options_.client_side != side) {
+                    if (cap->remote_ && !desk) leave_remote(true);  // the edge it crossed is no edge any more
+                    cap->options_.client_side = side;
+                    refresh_monitors();
+                    note("input capture: the other PC stands on another side now");
+                }
+                return 0;
+            }
             case kMsgLocal: leave_remote(wp != 0); return 0;
             case kMsgReturned: returned(unpack(wp)); return 0;
             case kMsgUnhook: unhook(); return 0;
@@ -765,6 +777,10 @@ void InputCapture::switch_to_remote(double y_norm) {
 
 void InputCapture::switch_to_local(bool tell_peer) {
     post(kMsgLocal, tell_peer ? 1 : 0);
+}
+
+void InputCapture::set_client_side(display::Side side) {
+    post(kMsgSide, static_cast<unsigned long long>(side));
 }
 
 void InputCapture::set_on_drag_at_edge(DragAtEdge callback) {

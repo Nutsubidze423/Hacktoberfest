@@ -94,18 +94,31 @@ void KvmLink::detach() {
     sink_ = nullptr;
 }
 
+void KvmLink::set_peer_side(display::Side side) {
+    {
+        std::lock_guard lock(inject_mutex_);
+        if (options_.peer_side == side) return;
+        options_.peer_side = side;
+        inject_.set_host_side(side);
+    }
+    if (capture_) capture_->set_client_side(side);
+    log::info("kvm: the other PC is on the {} now", display::to_string(side));
+}
+
 void KvmLink::take_back() {
+    display::Side peer_side;
     {
         std::lock_guard lock(inject_mutex_);
         if (!inject_.active()) return;
         inject_.release_all();
+        peer_side = options_.peer_side;
     }
     // The peer's cursor goes home where ours is now along the shared edge: the height for a peer on
     // the left or right, the x position for one above or below.
     const auto vd = display::virtual_desktop();
     POINT pt{};
     GetCursorPos(&pt);
-    const bool along_x = options_.peer_side == display::Side::Top || options_.peer_side == display::Side::Bottom;
+    const bool along_x = peer_side == display::Side::Top || peer_side == display::Side::Bottom;
     const int len = along_x ? vd.width() : vd.height();
     const int at = along_x ? pt.x - vd.left : pt.y - vd.top;
     const double y_norm = len > 0 ? std::clamp((at + 0.5) / len, 0.0, 1.0) : 0.5;

@@ -87,6 +87,10 @@ public:
     // Called after Ctrl+Alt+Shift+Q (e.g. desk mode off, VDD detached).
     void set_on_emergency(std::function<void()> callback);
 
+    // The other PC stands on `side` now (kvm/layout_sync.h: each PC it meets has its own place, and
+    // the user may move it): the edges towards it follow. Any thread.
+    void set_peer_side(display::Side side);
+
     // The peer let go of the left button of a file drag it carried over to this PC (see
     // InputInject::set_on_drag_release): FileLink::peer_released(). Set before sessions start.
     void set_on_drag_release(std::function<void()> callback);

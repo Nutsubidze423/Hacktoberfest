@@ -95,11 +95,15 @@ public:
     void disable_desk();
     bool desk_live() const { return desk_live_; }
 
+    // The other PC stands on `side` now (kvm/layout_sync.h): the VDD moves to that side of this PC's
+    // screens (desk mode re-shares from there). Any thread.
+    void set_peer_side(display::Side side);
+
     void set_rtt_ms(int rtt_ms, std::int64_t clock_offset_us);
 
 private:
     struct DeskCommand {
-        enum Kind { Start, Stop, Disable, Exit } kind = Start;
+        enum Kind { Start, Stop, Disable, Exit, Side } kind = Start;  // Side: peer_side_ changed
         int width = 0;
         int height = 0;
         double scale = 1.0;  // the peer's display scale
@@ -112,6 +116,7 @@ private:
     void toggle_desk(HWND window);
 
     Options options_;
+    std::atomic<display::Side> peer_side_;  // options_.peer_side, changed by set_peer_side()
     // mutex_: share_, input_, viewer_, desk_input_, peer size. video_mutex_: video_, router_ (never
     // held while waiting on mutex_, so stopping a share can join its sender thread). send_mutex_: send_.
     // parked_mutex_: parked_ (windows sent over with Ctrl+Alt+Shift+W in desk mode).

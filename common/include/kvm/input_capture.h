@@ -92,6 +92,10 @@ public:
     void switch_to_remote(double y_norm = 0.5);
     void switch_to_local(bool tell_peer = true);
 
+    // The peer stands on another side now (it connected, or the user moved it in the Displays
+    // window): the edge towards it moves there. Any thread; applied on the hook thread.
+    void set_client_side(display::Side side);
+
     // While suspended, control never moves to the peer (the peer is controlling
     // this PC). Leaving suspension starts the switch cooldown.
     void set_suspended(bool suspended);

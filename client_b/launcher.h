@@ -43,7 +43,12 @@ struct Rtt {
 struct Problem {  // an [error] line
     std::string text;
 };
-using Event = std::variant<std::monostate, Connected, LinkUp, SessionEnded, Searching, Rtt, Problem>;
+struct PlaceSet {  // where the connected PC stands was applied ("layout: 'name' is on the right of this PC")
+    std::string name;
+    std::string side;
+};
+struct IdentifyAsked {};  // the other PC pressed Identify: show this PC's screen numbers
+using Event = std::variant<std::monostate, Connected, LinkUp, SessionEnded, Searching, Rtt, Problem, PlaceSet, IdentifyAsked>;
 
 Event parse_line(std::string_view line);
 
@@ -79,6 +84,9 @@ struct Options {
     std::optional<layout::Role> role;                  // else the host (see App::decide_role)
     std::optional<std::filesystem::path> config_path;  // else the one the apps would find
     std::vector<std::wstring> app_args;                // passed to the app, e.g. --no-clipboard
+    // Opened by the user: show the PCs on the network right away, one click connects. false =
+    // started with Windows (--background): only the tray icon (PCs set to "Auto" still connect).
+    bool show_devices = true;
 };
 
 // Runs until Quit (tray menu) or Windows ends the session. Returns the process exit code.

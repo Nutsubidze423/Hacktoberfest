@@ -82,7 +82,7 @@ const char* cursor_shape(HCURSOR cursor) {
 
 }  // namespace
 
-WindowLink::WindowLink(Options options) : options_(options) {
+WindowLink::WindowLink(Options options) : options_(options), peer_side_(options.peer_side) {
     std::promise<void> ready;
     auto started = ready.get_future();
     ui_thread_ = std::thread([this, &ready] {
@@ -219,6 +219,11 @@ void WindowLink::detach() {
     send_ = nullptr;
 }
 
+void WindowLink::set_peer_side(display::Side side) {
+    if (peer_side_.exchange(side) == side) return;
+    if (options_.desk) desk_commands_.push({.kind = DeskCommand::Side});
+}
+
 void WindowLink::disable_desk() {
     if (options_.desk) desk_commands_.push({.kind = DeskCommand::Disable});
 }
@@ -300,7 +305,7 @@ void WindowLink::toggle() {
             {.width = peer_w_,
              .height = peer_h_,
              .hz = 60,
-             .side = options_.peer_side,
+             .side = peer_side_.load(),
              .jpeg_quality = options_.jpeg_quality,
              .max_fps = options_.max_fps});
     } catch (const std::exception& e) {
@@ -448,8 +453,9 @@ void WindowLink::desk_main(std::stop_token stop) {
         }
         go_live(false);
         share.reset();
-        const bool ok = vdd->attached() ? vdd->match_peer(w, h, options_.peer_side)
-                                        : vdd->attach(w, h, 60, options_.peer_side);
+        const auto side = peer_side_.load();
+        const bool ok = vdd->attached() ? vdd->match_peer(w, h, side)
+                                        : vdd->attach(w, h, 60, side);
         const auto r = vdd->rect();
         if (!ok || !r) {
             log::error("desk: the virtual display could not be attached - Ctrl+Alt+Shift+W uses the viewer");
@@ -470,13 +476,22 @@ void WindowLink::desk_main(std::stop_token stop) {
         size = want;
         go_live(true);
         log::info("desk: on - the other PC's screen ({}x{}) is on the {}: drag windows over the edge",
-                  vdd_rect.width(), vdd_rect.height(), display::to_string(options_.peer_side));
+                  vdd_rect.width(), vdd_rect.height(), display::to_string(side));
     };
 
     while (!stop.stop_requested()) {
         if (auto cmd = desk_commands_.pop_for(kDeskPoll)) {
             switch (cmd->kind) {
                 case DeskCommand::Start: start(cmd->width, cmd->height, cmd->scale); break;
+                case DeskCommand::Side:
+                    // The other PC stands elsewhere now: move the VDD there. The recheck below sees it
+                    // moved and shares it anew from its new place.
+                    if (share && vdd && vdd->attached()) {
+                        const auto side = peer_side_.load();
+                        if (vdd->place(side)) log::info("desk: the other PC's screen moved to the {}", display::to_string(side));
+                        next_recheck = Clock::now();
+                    }
+                    break;
                 case DeskCommand::Stop:
                     if (share) {
                         go_live(false);  // the cursor can't go there meanwhile; windows stay put

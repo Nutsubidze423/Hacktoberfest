@@ -135,6 +135,7 @@ public:
         }
         canvas_.present(hwnd_, m.work.left + inset, m.work.bottom - inset - size, 255);
         ShowWindow(hwnd_, SW_SHOWNOACTIVATE);
+        SetTimer(hwnd_, kHideTimer, kIdentifyMs, nullptr);  // goes away by itself, Displays window open or not
     }
     ~IdentifyPopup() {
         if (hwnd_) DestroyWindow(hwnd_);
@@ -150,10 +151,19 @@ private:
         case WM_LBUTTONDOWN:
             ShowWindow(hwnd, SW_HIDE);  // click it away
             return 0;
+        case WM_TIMER:
+            if (wp == kHideTimer) {
+                KillTimer(hwnd, kHideTimer);
+                ShowWindow(hwnd, SW_HIDE);
+                return 0;
+            }
+            break;
         default:
-            return DefWindowProcW(hwnd, msg, wp, lp);
+            break;
         }
+        return DefWindowProcW(hwnd, msg, wp, lp);
     }
+    static constexpr UINT_PTR kHideTimer = 1;
 
     void draw(const display::Monitor& m, int number, UINT dpi, int size) {
         ID2D1RenderTarget* rt = canvas_.begin(size, size);
@@ -180,7 +190,11 @@ private:
         const float line = text.metrics(TextStyle::Caption).line_px;
         const float logo = P(18);
         p.logo({pad, s - pad - 2 * line - P(6) - logo + line, pad + logo, s - pad - 2 * line - P(6) + line});
-        p.text(TextStyle::BodyStrong, ui::kAppName, pad + logo + P(6), s - pad - 2 * line - P(4), s - 2 * pad, c.ink);
+        // This PC's name: with both PCs showing their numbers, each tile says whose screen it is.
+        wchar_t computer[MAX_COMPUTERNAME_LENGTH + 1]{};
+        DWORD computer_len = MAX_COMPUTERNAME_LENGTH + 1;
+        const std::wstring name = GetComputerNameW(computer, &computer_len) ? std::wstring(computer) : std::wstring(ui::kAppName);
+        p.text(TextStyle::BodyStrong, name, pad + logo + P(6), s - pad - 2 * line - P(4), s - 2 * pad - logo - P(6), c.ink);
         p.text(TextStyle::Caption, std::format(L"{}{}{}", size_text(m.rect.width(), m.rect.height()), ui::kSeparator,
                                                percent(m.scale)),
                pad, s - pad - line, s - 2 * pad, c.ink2);
@@ -368,6 +382,7 @@ LRESULT DisplaySettings::handle_message(UINT msg, WPARAM wp, LPARAM lp) {
             peer_ = p->first;
             peer_live_ = p->second;
             peer_set_ = true;
+            config_changed();  // this PC's own place for it
             InvalidateRect(hwnd, nullptr, FALSE);
         }
         return 0;
@@ -592,6 +607,19 @@ void DisplaySettings::reload_config() {
                                        widen(cfg_.client_side));
         }
     }
+    // The connected (or last) PC keeps its own place ("peers", kvm/layout_sync.h), the same on both PCs.
+    if (cfg_.error.empty() && peer_.known()) {
+        if (const auto it = cfg_.peer_sides.find(peer_.hostname); it != cfg_.peer_sides.end()) {
+            if (const auto side = display::parse_side(it->second); side && layout::side_accepted(*side)) {
+                saved_side_ = *side;
+                saved_valid_ = true;
+                if (status_ == Status::Error) {
+                    status_ = Status::Clean;
+                    status_text_.clear();
+                }
+            }
+        }
+    }
     pending_side_ = layout::side_accepted(saved_side_) ? saved_side_ : layout::peer_side_from(role_, Side::Right);
     if (keep_saved_note && status_ == Status::Clean) status_ = Status::Saved;
     if (hwnd_) InvalidateRect(hwnd_, nullptr, FALSE);
@@ -634,12 +662,26 @@ void DisplaySettings::apply() {
         log::error("displays: {}", error);
     } else {
         log::info("displays: client_side \"{}\" saved to {}", display::to_string(client_side), cfg_.path.string());
+        const Side peer_side = pending_side_;
         status_ = Status::Clean;
         reload_config();
+        pending_side_ = saved_side_ = peer_side;  // the app saves it for the connected PC in a moment
         status_ = Status::Saved;
-        if (auto on_applied = on_applied_) on_applied();
+        if (auto on_applied = on_applied_) on_applied(peer_side);
     }
     if (hwnd_) InvalidateRect(hwnd_, nullptr, FALSE);
+}
+
+void DisplaySettings::config_changed() {
+    if (dirty() || status_ == Status::Error) return;
+    const bool saved = status_ == Status::Saved;
+    reload_config();
+    if (saved) status_ = Status::Saved;
+}
+
+void DisplaySettings::identify_screens() {
+    if (!hwnd_) mons_ = layout::local_monitors();  // the window is closed: its list may be old
+    identify();  // the popups hide themselves after a moment
 }
 
 void DisplaySettings::revert() {
@@ -671,7 +713,10 @@ void DisplaySettings::activate(Hit hit) {
     case Hit::Connect: set_role(role_ == Role::Host ? Role::Client : Role::Host); break;
     case Hit::Apply: apply(); break;
     case Hit::Revert: revert(); break;
-    case Hit::Identify: identify(); break;
+    case Hit::Identify:
+        identify();
+        if (auto on_identify = on_identify_) on_identify();  // and on the other PC's screens
+        break;
     case Hit::WindowsSettings:
         ShellExecuteW(hwnd_, L"open", L"ms-settings:display", nullptr, nullptr, SW_SHOWNORMAL);
         break;
@@ -1130,21 +1175,31 @@ void DisplaySettings::draw_footer(ui::Painter& p, const Layout& l) {
         break;
     case Status::Saved:
         rgb = c.ok;
-        text = options_.app_restarts
-                   ? std::format(L"Saved \u2014 Sarke restarted with it. On {}, this PC must be on the {}.", other, this_side)
-                   : std::format(L"Saved. Restart Sarke on this PC \u2014 and on {}, this PC must be on the {}.", other, this_side);
+        if (peer_live_ && peer_.known()) {
+            text = std::format(L"Saved \u2014 {} has this PC on its {} now, too.", other, this_side);
+        } else {
+            text = options_.app_restarts
+                       ? std::format(L"Saved \u2014 Sarke restarted with it. On {}, this PC must be on the {}.", other, this_side)
+                       : std::format(L"Saved. Restart Sarke on this PC \u2014 and on {}, this PC must be on the {}.", other, this_side);
+        }
         break;
     default:
         if (dirty()) {
             rgb = c.warn;
             const std::wstring cs = side_word(layout::client_side_for(role_, pending_side_));
-            text = options_.app_restarts
-                       ? std::format(L"Not saved yet. Apply writes client_side \"{}\" to config.json and restarts Sarke.", cs)
-                       : std::format(L"Not saved yet. Apply writes client_side \"{}\" to config.json, then restart Sarke.", cs);
+            if (peer_live_ && peer_.known()) {
+                text = std::format(L"Not saved yet. Apply moves {} there on both PCs at once.", other);
+            } else {
+                text = options_.app_restarts
+                           ? std::format(L"Not saved yet. Apply writes client_side \"{}\" to config.json and restarts Sarke.", cs)
+                           : std::format(L"Not saved yet. Apply writes client_side \"{}\" to config.json, then restart Sarke.", cs);
+            }
         } else if (!cfg_.exists) {
             text = L"No config.json yet \u2014 Sarke uses \"right\". Apply creates it next to the app.";
+        } else if (peer_live_ && peer_.known()) {
+            text = std::format(L"In sync with {}: there, this PC is on the {}. Each PC keeps its own place.", other, this_side);
         } else {
-            text = std::format(L"Each PC keeps its own setting: on {}, this PC must be on the {}.", other, this_side);
+            text = std::format(L"Saved per PC and kept in sync: on {}, this PC is on the {}.", other, this_side);
         }
         break;
     }

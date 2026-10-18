@@ -68,7 +68,7 @@ Name: "{autoprograms}\Sarke"; Filename: "{app}\sarke.exe"; WorkingDir: "{app}"
 Name: "{autodesktop}\Sarke"; Filename: "{app}\sarke.exe"; WorkingDir: "{app}"; Tasks: desktopicon
 
 [Registry]
-Root: HKA; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "Sarke"; ValueData: """{app}\sarke.exe"""; Flags: uninsdeletevalue; Tasks: autostart
+Root: HKA; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "Sarke"; ValueData: """{app}\sarke.exe"" --background"; Flags: uninsdeletevalue; Tasks: autostart
 
 [Run]
 ; Windows Firewall: Sarke's ports and its two programs, from the local network only, on any network

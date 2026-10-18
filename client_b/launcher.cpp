@@ -142,6 +142,14 @@ std::string computer_name() {
 
 std::wstring scale_text(double scale) { return std::format(L"{}%", std::lround(scale * 100)); }
 
+// The bottom-right corner of the main monitor's work area: where the tray and its cards are.
+POINT tray_corner() {
+    MONITORINFO mi{};
+    mi.cbSize = sizeof(mi);
+    GetMonitorInfoW(MonitorFromPoint({0, 0}, MONITOR_DEFAULTTOPRIMARY), &mi);
+    return {mi.rcWork.right, mi.rcWork.bottom};
+}
+
 }  // namespace
 
 // ---------------------------------------------------------------------------------------------
@@ -154,6 +162,7 @@ Event parse_line(std::string_view line) {
     static const std::regex kClientLinkUp(R"(^connected to host (.+)$)");
     static const std::regex kClientHello(R"(^host '(.*)': screen (\d+)x(\d+), dpi scale ([0-9.]+)$)");
     static const std::regex kRtt(R"(^link: rtt ([0-9.]+) ms)");
+    static const std::regex kPlace(R"(^layout: '(.*)' is on the (left|right|top|bottom) of this PC)");
 
     std::string s(line);
     while (!s.empty() && (s.back() == '\r' || s.back() == '\n')) s.pop_back();
@@ -173,6 +182,8 @@ Event parse_line(std::string_view line) {
     if (std::regex_match(msg, g, kClientLinkUp)) return LinkUp{g[1]};
     if (msg.starts_with("looking for a KVM host") || msg.starts_with("no KVM host found yet")) return Searching{};
     if (std::regex_search(msg, g, kRtt)) return Rtt{std::stod(g[1])};
+    if (std::regex_search(msg, g, kPlace)) return PlaceSet{g[1], g[2]};
+    if (msg.starts_with("identify: the other PC shows")) return IdentifyAsked{};
     if (level == "error") return Problem{msg};
     return std::monostate{};
 }
@@ -282,7 +293,9 @@ private:
     void maybe_auto_connect();
     void connect_to(const discovery::Host& host, bool automatic);
     void disconnect();
-    void pick_device();  // "Connect to another PC…" (tray) and the Displays window's Connect button
+    // "Connect to another PC…": at the cursor (tray, the Displays window's Connect button), or at
+    // `at` (above the tray when Sarke starts).
+    void pick_device(std::optional<POINT> at = std::nullopt);
     std::vector<DevicePicker::Row> picker_rows();
     void refresh_picker();
     bool auto_listed(std::string_view name) const;
@@ -301,6 +314,7 @@ private:
     void on_command(UINT id);
     void change_config(std::string_view key, layout::ConfigValue value, const std::wstring& what);
     void restart(const std::wstring& why);
+    bool send_command(const std::string& line);  // to the running app's stdin (kvm/launcher_commands.h)
     void notify(std::wstring_view title, std::wstring_view text, Toast::Kind kind);
     std::optional<Config> current_config() const;
 
@@ -358,13 +372,20 @@ App::~App() {
 }
 
 int App::run() {
-    // One launcher per user session: a second start shows the first one's Display arrangement.
+    // One launcher per user session: a second start opens the first one's list of PCs.
     HANDLE mutex = CreateMutexW(nullptr, TRUE, kMutexName);
     if (mutex && GetLastError() == ERROR_ALREADY_EXISTS) {
         const UINT what = options_.command == Command::Quit      ? kMsgRemoteQuit
                           : options_.command == Command::Restart ? kMsgRemoteRestart
                                                                  : kMsgRemoteShow;
-        if (const HWND other = FindWindowW(kWindowClass, nullptr)) PostMessageW(other, what, 0, 0);
+        if (const HWND other = FindWindowW(kWindowClass, nullptr)) {
+            // The user just started this one, so it may come to the front: let the first one show
+            // its card there (it closes when it loses focus).
+            DWORD pid = 0;
+            GetWindowThreadProcessId(other, &pid);
+            if (pid) AllowSetForegroundWindow(pid);
+            PostMessageW(other, what, 0, 0);
+        }
         CloseHandle(mutex);
         return 0;
     }
@@ -402,7 +423,13 @@ int App::run() {
                                 },
                                 .quit = [this] { on_command(kCmdQuit); }});
     tray_.set_menu([this] { return build_menu(); }, [this](UINT id) { on_command(id); });
-    displays_.set_applied_handler([this] { restart(L"to use the new side"); });
+    displays_.set_applied_handler([this](display::Side side) {
+        // Connected: the running app moves the other PC at once, on both PCs (kvm/launcher_commands.h).
+        // Otherwise the app reads the new side when it starts.
+        if (link_ == Link::Linked && send_command(std::format("layout {}", display::to_string(side)))) return;
+        restart(L"to use the new side");
+    });
+    displays_.set_identify_handler([this] { send_command("identify"); });  // the other PC shows its numbers too
     // The Displays window's Connect button lists the PCs on the network; Disconnect makes this the host.
     displays_.set_role_change_handler([this](Role r) {
         if (r == Role::Client) {
@@ -415,9 +442,16 @@ int App::run() {
     self_name_ = computer_name();
     scanner_ = std::jthread([this, hwnd = hwnd_](std::stop_token stop) { scan_loop(stop, hwnd); });
     decide_role();
+    // Opened by the user: the PCs on the network right away, above the tray (the list fills in as
+    // the scanner finds them). One click connects; PCs set to "Auto" connect by themselves meanwhile.
+    // Started with Windows: only a card that Sarke runs.
     if (start_app()) {
-        notify(L"Sarke is running", std::format(L"{} · settings are in the tray", role_ == Role::Host ? L"Host" : L"Client"),
-               Toast::Kind::Info);
+        if (options_.show_devices) {
+            pick_device(tray_corner());
+        } else {
+            notify(L"Sarke is running", std::format(L"{} · settings are in the tray", role_ == Role::Host ? L"Host" : L"Client"),
+                   Toast::Kind::Info);
+        }
     }
 
     MSG msg;
@@ -582,7 +616,7 @@ std::vector<DevicePicker::Row> App::picker_rows() {
     return rows;
 }
 
-void App::pick_device() {
+void App::pick_device(std::optional<POINT> at) {
     picker_.show(picker_rows(), {
                                     .connect =
                                         [this](std::size_t i) {
@@ -598,7 +632,8 @@ void App::pick_device() {
                                             refresh_picker();
                                         },
                                     .disconnect = [this] { disconnect(); },
-                                });
+                                },
+                 at);
 }
 
 void App::refresh_picker() {
@@ -796,6 +831,10 @@ void App::handle(const Event& e) {
             } else if constexpr (std::is_same_v<T, Rtt>) {
                 rtt_ms_ = ev.ms;
                 update_tray();
+            } else if constexpr (std::is_same_v<T, PlaceSet>) {
+                displays_.config_changed();  // the app saved where the connected PC stands: show it
+            } else if constexpr (std::is_same_v<T, IdentifyAsked>) {
+                displays_.identify_screens();
             } else if constexpr (std::is_same_v<T, Problem>) {
                 last_problem_ = widen(ev.text);
                 const auto now = std::chrono::steady_clock::now();
@@ -806,6 +845,14 @@ void App::handle(const Event& e) {
             }
         },
         e);
+}
+
+bool App::send_command(const std::string& line) {
+    if (!process_ || !stdin_write_ || stopping_) return false;
+    const std::string text = line + "\n";
+    DWORD written = 0;
+    return WriteFile(stdin_write_, text.data(), static_cast<DWORD>(text.size()), &written, nullptr) &&
+           written == text.size();
 }
 
 void App::stop_app(bool restart_after) {
@@ -1073,9 +1120,8 @@ LRESULT App::handle_message(UINT msg, WPARAM wp, LPARAM lp) {
     case kMsgRemoteRestart:
         on_command(kCmdRestart);
         return 0;
-    case kMsgRemoteShow:  // a second launcher was started
-        displays_.show({.config_path = config_path_, .role = role_, .app_restarts = true});
-        notify(L"Sarke is already running", L"It lives in the tray (^ on the taskbar).", Toast::Kind::Info);
+    case kMsgRemoteShow:  // a second launcher was started (Start menu, desktop): the PCs on the network
+        pick_device(tray_corner());
         return 0;
     case WM_TIMER:
         if (wp == kKillTimer) {  // didn't stop in time

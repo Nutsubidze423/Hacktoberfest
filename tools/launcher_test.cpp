@@ -65,6 +65,12 @@ void log_lines() {
     check(as<launcher::Rtt>(e) && as<launcher::Rtt>(e)->ms == 3.25, "rtt");
     e = launcher::parse_line("01:02:03.456 [error] config: client_side must be \"left\" or \"right\", got \"top\"");
     check(as<launcher::Problem>(e) && as<launcher::Problem>(e)->text.starts_with("config: client_side"), "error line -> problem");
+    e = launcher::parse_line("01:02:03.456 [info] layout: 'tabuladze' is on the right of this PC (set on the other PC)\r\n");
+    check(as<launcher::PlaceSet>(e) && as<launcher::PlaceSet>(e)->name == "tabuladze" && as<launcher::PlaceSet>(e)->side == "right",
+          "layout line -> where the other PC stands");
+    check(as<launcher::IdentifyAsked>(launcher::parse_line(
+              "01:02:03.456 [info] identify: the other PC shows its screen numbers - showing this PC's too")) != nullptr,
+          "identify line -> show this PC's numbers");
     check(std::holds_alternative<std::monostate>(launcher::parse_line("01:02:03.456 [info] video channel from 1.2.3.4")),
           "other info lines mean nothing");
     check(std::holds_alternative<std::monostate>(launcher::parse_line("  1) tabuladze  (172.20.10.2)")), "non-log lines mean nothing");

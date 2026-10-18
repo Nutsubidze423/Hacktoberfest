@@ -18,6 +18,8 @@ using ui::pal;
 using ui::TextStyle;
 
 constexpr wchar_t kClassName[] = L"SarkeDevicePicker";
+constexpr UINT_PTR kOutsideTimer = 1;  // without the focus: watches for a click outside the card
+constexpr UINT kOutsideMs = 100;
 
 // Card (dp), like the notification card (docs/DESIGN.md 9.3).
 constexpr float kWidth = 380;
@@ -96,17 +98,25 @@ bool DevicePicker::ensure_window() {
     return hwnd_ != nullptr;  // set in WM_NCCREATE
 }
 
-void DevicePicker::show(std::vector<Row> rows, Actions actions) {
+void DevicePicker::show(std::vector<Row> rows, Actions actions, std::optional<POINT> anchor) {
     if (!ensure_window()) return;
     rows_ = std::move(rows);
     actions_ = std::move(actions);
     hover_ = {};
-    GetCursorPos(&anchor_);
+    if (anchor) {
+        anchor_ = *anchor;
+    } else {
+        GetCursorPos(&anchor_);
+    }
     layout_at(anchor_);
     render();
     present();
+    close_on_blur_ = !anchor;
+    had_focus_ = false;
     ShowWindow(hwnd_, SW_SHOW);
     SetForegroundWindow(hwnd_);  // so a click anywhere else closes it (WM_ACTIVATE)
+    had_focus_ = GetForegroundWindow() == hwnd_;
+    if (!close_on_blur_ || !had_focus_) SetTimer(hwnd_, kOutsideTimer, kOutsideMs, nullptr);
 }
 
 void DevicePicker::update(std::vector<Row> rows) {
@@ -120,6 +130,7 @@ void DevicePicker::update(std::vector<Row> rows) {
 }
 
 void DevicePicker::close() {
+    if (hwnd_) KillTimer(hwnd_, kOutsideTimer);
     if (hwnd_ && IsWindowVisible(hwnd_)) ShowWindow(hwnd_, SW_HIDE);
     hover_ = {};
 }
@@ -307,7 +318,23 @@ LRESULT DevicePicker::handle_message(UINT msg, WPARAM wp, LPARAM lp) {
     const HWND hwnd = hwnd_;
     switch (msg) {
     case WM_ACTIVATE:
-        if (LOWORD(wp) == WA_INACTIVE) close();  // a click anywhere else
+        if (LOWORD(wp) != WA_INACTIVE) {
+            if (GetForegroundWindow() == hwnd) {  // e.g. clicked: from now on losing the focus closes it
+                had_focus_ = true;
+                if (close_on_blur_) KillTimer(hwnd, kOutsideTimer);
+            }
+        } else if (close_on_blur_ && had_focus_) {
+            close();  // a click anywhere else
+        }
+        return 0;
+    case WM_TIMER:
+        if (wp == kOutsideTimer) {
+            const bool pressed = (GetAsyncKeyState(VK_LBUTTON) | GetAsyncKeyState(VK_RBUTTON) | GetAsyncKeyState(VK_MBUTTON)) & 0x8000;
+            POINT pt{};
+            GetCursorPos(&pt);
+            const HWND under = WindowFromPoint(pt);
+            if (pressed && (!under || GetAncestor(under, GA_ROOT) != hwnd)) close();
+        }
         return 0;
     case WM_KEYDOWN:
         if (wp == VK_ESCAPE) close();

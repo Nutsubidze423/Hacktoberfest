@@ -30,6 +30,8 @@
 #include "kvm/file_transfer.h"
 #include "kvm/hotkeys.h"
 #include "kvm/kvm_link.h"
+#include "kvm/launcher_commands.h"
+#include "kvm/layout_sync.h"
 #include "kvm/log.h"
 #include "kvm/net.h"
 #include "kvm/protocol.h"
@@ -101,7 +103,8 @@ kvm::clip::Chunk to_chunk(const proto::Clipboard& m) {
 }
 
 void run_session(kvm::net::Connection& conn, const kvm::Config& cfg, kvm::KvmLink* kvm,
-                 kvm::clip::ClipboardSync* clip, kvm::FileLink& files, kvm::WindowLink& windows) {
+                 kvm::clip::ClipboardSync* clip, kvm::FileLink& files, kvm::WindowLink& windows,
+                 kvm::layout_sync::Session& places, kvm::CurrentPeer& current_peer) {
     if (!conn.send(make_hello(cfg.desk))) {
         return;
     }
@@ -149,9 +152,16 @@ void run_session(kvm::net::Connection& conn, const kvm::Config& cfg, kvm::KvmLin
             } else if (const auto* h = std::get_if<proto::Hello>(&*msg)) {
                 kvm::log::info("host '{}': screen {}x{}, dpi scale {:.2f}", h->hostname, h->screen_w, h->screen_h,
                                h->dpi_scale);
+                // Where the host stands, kept per PC and the same on both: before KVM and desk mode use it.
+                conn.send(places.begin(h->hostname));
+                current_peer.set([&conn](const proto::Message& m) { return conn.send_json(proto::encode(m)); });
                 const auto client_side = kvm::display::parse_side(cfg.client_side).value_or(kvm::display::Side::Right);
                 if (!cfg.desk) match_vdd_to_peer(h->screen_w, h->screen_h, kvm::display::opposite(client_side));
                 windows.set_peer(*h);  // B's windows go to A at A's size; desk mode: A's screen = one more monitor
+            } else if (const auto* l = std::get_if<proto::Layout>(&*msg)) {
+                places.on_message(*l);  // the host's view of where it stands, if newer
+            } else if (std::holds_alternative<proto::Identify>(*msg)) {
+                kvm::log::info("identify: the other PC shows its screen numbers - showing this PC's too");
             } else {
                 kvm::log::info("from host: {}", proto::encode(*msg).dump());
             }
@@ -170,6 +180,8 @@ void run_session(kvm::net::Connection& conn, const kvm::Config& cfg, kvm::KvmLin
     if (clip) clip->detach();
     if (kvm) kvm->detach();
     detach = {nullptr, nullptr};
+    current_peer.set(nullptr);
+    places.end();
     windows.detach();  // B's window shown on A comes home; the viewer shows the link as lost
     files.set(nullptr);
     windows.set_video(nullptr);  // closes the video channel and joins the viewer's reader
@@ -191,6 +203,9 @@ std::optional<kvm::discovery::Host> discover_host(const std::string& preferred) 
         if (!preferred.empty() && h.name == preferred) return h;
     }
     if (hosts.size() == 1) return hosts.front();
+    // Started by the launcher: stdin carries its commands (kvm/launcher_commands.h), not an answer;
+    // it picks a PC itself (--host).
+    if (GetFileType(GetStdHandle(STD_INPUT_HANDLE)) == FILE_TYPE_PIPE) return hosts.front();
 
     std::printf("\nKVM hosts on this network:\n");
     for (std::size_t i = 0; i < hosts.size(); ++i) {
@@ -327,6 +342,18 @@ int wmain(int argc, wchar_t** argv) {
             }
         } emergency_reset{kvm_link ? &*kvm_link : nullptr};
 
+        // Where the host stands: kept per PC in config.json and the same on both PCs (each session
+        // agrees on it), applied to the KVM edges and the VDD while running. The launcher's Displays
+        // window moves it ("layout ...") and asks for Identify on both PCs ("identify").
+        kvm::layout_sync::Session places(kvm::config_file_in_use(config_path), /*this_is_host=*/false,
+                                         [&](kvm::display::Side s) {
+                                             if (kvm_link) kvm_link->set_peer_side(s);
+                                             windows.set_peer_side(s);
+                                         });
+        kvm::CurrentPeer current_peer;
+        kvm::LauncherCommands commands(
+            [&](const std::string& line) { kvm::handle_launcher_command(line, places, current_peer); });
+
         kvm::Hotkeys hotkeys;
         hotkeys.add('F', [&] { files.show_catcher_at_cursor(); });
         hotkeys.add('W', [&] { windows.toggle(); });
@@ -351,7 +378,8 @@ int wmain(int argc, wchar_t** argv) {
                 cfg.control_port = found->control_port;
             }
             if (auto conn = kvm::net::connect(cfg.host_ip, cfg.control_port)) {
-                run_session(*conn, cfg, kvm_link ? &*kvm_link : nullptr, clip_on ? &clip : nullptr, files, windows);
+                run_session(*conn, cfg, kvm_link ? &*kvm_link : nullptr, clip_on ? &clip : nullptr, files, windows, places,
+                            current_peer);
             }
             if (g_running) {
                 kvm::log::info("reconnecting in {} s...", kReconnectDelay.count());

@@ -61,8 +61,20 @@ public:
     // Runs on the UI thread after the window is gone (closed by the user or destroyed).
     void set_close_handler(std::function<void()> on_close) { on_close_ = std::move(on_close); }
 
-    // Runs on the UI thread after Apply wrote config.json (e.g. the launcher restarts the app).
-    void set_applied_handler(std::function<void()> on_applied) { on_applied_ = std::move(on_applied); }
+    // Runs on the UI thread after Apply wrote config.json, with where the other PC stands now (the
+    // launcher has the running app move it at once, on both PCs; or restarts the app).
+    void set_applied_handler(std::function<void(display::Side peer_side)> on_applied) { on_applied_ = std::move(on_applied); }
+
+    // Runs on the UI thread when the user presses Identify (the launcher asks the other PC to show
+    // its numbers too).
+    void set_identify_handler(std::function<void()> on_identify) { on_identify_ = std::move(on_identify); }
+
+    // The other PC pressed Identify: show this PC's screen numbers for a moment, window open or not.
+    void identify_screens();
+
+    // config.json changed elsewhere (the app saved where the other PC stands): show it, unless the
+    // user is changing it right now.
+    void config_changed();
 
     // Runs on the UI thread when the user picks the Host / Client toggle, so the launcher can connect
     // or disconnect. When set, the toggle is live even though the launcher passed a known role.
@@ -144,7 +156,8 @@ private:
     ui::TextStyles text_;
     ui::unique_icon small_icon_, big_icon_;
     std::function<void()> on_close_;
-    std::function<void()> on_applied_;
+    std::function<void(display::Side)> on_applied_;
+    std::function<void()> on_identify_;
     std::function<void(layout::Role)> on_role_change_;
 
     Options options_;

@@ -199,6 +199,23 @@ struct DeskLayout {
     std::vector<DeskWindow> windows;
 };
 
+// Both directions, right after the hellos and whenever the user moves the other PC in the Displays
+// window: where the receiver stands next to the sender ("right" = on the sender's right) and when the
+// user set that (unix ms; 0 = never set, a default). Both PCs keep the newer one, on a tie the host's;
+// the receiver keeps the opposite for itself (it stands right of us = we stand left of it). Each PC
+// remembers this per peer (config.json "peers"), so every PC it meets keeps its own place.
+struct Layout {
+    static constexpr std::string_view kType = "layout";
+    std::string you_are;     // "left" / "right" / "top" / "bottom"
+    std::int64_t set_at = 0;
+};
+
+// Both directions: the user pressed Identify in the Displays window - show the screen numbers on
+// this PC's monitors too.
+struct Identify {
+    static constexpr std::string_view kType = "identify";
+};
+
 // Video channel header (port 50501), followed by `payload_len` bytes of encoded image.
 // layer "" = a window stream for the viewer window. layer "desk" = desk mode: the picture of one
 // window of the owner's virtual display (`window` = DeskWindow::id), drawn at that window's place
@@ -240,13 +257,16 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(DeskCursor, shape)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(DeskRect, x, y, w, h)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(DeskWindow, id, x, y, w, h)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(DeskLayout, desk_w, desk_h, active, windows)
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(Layout, you_are, set_at)
+inline void to_json(nlohmann::json& j, const Identify&) { j = nlohmann::json::object(); }
+inline void from_json(const nlohmann::json&, Identify&) {}
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(FrameHeader, seq, t_capture_us, width, height, codec, layer, x, y,
                                                 desk_w, desk_h, rects, window, alpha_bytes)
 
 // Any message that travels on the control channel (port 50500).
 using Message = std::variant<Hello, FocusEnter, FocusLeave, MouseMove, MouseButtonEvent, MouseWheel,
                              Key, StreamStart, StreamStop, RemoteMouseMove, Clipboard, Ping, Pong,
-                             DeskMove, DeskCursor, DeskLayout>;
+                             DeskMove, DeskCursor, DeskLayout, Layout, Identify>;
 
 // Serializes a message struct (including FrameHeader) to JSON with its "type" field set.
 template <class M>

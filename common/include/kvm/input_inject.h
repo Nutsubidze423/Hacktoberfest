@@ -62,6 +62,9 @@ public:
     // This PC's own desk Region (its VDD, lent to the peer); nullptr = none. Must outlive this.
     void set_desk(const desk::Region* region) { desk_region_ = region; }
 
+    // The peer stands on another side now. Same thread as handle() (KvmLink holds its lock).
+    void set_host_side(display::Side side);
+
     // The peer let go of a left button it didn't press here: the end of a file drag it carried over
     // (FileLink continues it here). Runs on the thread that calls handle(); keep it short.
     void set_on_drag_release(std::function<void()> callback) { on_drag_release_ = std::move(callback); }
