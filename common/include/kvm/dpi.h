@@ -65,6 +65,14 @@ std::vector<Monitor> monitors();
 // Primary monitor; its rect always starts at (0, 0).
 Monitor primary_monitor();
 
+// Desk mode: the monitor the other PC's windows appear on (config.json "desk_monitor", a
+// Monitor::name such as "\\.\DISPLAY2"). The primary monitor if `name` is empty, isn't attached,
+// or is a Virtual Display Driver output.
+Monitor desk_monitor(std::string_view name);
+
+// True if `name` (Monitor::name) is an output of the Virtual Display Driver.
+bool is_virtual_display(std::string_view name);
+
 // Bounding box of all monitors.
 Rect virtual_desktop();
 Rect virtual_desktop(const std::vector<Monitor>& mons);

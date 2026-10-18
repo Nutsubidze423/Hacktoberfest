@@ -77,18 +77,18 @@ std::string narrow(std::wstring_view s) {
     return out;
 }
 
-// Screen = B's primary monitor, in physical pixels.
-proto::Hello make_hello(bool desk) {
+// Screen = B's desk monitor (the primary unless config "desk_monitor" picks another), physical pixels.
+proto::Hello make_hello(bool desk, const std::string& desk_monitor) {
     wchar_t name[256];
     DWORD name_len = static_cast<DWORD>(std::size(name));
     if (!GetComputerNameExW(ComputerNameDnsHostname, name, &name_len)) {
         name_len = 0;
     }
-    const auto primary = kvm::display::primary_monitor();
+    const auto screen = kvm::display::desk_monitor(desk_monitor);
     return proto::Hello{
-        .screen_w = primary.rect.width(),
-        .screen_h = primary.rect.height(),
-        .dpi_scale = primary.scale,
+        .screen_w = screen.rect.width(),
+        .screen_h = screen.rect.height(),
+        .dpi_scale = screen.scale,
         .hostname = narrow(std::wstring_view(name, name_len)),
         .desk = desk,
     };
@@ -105,7 +105,7 @@ kvm::clip::Chunk to_chunk(const proto::Clipboard& m) {
 void run_session(kvm::net::Connection& conn, const kvm::Config& cfg, kvm::KvmLink* kvm,
                  kvm::clip::ClipboardSync* clip, kvm::FileLink& files, kvm::WindowLink& windows,
                  kvm::layout_sync::Session& places, kvm::CurrentPeer& current_peer) {
-    if (!conn.send(make_hello(cfg.desk))) {
+    if (!conn.send(make_hello(cfg.desk, cfg.desk_monitor))) {
         return;
     }
     kvm::log::info("connected to host {}", conn.peer());
@@ -284,7 +284,8 @@ int wmain(int argc, wchar_t** argv) {
         // KVM lives for the whole process: its hooks stay installed across reconnects.
         std::optional<kvm::KvmLink> kvm_link;
         if (kvm_enabled) {
-            kvm_link.emplace(kvm::KvmOptions{.peer_side = host_side, .is_host = false, .desk = desk});
+            kvm_link.emplace(
+                kvm::KvmOptions{.peer_side = host_side, .is_host = false, .desk = desk, .desk_monitor = cfg.desk_monitor});
             kvm_link->start();  // false = hooks failed (logged); A can still control B
         }
         kvm::clip::ClipboardSync clip;
@@ -332,7 +333,8 @@ int wmain(int argc, wchar_t** argv) {
                                  .max_fps = cfg.max_fps,
                                  .peer_side = host_side,
                                  .desk = desk,
-                                 .own_vdd = desk_own_vdd});
+                                 .own_vdd = desk_own_vdd,
+                                 .desk_monitor = cfg.desk_monitor});
         // Ctrl+Alt+Shift+Q also ends desk mode (the hooks that keep the cursor off the VDD are gone).
         if (kvm_link) kvm_link->set_on_emergency([&windows] { windows.disable_desk(); });
         struct EmergencyReset {  // declared after `windows`, so it runs before `windows` goes away

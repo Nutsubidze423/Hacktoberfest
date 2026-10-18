@@ -22,6 +22,7 @@
 
 #include "device_picker.h"
 #include "display_settings.h"
+#include "kvm/dpi.h"
 #include "kvm/config.h"
 #include "kvm/discovery.h"
 #include "kvm/log.h"
@@ -74,6 +75,8 @@ enum : UINT {
     kCmdRoleClient = 71,
     kCmdRestart = 80,
     kCmdQuit = 90,
+    kCmdMonitorBase = 100,  // + index into menu_monitors_: the monitor the other PC's windows appear on
+    kMaxMonitors = 16,
 };
 struct Choice {
     int value;
@@ -352,6 +355,7 @@ private:
     std::string self_name_;
     std::optional<Target> target_;
     std::vector<Device> devices_;            // UI thread's copy of the scan
+    std::vector<std::string> menu_monitors_;  // what the menu's monitor ids stand for ("" = the main one)
     DevicePicker picker_;
     std::vector<discovery::Host> picker_hosts_;  // what the picker's rows stand for
     std::vector<std::string> picker_names_;
@@ -986,6 +990,23 @@ std::vector<TrayIcon::MenuItem> App::build_menu() {
     m.push_back(std::move(fps));
     m.push_back({.id = kCmdDesk, .text = L"Desk mode (the other PC as a monitor)", .checked = cfg && cfg->desk});
 
+    // Desk mode maps the other PC's virtual display onto one monitor of this PC: which one.
+    Item on_monitor{.text = L"Other PC's windows appear on"};
+    menu_monitors_.clear();
+    const std::string chosen = cfg ? cfg->desk_monitor : std::string();
+    const std::string shown = display::desk_monitor(chosen).name;  // the primary if the chosen one is gone
+    for (const auto& mon : display::monitors()) {
+        if (display::is_virtual_display(mon.name) || menu_monitors_.size() >= kMaxMonitors) continue;
+        const int number = layout::display_number(mon.name);
+        std::wstring text = number > 0 ? std::format(L"Monitor {}", number) : widen(mon.name);
+        text += std::format(L"{}{}{}{}", ui::kSeparator, mon.rect.width(), ui::kTimes, mon.rect.height());
+        if (mon.primary) text += L" (main)";
+        on_monitor.submenu.push_back({.id = kCmdMonitorBase + static_cast<UINT>(menu_monitors_.size()), .text = text,
+                                      .checked = mon.name == shown, .radio = true, .enabled = !cfg || cfg->desk});
+        menu_monitors_.push_back(mon.primary ? std::string() : mon.name);  // "" = whichever is the main one
+    }
+    if (on_monitor.submenu.size() > 1) m.push_back(std::move(on_monitor));  // one monitor: nothing to pick
+
     Item notes{.text = L"Notifications"};
     notes.submenu.push_back({.id = kCmdNotifyConnected, .text = L"When the other PC connects", .checked = settings_.notify_connected});
     notes.submenu.push_back({.id = kCmdNotifyLost, .text = L"When the connection drops", .checked = settings_.notify_lost});
@@ -1016,6 +1037,15 @@ void App::on_command(UINT id) {
     if (id >= kCmdFpsBase && id < kCmdFpsBase + std::size(kFrameRates)) {
         const auto& f = kFrameRates[id - kCmdFpsBase];
         change_config("max_fps", f.value, std::wstring(L"Frame rate: ") + f.text);
+        return;
+    }
+    if (id >= kCmdMonitorBase && id < kCmdMonitorBase + menu_monitors_.size()) {
+        const std::string& name = menu_monitors_[id - kCmdMonitorBase];
+        const int number = layout::display_number(name.empty() ? display::primary_monitor().name : name);
+        // The other PC sizes its virtual display to that monitor when it connects again (restart).
+        change_config("desk_monitor", name,
+                      number > 0 ? std::format(L"The other PC's windows appear on monitor {}", number)
+                                 : std::wstring(L"The other PC's windows appear on the main monitor"));
         return;
     }
     switch (id) {

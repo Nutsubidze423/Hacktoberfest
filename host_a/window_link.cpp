@@ -119,7 +119,7 @@ WindowLink::WindowLink(Options options) : options_(options), peer_side_(options.
     started.wait();
 
     if (options_.desk) {
-        desk_view_ = std::make_unique<DeskView>();  // the other PC's windows, drawn on this screen
+        desk_view_ = std::make_unique<DeskView>(options_.desk_monitor);  // the other PC's windows, drawn here
         desk_thread_ = std::jthread([this](std::stop_token stop) { desk_main(stop); });
     }
 

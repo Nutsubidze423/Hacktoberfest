@@ -31,6 +31,7 @@ KvmLink::KvmLink(KvmOptions options)
               },
               options_.leave_cooldown) {
     inject_.set_desk(options_.desk);
+    inject_.set_desk_monitor(options_.desk_monitor);
 }
 
 KvmLink::~KvmLink() {

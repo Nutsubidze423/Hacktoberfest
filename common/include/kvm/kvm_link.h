@@ -46,6 +46,8 @@ struct KvmOptions {
     std::chrono::milliseconds leave_cooldown{250};
     // Desk mode: this PC's VDD and its windows (kvm/desk_region.h); nullptr = off. Outlives the link.
     desk::Region* desk = nullptr;
+    // Desk mode: this PC's monitor the peer's virtual display maps onto ("" = the primary).
+    std::string desk_monitor;
 };
 
 class KvmLink {

@@ -37,6 +37,7 @@
 #include <memory>
 #include <mutex>
 #include <stop_token>
+#include <string>
 #include <thread>
 
 #include "kvm/desk_region.h"
@@ -65,6 +66,7 @@ public:
         display::Side peer_side = display::Side::Right;  // where the VDD goes
         desk::Region* desk = nullptr;                    // desk mode; nullptr = off. Outlives the link.
         bool own_vdd = true;  // false: show the peer's windows but never attach this PC's VDD (--desk-no-vdd)
+        std::string desk_monitor;  // this PC's monitor the peer's windows appear on ("" = the primary)
     };
 
     explicit WindowLink(Options options);

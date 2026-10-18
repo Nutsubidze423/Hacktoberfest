@@ -37,6 +37,7 @@
 #include <map>
 #include <mutex>
 #include <optional>
+#include <string>
 #include <string_view>
 #include <thread>
 #include <vector>
@@ -51,7 +52,8 @@ class DeskView {
 public:
     using Sink = std::function<bool(const proto::Message&)>;
 
-    DeskView();
+    // monitor: this PC's monitor the windows appear on (display::desk_monitor; "" = the primary).
+    explicit DeskView(std::string monitor = {});
     ~DeskView();
 
     DeskView(const DeskView&) = delete;
@@ -141,7 +143,8 @@ private:
     HBITMAP bitmap_ = nullptr;
     HGDIOBJ old_bitmap_ = nullptr;
     std::uint8_t* bits_ = nullptr;
-    RECT screen_{};  // the primary monitor
+    std::string monitor_;  // config "desk_monitor"
+    RECT screen_{};        // that monitor (the primary by default)
     proto::DeskLayout layout_;
     std::map<std::uint64_t, Picture> pictures_;
     std::vector<Placed> placed_;  // what is drawn now, bottom first

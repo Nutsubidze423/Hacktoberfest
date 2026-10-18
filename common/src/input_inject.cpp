@@ -132,7 +132,7 @@ bool InputInject::off_own_vdd() {
 }
 
 void InputInject::enter_desk() {
-    primary_ = display::primary_monitor().rect;
+    primary_ = display::desk_monitor(desk_monitor_).rect;
     warned_blocked_ = false;
     received_ = {};
     entered_at_ = std::chrono::steady_clock::now();

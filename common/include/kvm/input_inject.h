@@ -62,6 +62,10 @@ public:
     // This PC's own desk Region (its VDD, lent to the peer); nullptr = none. Must outlive this.
     void set_desk(const desk::Region* region) { desk_region_ = region; }
 
+    // Desk mode: this PC's monitor the peer's virtual display maps onto (display::desk_monitor;
+    // "" = the primary). Before the first handle().
+    void set_desk_monitor(std::string monitor) { desk_monitor_ = std::move(monitor); }
+
     // The peer stands on another side now. Same thread as handle() (KvmLink holds its lock).
     void set_host_side(display::Side side);
 
@@ -90,7 +94,8 @@ private:
     display::OuterEdge edge_;
     const desk::Region* desk_region_ = nullptr;
     bool desk_ = false;           // this stay is desk mode
-    display::Rect primary_{};     // desk mode: where desk_move positions land
+    std::string desk_monitor_;    // config "desk_monitor"
+    display::Rect primary_{};     // desk mode: where desk_move positions land (that monitor)
     std::atomic<bool> active_{false};  // read from other threads (KvmLink::controlled_by_peer)
     bool warned_blocked_ = false;
     struct {

@@ -54,6 +54,7 @@ struct Options {
     bool kvm_enabled = true;
     bool clipboard = true;
     bool desk = true;  // --no-desk, config "desk"
+    std::string desk_monitor;  // config "desk_monitor": the monitor B's windows appear on ("" = primary)
     bool test_video = false;
     int test_video_kb = 250;
     int test_video_fps = 30;
@@ -154,18 +155,19 @@ std::string narrow(std::wstring_view s) {
     return out;
 }
 
-// A's answer to the client's hello: A's primary monitor, so B can size its virtual display to it.
-proto::Hello make_hello(bool desk) {
+// A's answer to the client's hello: A's desk monitor (the primary unless config "desk_monitor" picks
+// another), so B can size its virtual display to it.
+proto::Hello make_hello(bool desk, const std::string& desk_monitor = {}) {
     wchar_t name[256];
     DWORD name_len = static_cast<DWORD>(std::size(name));
     if (!GetComputerNameExW(ComputerNameDnsHostname, name, &name_len)) {
         name_len = 0;
     }
-    const auto primary = kvm::display::primary_monitor();
+    const auto screen = kvm::display::desk_monitor(desk_monitor);
     return proto::Hello{
-        .screen_w = primary.rect.width(),
-        .screen_h = primary.rect.height(),
-        .dpi_scale = primary.scale,
+        .screen_w = screen.rect.width(),
+        .screen_h = screen.rect.height(),
+        .dpi_scale = screen.scale,
         .hostname = narrow(std::wstring_view(name, name_len)),
         .desk = desk,
     };
@@ -214,7 +216,7 @@ void run_session(kvm::net::Connection& conn, kvm::KvmLink* kvm, kvm::clip::Clipb
     }
     kvm::log::info("client '{}' connected from {}: screen {}x{}, dpi scale {:.2f}", hello->hostname, conn.peer(),
                    hello->screen_w, hello->screen_h, hello->dpi_scale);
-    conn.send(make_hello(opt.desk));
+    conn.send(make_hello(opt.desk, opt.desk_monitor));
     // Where this client stands, kept per PC and the same on both: before KVM and desk mode use it.
     conn.send(places.begin(hello->hostname));
     current_peer.set([&conn](const proto::Message& m) { return conn.send_json(proto::encode(m)); });
@@ -322,6 +324,7 @@ int wmain(int argc, wchar_t** argv) {
         } cleaned_up;
         const kvm::Config cfg = kvm::load_config(opt.config_path);
         opt.desk = opt.desk && cfg.desk;
+        opt.desk_monitor = cfg.desk_monitor;
         g_desk = opt.desk;
 
         // KVM: hooks run for the whole process; sessions attach/detach the client.
@@ -336,7 +339,8 @@ int wmain(int argc, wchar_t** argv) {
         kvm::desk::Region* desk = opt.desk ? &desk_region : nullptr;
         std::optional<kvm::KvmLink> kvm_link;
         if (opt.kvm_enabled) {
-            kvm_link.emplace(kvm::KvmOptions{.peer_side = *side, .is_host = true, .desk = desk});
+            kvm_link.emplace(
+                kvm::KvmOptions{.peer_side = *side, .is_host = true, .desk = desk, .desk_monitor = cfg.desk_monitor});
             kvm_link->start();  // false = hooks failed (logged); B can still control A
         }
         kvm::clip::ClipboardSync clip;
@@ -367,7 +371,8 @@ int wmain(int argc, wchar_t** argv) {
         kvm::WindowLink windows({.jpeg_quality = cfg.jpeg_quality,
                                  .max_fps = cfg.max_fps,
                                  .peer_side = side.value_or(kvm::display::Side::Right),
-                                 .desk = desk});
+                                 .desk = desk,
+                                 .desk_monitor = cfg.desk_monitor});
         // Ctrl+Alt+Shift+Q also ends desk mode (the hooks that keep the cursor off the VDD are gone).
         if (kvm_link) kvm_link->set_on_emergency([&windows] { windows.disable_desk(); });
         struct EmergencyReset {  // declared after `windows`, so it runs before `windows` goes away

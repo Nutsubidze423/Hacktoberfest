@@ -11,6 +11,7 @@
 #include <utility>
 
 #include "jpeg_decoder.h"
+#include "kvm/dpi.h"
 #include "kvm/log.h"
 #include "kvm/win32_input.h"
 
@@ -31,10 +32,10 @@ bool injected_by_us() {
     return input::is_own_injection(static_cast<std::uintptr_t>(GetMessageExtraInfo()));
 }
 
-RECT primary_rect() {
-    MONITORINFO mi{sizeof(mi)};
-    GetMonitorInfoW(MonitorFromPoint({0, 0}, MONITOR_DEFAULTTOPRIMARY), &mi);
-    return mi.rcMonitor;
+// The monitor the other PC's windows appear on (config "desk_monitor"; the primary by default).
+RECT screen_rect(const std::string& monitor) {
+    const auto r = display::desk_monitor(monitor).rect;
+    return {r.left, r.top, r.right, r.bottom};
 }
 
 void unite(RECT& into, const RECT& r) {
@@ -96,7 +97,7 @@ bool apply_alpha(std::span<const std::uint8_t> runs, int width, int height, std:
 
 }  // namespace
 
-DeskView::DeskView() {
+DeskView::DeskView(std::string monitor) : monitor_(std::move(monitor)) {
     cursor_ = LoadCursorW(nullptr, IDC_ARROW);
     input_.set_sink([this](const proto::Message& m) {
         Sink sink;
@@ -211,7 +212,7 @@ void DeskView::ui_main(std::promise<void>* ready) {
     wc.lpszClassName = kClassName;
     RegisterClassExW(&wc);  // fails harmlessly if a second DeskView registered it already
 
-    screen_ = primary_rect();
+    screen_ = screen_rect(monitor_);
     // Not topmost: the overlay rides in the normal z-order so this PC's own windows can come in front
     // of the owner's windows when the user raises them (apply_z keeps it above the desktop either way).
     const HWND hwnd = CreateWindowExW(WS_EX_LAYERED | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, kClassName, L"Sarke desk",
@@ -265,7 +266,7 @@ void DeskView::apply_z() {
 
 bool DeskView::make_surface() {
     free_surface();
-    screen_ = primary_rect();
+    screen_ = screen_rect(monitor_);
     const int w = screen_.right - screen_.left;
     const int h = screen_.bottom - screen_.top;
     BITMAPINFO bi{};
@@ -488,9 +489,10 @@ void DeskView::hide() {
 }
 
 NormPoint DeskView::norm(LPARAM lp) const {
-    // Client coordinates = screen coordinates of the primary monitor (the window covers it from 0,0).
-    const double x = GET_X_LPARAM(lp) + screen_.left;
-    const double y = GET_Y_LPARAM(lp) + screen_.top;
+    // Client coordinates = the owner's virtual display: the window covers this PC's desk monitor
+    // and the owner's virtual display maps onto it from its top-left corner.
+    const double x = GET_X_LPARAM(lp);
+    const double y = GET_Y_LPARAM(lp);
     return {layout_.desk_w > 0 ? x / layout_.desk_w : 0.0, layout_.desk_h > 0 ? y / layout_.desk_h : 0.0};
 }
 

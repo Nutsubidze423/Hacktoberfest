@@ -15,7 +15,7 @@ namespace kvm {
 
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(PeerLayout, side, set_at)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(Config, host_ip, control_port, video_port, file_port, client_side,
-                                                jpeg_quality, max_fps, desk, peers)
+                                                jpeg_quality, max_fps, desk, desk_monitor, peers)
 
 namespace {
 

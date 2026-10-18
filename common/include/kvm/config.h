@@ -27,6 +27,9 @@ struct Config {
     // Desk mode: the other PC's screen is one more monitor, windows are dragged across (needs the
     // Virtual Display Driver on the PC whose windows go over). false = Ctrl+Alt+Shift+W viewer only.
     bool desk = true;
+    // Desk mode: the monitor of this PC the other PC's windows appear on (its device name, e.g.
+    // "\\.\DISPLAY2"; the tray menu sets it). "" = the main monitor.
+    std::string desk_monitor;
     // Every PC this one has been connected to, by computer name: where it stands. client_side is the
     // default for a PC that isn't listed yet.
     std::map<std::string, PeerLayout> peers;

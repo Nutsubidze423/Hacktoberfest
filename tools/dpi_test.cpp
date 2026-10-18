@@ -172,6 +172,17 @@ void this_machine() {
         check(back && std::abs(*back - 0.5) < 0.01, std::string("live ") + std::string(display::to_string(s)) +
                                                        " edge midpoint round-trips");
     }
+
+    // Desk mode's monitor (config "desk_monitor"): the named one, else the primary.
+    const auto& primary = mons.front();
+    check(display::desk_monitor("").rect == primary.rect, "desk_monitor(\"\") = the primary");
+    check(display::desk_monitor("\\\\.\\NO_SUCH_DISPLAY").rect == primary.rect, "desk_monitor(unknown) = the primary");
+    for (const Monitor& m : mons) {
+        const auto picked = display::desk_monitor(m.name);
+        const auto expect = display::is_virtual_display(m.name) ? primary.rect : m.rect;
+        check(picked.rect == expect, "desk_monitor(" + m.name + ")" +
+                                         (display::is_virtual_display(m.name) ? " = the primary (a VDD is never one)" : ""));
+    }
 }
 
 }  // namespace

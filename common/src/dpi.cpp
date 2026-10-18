@@ -188,6 +188,24 @@ Monitor primary_monitor() {
     return m;
 }
 
+bool is_virtual_display(std::string_view name) {
+    for (DWORD i = 0;; ++i) {
+        DISPLAY_DEVICEA dd{};
+        dd.cb = sizeof(dd);
+        if (!EnumDisplayDevicesA(nullptr, i, &dd, 0)) return false;
+        if (name == dd.DeviceName) return std::string_view(dd.DeviceString) == "Virtual Display Driver";
+    }
+}
+
+Monitor desk_monitor(std::string_view name) {
+    if (!name.empty() && !is_virtual_display(name)) {
+        for (auto& m : monitors()) {
+            if (m.name == name) return std::move(m);
+        }
+    }
+    return primary_monitor();
+}
+
 Rect virtual_desktop() {
     const int x = GetSystemMetrics(SM_XVIRTUALSCREEN);
     const int y = GetSystemMetrics(SM_YVIRTUALSCREEN);
