@@ -22,6 +22,8 @@ and that PC stays fully usable with its own apps, mouse and keyboard.
 - **Clipboard.** Text and images copied on one PC paste on the other.
 - **Finds the other PC.** No IP addresses to type. Sarke lists the PCs running it on the network;
   pick one, and optionally let Sarke connect to it automatically next time.
+- **Arranged once.** Set where the other PC stands on either of the two; both follow at once, and
+  each PC remembers the place of every PC it has been connected to.
 - **Window viewer.** Without a virtual display, any window can still be streamed into a viewer on
   the other PC and controlled from there.
 
@@ -36,10 +38,13 @@ and that PC stays fully usable with its own apps, mouse and keyboard.
 
 1. Download `SarkeSetup.exe` from the [releases](../../releases) page and run it on both PCs. It
    installs Sarke, the virtual display driver and the firewall rules for the local network.
-2. Start Sarke on both PCs. It runs in the system tray.
-3. On one PC, open the tray menu and choose **Connect to another PC**, then pick the other PC.
-   Turn on **Auto** to connect to it by itself whenever it is on the network.
-4. Choose **Display arrangement** to set which side of this screen the other PC is on.
+2. Start Sarke on both PCs. It runs in the system tray and shows the PCs running Sarke on the
+   network.
+3. On one PC, click the other PC in that list to connect. Turn on **Auto** to connect to it by
+   itself whenever it is on the network. The list is also under **Connect to another PC** in the
+   tray menu.
+4. Choose **Display arrangement** in the tray menu to set which side of this screen the other PC is
+   on. The change applies on both PCs at once.
 
 Then move the mouse across that edge.
 
@@ -62,7 +67,8 @@ from source uses the one in the repository. Most of them can be changed from the
 | `control_port` | `50500` | Control and input |
 | `video_port` | `50501` | Window pictures |
 | `file_port` | `50502` | File transfers |
-| `client_side` | `"right"` | Where the client PC stands next to the host: `left`, `right`, `top` or `bottom` |
+| `client_side` | `"right"` | For a PC not in `peers` yet: where the client stands next to the host (`left`, `right`, `top` or `bottom`) |
+| `peers` | `{}` | Where each PC this one has been connected to stands, by computer name; set by Display arrangement |
 | `jpeg_quality` | `75` | Picture quality, 1–100 |
 | `max_fps` | `30` | Frame rate limit, `0` for none |
 | `desk` | `true` | Desk mode; `false` uses the window viewer |
@@ -103,7 +109,7 @@ listens.
 
 | Port | Protocol | Carries |
 |---|---|---|
-| 50500 | TCP, length-prefixed JSON | Handshake, input, clipboard, window layout |
+| 50500 | TCP, length-prefixed JSON | Handshake, arrangement, input, clipboard, window layout |
 | 50501 | TCP, JSON header + payload | Window pictures (JPEG) |
 | 50502 | TCP, JSON header + payload | Files |
 | 50503 | UDP broadcast | Finding the other PCs |
