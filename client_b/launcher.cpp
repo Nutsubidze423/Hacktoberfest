@@ -224,6 +224,7 @@ private:
 
     void decide_role();
     void switch_role(Role want);  // tray "Connect to the other PC" / the Displays window's Host/Client
+    void keep_peer_side(Role from, Role to);
     bool start_app();
     void stop_app(bool restart);
     void end_app_now();
@@ -348,6 +349,7 @@ int App::run() {
 }
 
 void App::decide_role() {
+    const auto last = settings_.role;
     if (options_.role) {
         role_ = *options_.role;
     } else if (settings_.role) {
@@ -359,17 +361,43 @@ void App::decide_role() {
         role_ = Role::Host;
         log::info("launcher: starting as the host; use the tray menu to connect to another PC");
     }
+    if (last && *last != role_) keep_peer_side(*last, role_);  // e.g. --client on a PC that was the host
     settings_.role = role_;
     save_settings(settings_);
 }
 
 void App::switch_role(Role want) {
     if (want == role_) return;
+    keep_peer_side(role_, want);
     role_ = want;
     settings_.role = want;
     save_settings(settings_);
+    displays_.follow_role(want);
     peer_name_.clear();
     restart(want == Role::Client ? L"Connecting to the other PC" : L"This PC is the host now");
+}
+
+// config.json client_side says where the client stands next to the host, so the same value means
+// the opposite side once this PC swaps roles. Rewrites it for `to`, so the other PC stays on the side
+// of this PC the user set in the Displays window.
+void App::keep_peer_side(Role from, Role to) {
+    if (from == to) return;
+    const auto cfg = layout::read_config(config_path_);
+    if (!cfg.error.empty()) {
+        log::warn("launcher: can't keep the other PC's side: {}", cfg.error);
+        return;
+    }
+    // Missing client_side: the apps use "right".
+    const auto client_side = cfg.client_side.empty() ? std::optional(display::Side::Right) : display::parse_side(cfg.client_side);
+    if (!client_side) return;  // invalid: the Displays window asks for a side
+    const auto peer_side = layout::peer_side_from(from, *client_side);
+    const auto now = layout::client_side_for(to, peer_side);
+    if (const auto error = layout::save_client_side(config_path_, now); !error.empty()) {
+        log::warn("launcher: can't keep the other PC's side: {}", error);
+        return;
+    }
+    log::info("launcher: the other PC stays on the {} - client_side \"{}\" for the {}", display::to_string(peer_side),
+              display::to_string(now), to == Role::Host ? "host" : "client");
 }
 
 bool App::start_app() {

@@ -70,6 +70,10 @@ public:
         on_role_change_ = std::move(on_role_change);
     }
 
+    // The launcher switched the role (e.g. from the tray menu): show the layout as that role reads
+    // config.json. Doesn't call the role change handler.
+    void follow_role(layout::Role role);
+
     enum class Hit {
         None, Minimize, Close, Peer,
         SideLeft, SideRight, SideTop, SideBottom,

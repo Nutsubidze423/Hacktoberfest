@@ -597,14 +597,23 @@ void DisplaySettings::reload_config() {
     if (hwnd_) InvalidateRect(hwnd_, nullptr, FALSE);
 }
 
+void DisplaySettings::follow_role(Role role) {
+    if (role == role_) return;
+    role_ = role;
+    status_ = Status::Clean;
+    reload_config();
+}
+
 void DisplaySettings::set_role(Role role) {
     if (role == role_) return;
     if (options_.role && !on_role_change_) return;  // the launcher owns the role, unless it gave us a handler
+    // The launcher first: it rewrites client_side so the other PC stays on the same side of this PC,
+    // then connects / disconnects and restarts the app. The layout is read after that.
+    if (on_role_change_) on_role_change_(role);
     role_ = role;
     status_ = Status::Clean;
     reload_config();
     if (hwnd_) InvalidateRect(hwnd_, nullptr, FALSE);
-    if (on_role_change_) on_role_change_(role);  // the launcher connects / disconnects and restarts the app
 }
 
 void DisplaySettings::set_pending(Side side) {
