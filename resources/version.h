@@ -2,5 +2,5 @@
 // sarke.exe). Bump it for every installer that goes out.
 #pragma once
 
-#define SARKE_VERSION_COMMA 1, 0, 1, 0
-#define SARKE_VERSION_STRING "1.0.1"
+#define SARKE_VERSION_COMMA 1, 1, 0, 0
+#define SARKE_VERSION_STRING "1.1.0"
