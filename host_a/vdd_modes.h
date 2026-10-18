@@ -8,7 +8,8 @@
 //   if (kvm::vdd_modes::ensure(1920, 1200)) vdd = kvm::VirtualDisplay::find();  // driver restarted
 //
 // The settings file is writable without admin rights; restarting the device asks Windows for
-// permission once (UAC). tools/vdd_modes.ps1 adds the common laptop resolutions up front.
+// permission once (UAC). The list stays short (at most 10): with too many resolutions the driver's
+// monitor stops coming up. tools/vdd_modes.ps1 adds one by hand, or repairs a list that grew too long.
 #pragma once
 
 #include <filesystem>

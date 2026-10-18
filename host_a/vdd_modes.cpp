@@ -23,6 +23,19 @@ namespace {
 
 constexpr auto kRestartTimeout = std::chrono::seconds(45);  // includes the time the user takes for UAC
 constexpr auto kComeBackTimeout = std::chrono::seconds(15);
+// The driver offers every resolution at each refresh rate of its <global> list too. With 35
+// resolutions (~245 modes) its monitor no longer came up at all: no modes, the VDD couldn't be
+// attached. 6 is known to work; stay well below what broke it.
+constexpr int kMaxResolutions = 10;
+
+const std::regex& mode_pattern() {
+    static const std::regex mode(R"(<width>\s*(\d+)\s*</width>\s*<height>\s*(\d+)\s*</height>)");
+    return mode;
+}
+
+int count_modes(const std::string& xml) {
+    return static_cast<int>(std::distance(std::sregex_iterator(xml.begin(), xml.end(), mode_pattern()), std::sregex_iterator()));
+}
 
 std::string utf8(const fs::path& p) {
     const auto s = p.u8string();
@@ -37,8 +50,7 @@ bool read_file(std::string& out) {
 }
 
 bool has_mode(const std::string& xml, int width, int height) {
-    static const std::regex mode(R"(<width>\s*(\d+)\s*</width>\s*<height>\s*(\d+)\s*</height>)");
-    for (auto it = std::sregex_iterator(xml.begin(), xml.end(), mode); it != std::sregex_iterator(); ++it) {
+    for (auto it = std::sregex_iterator(xml.begin(), xml.end(), mode_pattern()); it != std::sregex_iterator(); ++it) {
         if (std::stoi((*it)[1]) == width && std::stoi((*it)[2]) == height) return true;
     }
     return false;
@@ -85,6 +97,12 @@ bool add(int width, int height) {
         return false;
     }
     if (has_mode(xml, width, height)) return true;
+    if (const int n = count_modes(xml); n >= kMaxResolutions) {
+        log::warn("vdd: {} lists {} resolutions already - more and the driver's monitor stops working, so {}x{} isn't added "
+                  "(tools\\vdd_modes.ps1 -Restore puts the driver's own list back)",
+                  utf8(settings_path()), n, width, height);
+        return false;
+    }
     const auto end = xml.find("</resolutions>");
     if (end == std::string::npos) {
         log::warn("vdd: {} has no <resolutions> list", utf8(settings_path()));
