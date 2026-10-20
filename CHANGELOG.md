@@ -15,6 +15,9 @@ What changed for people who use Sarke, newest first. The plan ahead is in
   - Video and file ports changed only on the host now work: the client follows them.
   - The list of PCs knows each PC by its key. A PC that isn't paired shows "Pair…", and only paired
     PCs can be set to connect automatically. PCs set to Auto in 1.1 get Auto again once paired.
+  - **Paired PCs…** in the tray menu lists the paired PCs (name, the code-like ID both showed when
+    pairing, when last seen) with Auto and **Unpair**. Unpairing ends a connection with that PC at
+    once, and the other PC is told.
 - Sarke is open source under the Apache License 2.0; the installer ships `LICENSE`, `NOTICE` and
   the licenses of everything compiled in (`licenses\` in the install folder).
 - Installers are published as GitHub Releases (and on the website), no longer kept in the repository.

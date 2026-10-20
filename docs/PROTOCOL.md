@@ -98,6 +98,7 @@ never hand-built JSON.
 | `pair_request` | pairing initiator → the other PC (key not paired yet) | `name` (shown to the other user only) |
 | `pair_confirm` | both, while pairing | `ok`: this user saw the same code and confirmed |
 | `pair_result` | both, while pairing | `ok`, `reason` (when not ok) |
+| `unpaired` | both, in a paired session | none. The sender's user unpaired the receiver: the receiver forgets the sender too and doesn't offer to pair again by itself; the sender closes the session right after ([SECURITY.md](SECURITY.md) §6.6) |
 
 ## Video frames (port 50501)
 

@@ -188,6 +188,16 @@ permissions}]`. It holds public data only, so it isn't encrypted. Anyone who can
 runs as this user (out of scope). **Unpair:** the entry is removed and any live session with that
 device ID is closed. The other side's next attempt fails pinning and shows "*Name* unpaired this PC".
 
+Implemented in P1.9:
+1. The launcher's "Paired PCs…" window asks first, removes the entry and sends `unpair <device id>`
+   to the running app.
+2. If the app's session is with that PC, it sends `unpaired`, then closes the control channel. The
+   host's session end closes the video and file channels (§6.4).
+3. The other PC forgets this one too, logs "*Name* unpaired this PC" (shown as a notification), and
+   doesn't offer to pair again by itself: its launcher goes back to waiting as the host.
+4. `unpaired` is only read inside a paired, pinned session, so an outsider can't use it to unpair
+   anything.
+
 ### 6.7 Version mismatch
 A v2 peer starts with plaintext `[u32 len]{"type":"hello"…` where TLS expects a ClientHello
 (first byte `0x16`). The v3 server peeks at the first byte. If it isn't `0x16`, it closes the

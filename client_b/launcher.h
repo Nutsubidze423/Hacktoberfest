@@ -14,6 +14,7 @@
 #include <windows.h>
 
 #include <chrono>
+#include <cstdint>
 #include <filesystem>
 #include <optional>
 #include <string>
@@ -61,8 +62,14 @@ struct PairingDone {  // any other "pairing: ..." line: the exchange is over
     bool paired = false;
     std::string text;
 };
+struct Unpaired {  // "unpair: 'name' unpaired this PC": the other PC unpaired this one
+    std::string name;
+};
+struct UnpairDone {  // "unpair: 1A2B-... is no longer paired with this PC": the app did "unpair <id>"
+    std::string id;  // the short device ID
+};
 using Event = std::variant<std::monostate, Connected, LinkUp, SessionEnded, Searching, Rtt, Problem, PlaceSet,
-                           IdentifyAsked, PairingCode, PairingDone>;
+                           IdentifyAsked, PairingCode, PairingDone, Unpaired, UnpairDone>;
 
 Event parse_line(std::string_view line);
 
@@ -96,6 +103,10 @@ std::filesystem::path data_dir(const std::vector<std::wstring>& app_args);
 // 6.5). The name doesn't count: a PC answering with a paired PC's name but another ID is another,
 // unpaired PC. Only a claim: the TLS handshake shows who it is.
 std::optional<paired::Device> paired_as(const discovery::Host& host, const std::vector<paired::Device>& paired);
+
+// When a paired PC was last seen, for the "Paired PCs" window: "Seen 5 min ago", or "Not seen yet"
+// (last_seen 0: not since pairing). Times in ms since 1970.
+std::wstring seen_text(std::int64_t last_seen_ms, std::int64_t now_ms);
 
 // The app for `role`: sarke_host.exe / kvm_host.exe (client: sarke_client / kvm_client) next to the
 // launcher, else in the build tree (..\host_a, ..\client_b). nullopt if none is found.

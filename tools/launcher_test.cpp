@@ -4,6 +4,7 @@
 // line means, settings.json round trips, config.json key writes, and finding the apps.
 // Usage: launcher_test.exe   (exit code 0 = all passed)
 
+#include <cstdint>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
@@ -91,6 +92,26 @@ void log_lines() {
     check(
         std::holds_alternative<std::monostate>(launcher::parse_line("01:02:03.456 [info] pairing: nothing to answer")),
         "a stray answer isn't an event");
+    e = launcher::parse_line(
+        "01:02:03.456 [warn] unpair: 'DESKTOP-1' unpaired this PC (1A2B-3C4D-5E6F-7081). Pair "
+        "again to connect.");
+    check(as<launcher::Unpaired>(e) && as<launcher::Unpaired>(e)->name == "DESKTOP-1",
+          "the other PC unpaired this one -> Unpaired");
+    e = launcher::parse_line(
+        "01:02:03.456 [info] unpair: 1A2B-3C4D-5E6F-7081 is no longer paired with this PC - its session is closed");
+    check(as<launcher::UnpairDone>(e) && as<launcher::UnpairDone>(e)->id == "1A2B-3C4D-5E6F-7081",
+          "the app did \"unpair <id>\" -> UnpairDone");
+    {
+        constexpr std::int64_t now = 1'800'000'000'000;
+        constexpr std::int64_t minute = 60'000;
+        check(launcher::seen_text(0, now) == L"Not seen yet" &&
+                  launcher::seen_text(now - 30'000, now) == L"Seen just now" &&
+                  launcher::seen_text(now - 5 * minute, now) == L"Seen 5 min ago" &&
+                  launcher::seen_text(now - 3 * 60 * minute, now) == L"Seen 3 h ago" &&
+                  launcher::seen_text(now - 3 * 24 * 60 * minute, now) == L"Seen 3 days ago" &&
+                  launcher::seen_text(now + minute, now) == L"Seen just now",
+              "when a paired PC was last seen, in words");
+    }
     e = launcher::parse_line(
         "01:02:03.456 [info] layout: 'tabuladze' is on the right of this PC (set on the other PC)\r\n");
     check(as<launcher::PlaceSet>(e) && as<launcher::PlaceSet>(e)->name == "tabuladze" &&

@@ -227,6 +227,13 @@ struct Identify {
     static constexpr std::string_view kType = "identify";
 };
 
+// Both directions, in a paired session: the sender's user unpaired the receiver (docs/SECURITY.md
+// 6.6). The receiver forgets the sender too and doesn't offer to pair again by itself; the sender
+// closes the session right after.
+struct Unpaired {
+    static constexpr std::string_view kType = "unpaired";
+};
+
 // Pairing (docs/SECURITY.md 6.3): the only messages accepted from a PC whose key isn't paired yet.
 // The PC whose user picked the other one sends pair_request. Each side shows the code derived from
 // its own TLS session and sends pair_confirm with its user's answer. Each stores the other only when
@@ -294,6 +301,10 @@ inline void to_json(nlohmann::json& j, const Identify&) {
     j = nlohmann::json::object();
 }
 inline void from_json(const nlohmann::json&, Identify&) {}
+inline void to_json(nlohmann::json& j, const Unpaired&) {
+    j = nlohmann::json::object();
+}
+inline void from_json(const nlohmann::json&, Unpaired&) {}
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(PairRequest, name)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(PairConfirm, ok)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(PairResult, ok, reason)
@@ -303,7 +314,7 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(FrameHeader, seq, t_capture_us, 
 // Any message that travels on the control channel (port 50500).
 using Message = std::variant<Hello, FocusEnter, FocusLeave, MouseMove, MouseButtonEvent, MouseWheel, Key, StreamStart,
                              StreamStop, RemoteMouseMove, Clipboard, Ping, Pong, DeskMove, DeskCursor, DeskLayout,
-                             Layout, Identify, PairRequest, PairConfirm, PairResult>;
+                             Layout, Identify, PairRequest, PairConfirm, PairResult, Unpaired>;
 
 // Serializes a message struct (including FrameHeader) to JSON with its "type" field set.
 template <class M>

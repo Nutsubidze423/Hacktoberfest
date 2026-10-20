@@ -9,6 +9,8 @@
 //   ... meanwhile, from the same thread (a message handled during the modal loop):
 //   dialog.close();   // the app ended the pairing: ask() returns nullopt
 //
+//   if (kvm::confirm_unpair(owner, L"DESKTOP-1")) ...           // "Unpair DESKTOP-1?" (modal)
+//
 // UI thread only. Needs Common Controls 6 (sarke.exe's manifest).
 #pragma once
 
@@ -38,5 +40,8 @@ private:
     std::chrono::steady_clock::time_point deadline_{};
     std::wstring footer_;
 };
+
+// "Unpair NAME?" with Unpair and Cancel (the default). true = Unpair.
+bool confirm_unpair(HWND owner, std::wstring_view peer_name);
 
 }  // namespace kvm

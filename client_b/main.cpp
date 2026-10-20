@@ -114,19 +114,25 @@ kvm::clip::Chunk to_chunk(const proto::Clipboard& m) {
     return {.seq = m.seq, .kind = m.kind, .total = m.total, .offset = m.offset, .data = m.data};
 }
 
-void run_session(kvm::net::Connection& conn, const kvm::Config& cfg, kvm::KvmLink* kvm, kvm::clip::ClipboardSync* clip,
+// Returns true if the host unpaired this PC during the session.
+bool run_session(kvm::net::Connection& conn, const kvm::Config& cfg, kvm::KvmLink* kvm, kvm::clip::ClipboardSync* clip,
                  kvm::FileLink& files, kvm::WindowLink& windows, kvm::layout_sync::Session& places,
-                 kvm::CurrentPeer& current_peer, const kvm::tls::Credentials& me, const kvm::tls::DeviceId& host_id) {
+                 kvm::CurrentPeer& current_peer, const kvm::tls::Credentials& me, const kvm::tls::DeviceId& host_id,
+                 kvm::paired::Store& paired) {
     if (!conn.send(make_hello(cfg.desk))) {
-        return;
+        return false;
     }
     kvm::log::info("connected to host {}", conn.peer());
+    std::string host_name;
 
     const auto on_host_hello = [&](const proto::Hello& h) {
         kvm::log::info("host '{}': screen {}x{}, dpi scale {:.2f}", h.hostname, h.screen_w, h.screen_h, h.dpi_scale);
+        host_name = h.hostname;
         // Where the host stands, kept per PC and the same on both: before KVM and desk mode use it.
         conn.send(places.begin(h.hostname));
-        current_peer.set([&conn](const proto::Message& m) { return conn.send_json(proto::encode(m)); });
+        // "unpair" from the launcher ends this session if it is with this host.
+        current_peer.set([&conn](const proto::Message& m) { return conn.send_json(proto::encode(m)); }, host_id,
+                         [&conn] { conn.close(); });
         const auto client_side = kvm::display::parse_side(cfg.client_side).value_or(kvm::display::Side::Right);
         if (!cfg.desk) match_vdd_to_peer(h.screen_w, h.screen_h, kvm::display::opposite(client_side));
         windows.set_peer(h);  // B's windows go to A at A's size; desk mode: A's screen = one more monitor
@@ -137,7 +143,7 @@ void run_session(kvm::net::Connection& conn, const kvm::Config& cfg, kvm::KvmLin
     const auto* host_hello = first ? std::get_if<proto::Hello>(&*first) : nullptr;
     if (!host_hello) {
         kvm::log::warn("host {}: no hello within {} s, dropping", conn.peer(), kHostHelloTimeout.count());
-        return;
+        return false;
     }
     on_host_hello(*host_hello);
     const std::uint16_t video_port =
@@ -177,8 +183,9 @@ void run_session(kvm::net::Connection& conn, const kvm::Config& cfg, kvm::KvmLin
         kvm::log::warn("no file channel — is port {} open on the host?", file_port);
     }
 
+    bool unpaired = false;
     auto next_stats = std::chrono::steady_clock::now() + kStatsInterval;
-    while (g_running && conn.is_open()) {
+    while (g_running && conn.is_open() && !unpaired) {
         if (const auto msg = conn.incoming().pop_for(500ms)) {
             if (kvm && kvm->handle(*msg)) {
                 // KVM: A controls B, or A's cursor came back
@@ -192,6 +199,9 @@ void run_session(kvm::net::Connection& conn, const kvm::Config& cfg, kvm::KvmLin
                 places.on_message(*l);  // the host's view of where it stands, if newer
             } else if (std::holds_alternative<proto::Identify>(*msg)) {
                 kvm::log::info("identify: the other PC shows its screen numbers - showing this PC's too");
+            } else if (std::holds_alternative<proto::Unpaired>(*msg)) {
+                kvm::forget_unpaired_peer(paired, host_id, host_name);
+                unpaired = true;  // the host closes the session
             } else {
                 kvm::log::info("from host: {}", proto::encode(*msg).dump());
             }
@@ -215,6 +225,7 @@ void run_session(kvm::net::Connection& conn, const kvm::Config& cfg, kvm::KvmLin
     windows.detach();  // B's window shown on A comes home; the viewer shows the link as lost
     files.set(nullptr);
     windows.set_video(nullptr);  // closes the video channel and joins the viewer's reader
+    return unpaired;
 }
 
 // Finds the host on the local network. Prefers `preferred` (the host of the last session) so that a
@@ -401,8 +412,9 @@ int wmain(int argc, wchar_t** argv) {
         struct PromptReset {
             ~PromptReset() { g_pairing_prompt = nullptr; }
         } prompt_reset;
-        kvm::LauncherCommands commands(
-            [&](const std::string& line) { kvm::handle_launcher_command(line, places, current_peer, pairing_prompt); });
+        kvm::LauncherCommands commands([&](const std::string& line) {
+            kvm::handle_launcher_command(line, places, current_peer, pairing_prompt, *trust->paired);
+        });
 
         kvm::Hotkeys hotkeys;
         hotkeys.add('F', [&] { files.show_catcher_at_cursor(); });
@@ -432,8 +444,10 @@ int wmain(int argc, wchar_t** argv) {
                 if (kvm::trust::is_paired(*trust->paired, *pending->stream)) {
                     const auto host_id = pending->stream->peer_id();
                     kvm::net::Connection conn(std::move(*pending));
-                    run_session(conn, cfg, kvm_link ? &*kvm_link : nullptr, clip_on ? &clip : nullptr, files, windows,
-                                places, current_peer, trust->me, host_id);
+                    if (run_session(conn, cfg, kvm_link ? &*kvm_link : nullptr, clip_on ? &clip : nullptr, files,
+                                    windows, places, current_peer, trust->me, host_id, *trust->paired)) {
+                        pair_unknown = false;  // unpaired by the host: never ask to pair again by itself
+                    }
                 } else if (pair_unknown) {
                     const auto paired = kvm::pairing::run(std::move(*pending), /*initiator=*/true, trust->me,
                                                           make_hello(false).hostname, *trust->paired, pairing_prompt);
