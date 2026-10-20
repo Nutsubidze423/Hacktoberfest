@@ -7,7 +7,9 @@
 //   1. a PC whose key isn't paired is closed right after the TLS handshake: its hello is never read;
 //   2. an older Sarke (plain TCP, protocol v2) is closed;
 //   3. a paired peer speaking another protocol version is dropped, and the host logs why;
-//   4. a paired peer speaking this version gets the host's hello back, with its device ID;
+//   4. a paired peer speaking this version gets the host's hello back, with its device ID and the
+//      session's side-channel token: with it the peer opens video and files; a wrong token or another
+//      PC's key is refused there and the live channel stays; the session's end closes its channels;
 //   5. kvm_client, paired with the host, connects (control, video, files) and both sides log rtt;
 //   6. Ctrl+Break, the way the launcher stops them, ends both normally.
 //
@@ -17,6 +19,7 @@
 #include <winsock2.h>
 #include <windows.h>
 
+#include <atomic>
 #include <chrono>
 #include <filesystem>
 #include <format>
@@ -31,9 +34,11 @@
 #include <variant>
 #include <vector>
 
+#include "kvm/file_transfer.h"
 #include "kvm/log.h"
 #include "kvm/net.h"
 #include "kvm/protocol.h"
+#include "kvm/video.h"
 
 namespace fs = std::filesystem;
 namespace proto = kvm::proto;
@@ -339,9 +344,47 @@ int wmain(int argc, wchar_t** argv) {
                     hello && hello->protocol_version == proto::kProtocolVersion &&
                         hello->device_id == kvm::tls::to_hex(*host_id),
                     std::format("the host answers hello v{} with its device ID", hello ? hello->protocol_version : 0));
+                check(hello && hello->session_token.size() == 64 && hello->video_port == video &&
+                          hello->file_port == files,
+                      "and with the session's side channels: a 32-byte token and the ports");
+                const std::string token = hello ? hello->session_token : std::string();
+                const auto refusals = [&] { return count(host.log(), "- refused"); };
+
+                // Side channels (docs/SECURITY.md 6.4, S4): the session's own peer, with its token.
+                auto live = kvm::net::connect_video("127.0.0.1", video, peer, *host_id, token, 3s);
+                check(live && wait_until([&] { return host.log_has("video channel from"); }, 3s),
+                      "with the token, the session's peer opens the video channel");
+                std::atomic<bool> live_closed = false;
+                std::thread watch([&] {
+                    while (live && live->recv_frame()) {}
+                    live_closed = true;
+                });
+                const auto before = refusals();
+                auto wrong_token =
+                    kvm::net::connect_video("127.0.0.1", video, peer, *host_id, std::string(64, '0'), 3s);
+                auto other_key = kvm::net::connect_video("127.0.0.1", video, stranger, *host_id, token, 3s);
+                auto other_files = kvm::files::connect_files("127.0.0.1", files, stranger, *host_id, token, {},
+                                                             dir / "stranger-in", 3s);
+                check(wait_until([&] { return refusals() >= before + 3; }, 5s),
+                      "a wrong token, or another PC's key with the right token, is refused on video and files");
+                check(
+                    !host.log_has("file channel from") && !live_closed && count(host.log(), "video channel from") == 1,
+                    "and doesn't replace the live video channel");
+                auto own_files =
+                    kvm::files::connect_files("127.0.0.1", files, peer, *host_id, token, {}, dir / "peer-in", 3s);
+                check(own_files && wait_until([&] { return host.log_has("file channel from"); }, 3s),
+                      "the session's peer opens the file channel");
+
                 conn->close();
                 check(wait_until([&] { return host.log_has("'loopback-peer' session ended"); }, 5s),
                       "the host ends that session when the peer leaves");
+                check(wait_until([&] { return live_closed.load(); }, 5s), "and closes the session's video channel");
+                const auto after = refusals();
+                auto late = kvm::net::connect_video("127.0.0.1", video, peer, *host_id, token, 3s);
+                check(wait_until([&] { return refusals() >= after + 1; }, 5s),
+                      "after the session, its token opens nothing");
+                if (live) live->close();
+                watch.join();
             }
         }
 

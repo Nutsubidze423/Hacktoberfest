@@ -6,10 +6,10 @@
 //       Local playback: decodes the JPEG(s) (logs a decode benchmark) and plays them in a loop from
 //       a background thread, like the real video receiver. No network.
 //   viewer_test.exe --connect <host> [--port 50501]
-//       Live stream over the network: does what main.cpp does for the video channel (connect,
-//       reconnect every second, link state) and hands the channel to a VideoReceiver. Works with
-//       tools/fake_streamer.exe (JPEG) and with kvm_host.exe --no-kvm --test-video (codec "test":
-//       not shown, but counted in the HUD's MBPS).
+//       Live stream: does what main.cpp does for the video channel (connect, reconnect every
+//       second, link state) and hands the channel to a VideoReceiver. Works with
+//       tools/fake_streamer.exe on the same PC (JPEG; a stand-in session, fake_session.h). A real
+//       kvm_host only lets its control session's client open a video channel.
 //
 // Check: the image looks right, keeps its aspect ratio when resized, and the HUD shows FPS etc.
 // Messages that would go to the window owner (input, stream_stop) are logged as "to owner: {...}".
@@ -29,6 +29,7 @@
 
 #include <windows.h>
 
+#include "fake_session.h"
 #include "jpeg_decoder.h"
 #include "kvm/config.h"
 #include "kvm/log.h"
@@ -93,14 +94,17 @@ void sleep_unless_stopped(std::stop_token& stop, std::chrono::milliseconds durat
 
 // Stands in for main.cpp's video side: it owns the channel, reconnects and sets the link state;
 // the VideoReceiver only reads from the channel it is given.
-void video_link_loop(std::stop_token stop, const std::string& host, std::uint16_t port, kvm::ViewerWindow& viewer) {
+void video_link_loop(std::stop_token stop, const std::string& host, std::uint16_t port, const kvm::tls::Credentials& me,
+                     kvm::ViewerWindow& viewer) {
     const bool same_machine = host == "127.0.0.1" || host == "localhost";
     bool lost = false;  // after a drop, the viewer keeps showing LOST until the link is back
     while (!stop.stop_requested()) {
         if (!lost) {
             viewer.set_link_state(kvm::LinkState::Connecting);
         }
-        auto channel = kvm::net::connect_video(host, port, kConnectTimeout);
+        // fake_streamer writes a new token each time it starts: read it again for every try.
+        const auto token = kvm::fake::read_session_token();
+        auto channel = token ? kvm::net::connect_video(host, port, me, me.id(), *token, kConnectTimeout) : nullptr;
         if (!channel) {
             if (!lost) {
                 viewer.set_link_state(kvm::LinkState::Waiting);
@@ -171,6 +175,9 @@ int run_connect(int argc, wchar_t** argv) {
         }
     }
 
+    const auto me = kvm::fake::session_credentials();
+    if (!me) return 1;
+
     kvm::ViewerWindow viewer;
     if (!viewer.create()) {
         kvm::log::error("could not create the viewer window (error {})", GetLastError());
@@ -192,7 +199,7 @@ int run_connect(int argc, wchar_t** argv) {
         [&](kvm::LinkState before, kvm::LinkState now) { tray.on_link_change(before, now, endpoint, true); });
 
     // Declared after viewer and tray: stopped and joined first.
-    std::jthread video(video_link_loop, host, port, std::ref(viewer));
+    std::jthread video(video_link_loop, host, port, std::cref(*me), std::ref(viewer));
     pump_messages();
     return 0;
 }

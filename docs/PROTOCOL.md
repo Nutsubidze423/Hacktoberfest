@@ -5,8 +5,9 @@ code is the authority: `protocol.h` defines every message, and this page explain
 two together, and bump the version when an older peer can't understand the change.
 
 **Version history:**
-- **3:** the control channel is TLS 1.3 between paired PCs, and `hello` carries `device_id`.
-  Version 2 peers can't connect (they don't speak TLS).
+- **3:** every channel is TLS 1.3 between paired PCs, and `hello` carries `device_id`. The host's
+  `hello` carries the session token and ports of the video and file channels, which open with
+  `channel_hello`. Version 2 peers can't connect (they don't speak TLS).
 - **2:** the hackathon release, Sarke 1.1.0.
 
 ## Connections
@@ -18,8 +19,8 @@ can take control, share windows, copy and send files. Every PC starts as a host;
 | Port | Transport | Framing | Carries |
 |---|---|---|---|
 | 50500 | TCP, **TLS 1.3** | `[u32 len][JSON]` inside TLS, big-endian length, at most 64 KB | control and input messages (table below) |
-| 50501 | TCP | `[u32 header_len][u32 payload_len][header JSON][payload]`, big-endian, payload at most 32 MB | video frames, both directions on one connection |
-| 50502 | TCP | same as 50501 | files: `transfer_begin` (`drag`, drag image), `file_begin`, `file_chunk`, `file_end`, `transfer_end` |
+| 50501 | TCP, **TLS 1.3** | `[u32 header_len][u32 payload_len][header JSON][payload]` inside TLS, big-endian, payload at most 32 MB | `channel_hello`, then video frames, both directions on one connection |
+| 50502 | TCP, **TLS 1.3** | same as 50501 | `channel_hello`, then files: `transfer_begin` (`drag`, drag image), `file_begin`, `file_chunk`, `file_end`, `transfer_end` |
 | 50503 | UDP | one JSON object per datagram | discovery: `kvm_discover` (broadcast), answered by `kvm_here` |
 
 `TCP_NODELAY` is set on every TCP socket.
@@ -41,7 +42,19 @@ paired:
 5. The client then connects again as a paired PC.
 
 The host allows 3 pairing attempts per IP per 10 minutes. For development, `--pair-with <device id>`
-pairs by hand (`--print-id` shows the ID). Ports 50501 and 50502 are still plain TCP until P1.7.
+pairs by hand (`--print-id` shows the ID).
+
+**Side channels** (50501 video, 50502 files; [SECURITY.md](SECURITY.md) §6.4) belong to the live
+control session:
+1. The host's `hello` answer carries `session_token` (32 random bytes, 64 hex, new for every
+   session), `video_port` and `file_port`. The client opens the side channels only after it.
+2. Each side channel runs TLS with the same keys as the control channel. The client checks that the
+   host has the control session's key.
+3. Its first frame is `channel_hello`: header `{"type": "channel_hello", "token": "<64 hex>"}`,
+   payload length 0, at most 1 KB, within 5 s.
+4. The host keeps the channel only if the peer's key is the control session's and the token matches.
+   Otherwise it closes it, and the live channel stays.
+5. When the session ends, the host closes its side channels and refuses the old token.
 
 **Discovery.** A PC looking for others broadcasts `kvm_discover`. Every running host answers
 `kvm_here` with `name`, `control_port`, `protocol_version` and `busy` (a client is already
@@ -62,7 +75,7 @@ never hand-built JSON.
 
 | `type` | Direction | Fields |
 |---|---|---|
-| `hello` | client → host, then host → client (the answer) | `protocol_version`, `screen_w`, `screen_h`, `dpi_scale`, `hostname`, `desk` (desk mode on), `device_id` (64 hex, the sender's TLS key; for logs) |
+| `hello` | client → host, then host → client (the answer) | `protocol_version`, `screen_w`, `screen_h`, `dpi_scale`, `hostname`, `desk` (desk mode on), `device_id` (64 hex, the sender's TLS key; for logs). The host's answer adds `session_token`, `video_port`, `file_port` (side channels, above) |
 | `focus_enter` | controller → controlled | `y_norm` (where the cursor enters), `desk` (the cursor follows `desk_move`) |
 | `focus_leave` | both | `y_norm`. Controller → controlled: "I took input back". Controlled → controller: "your cursor came back over my edge" |
 | `mouse_move` | controller → controlled | `dx`, `dy` (relative) |

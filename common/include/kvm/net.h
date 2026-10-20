@@ -22,10 +22,12 @@
 #include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <stop_token>
 #include <thread>
 
@@ -140,6 +142,43 @@ public:
 private:
     std::atomic<SOCKET> listen_sock_{INVALID_SOCKET};
 };
+
+// ---- side channels: video (50501) and files (50502), docs/SECURITY.md 6.4 ---------------------
+// They run TLS with the same keys as the control channel. The client's first frame is a
+// channel_hello carrying the token the host sent in its hello. The host accepts a side channel only
+// if its key is the live control session's peer and the token matches.
+
+// The live control session that side channels may join. Thread-safe.
+class SessionKey {
+public:
+    // A new session with `peer`: draws a fresh 32-byte token and returns it as hex.
+    std::string open(const tls::DeviceId& peer);
+    // No session: every side channel is refused. Waits for an install() running in admit().
+    void close();
+    // True if `peer` with `token` belongs to the live session. Then `install` (if given) runs before
+    // this returns, under the lock close() takes: a channel installed there is either in place
+    // before close() returns, for the caller to drop with the session, or never installed.
+    bool admit(const tls::DeviceId& peer, std::string_view token, const std::function<void()>& install = {}) const;
+
+private:
+    mutable std::mutex mutex_;
+    std::optional<tls::DeviceId> peer_;
+    std::string token_;
+};
+
+// Host: reads the side channel's channel_hello within `timeout` and checks it against `session`
+// (SessionKey::admit, which runs `install`). Logs a refusal (`what` = "video" / "files").
+// True = the channel belongs to the live session. `install` may move the stream away: nothing
+// here touches `stream` or `peer` after it.
+bool admit_side_channel(tls::Stream& stream, const SessionKey& session, std::string_view what, std::string_view peer,
+                        const std::function<void()>& install = {},
+                        std::chrono::milliseconds timeout = std::chrono::seconds(5));
+
+// Client: TLS to host:port; the host must have `host_id` (the control session's key); then sends
+// channel_hello with `token`. nullopt on failure (logged).
+std::optional<Handshaken> connect_side_channel(const std::string& host, std::uint16_t port, const tls::Credentials& me,
+                                               const tls::DeviceId& host_id, std::string_view token,
+                                               std::chrono::milliseconds timeout = std::chrono::seconds(2));
 
 // Connects to host:port within `timeout` and runs the TLS handshake. nullopt on failure (logged);
 // the caller decides when to retry.

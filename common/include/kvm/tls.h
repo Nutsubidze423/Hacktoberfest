@@ -109,6 +109,11 @@ private:
     std::string peer_name_;
 };
 
+// `bytes` random bytes from OpenSSL's CSPRNG, as lowercase hex (e.g. a session token).
+std::string random_hex(std::size_t bytes);
+// Compares two secrets in constant time (for tokens; the lengths themselves aren't secret).
+bool equal_secret(std::string_view a, std::string_view b);
+
 // The 6-digit pairing code from 4 exporter bytes (SECURITY.md 6.3): big-endian u32 mod 1 000 000,
 // as "042 917".
 std::string pairing_code(std::span<const std::uint8_t, 4> material);

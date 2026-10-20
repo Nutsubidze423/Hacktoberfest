@@ -122,15 +122,22 @@ private:
     std::shared_ptr<kvm::net::FrameChannel> channel_;
 };
 
-void accept_video_loop(kvm::net::VideoServer& server, VideoSlot& slot, kvm::WindowLink& windows) {
+// Video channels (port 50501): only one that belongs to the live session (docs/SECURITY.md 6.4).
+void accept_video_loop(kvm::net::VideoServer& server, VideoSlot& slot, kvm::WindowLink& windows,
+                       const kvm::tls::Credentials& me, const kvm::net::SessionKey& session) {
     while (g_running) {
-        auto channel = server.accept();
-        if (!channel) {
-            continue;  // stop() or a transient accept error
+        auto pending = server.accept(me);
+        if (!pending) {
+            continue;  // stop()
         }
-        kvm::log::info("video channel from {}", channel->peer());
-        slot.set(std::move(channel));
-        windows.set_video(slot.get());  // window frames go both ways on the newest connection
+        const std::string peer = pending->peer;
+        // Installed while the session can't end, so the session's end always drops it.
+        const bool admitted = kvm::net::admit_side_channel(*pending->stream, session, "video", peer, [&] {
+            slot.set(std::make_shared<kvm::net::FrameChannel>(std::move(*pending)));
+            windows.set_video(slot.get());  // window frames go both ways on the session's connection
+        });
+        if (admitted) kvm::log::info("video channel from {}", peer);
+        // else refused and closed; a live channel stays as it is
     }
 }
 
@@ -220,16 +227,29 @@ void match_vdd_to_peer(int width, int height, kvm::display::Side side) {
     if (auto vdd = kvm::VirtualDisplay::find(); vdd && vdd->attached()) vdd->match_peer(width, height, side);
 }
 
+// The side channels a session's client may open: who it is, and where.
+struct SideChannels {
+    kvm::net::SessionKey& session;
+    kvm::tls::DeviceId peer;
+    std::uint16_t video_port = 0;
+    std::uint16_t file_port = 0;
+};
+
 void run_session(kvm::net::Connection& conn, kvm::KvmLink* kvm, kvm::clip::ClipboardSync* clip, VideoSlot& video,
                  const Options& opt, kvm::display::Side client_side, kvm::WindowLink& windows,
-                 kvm::layout_sync::Session& places, kvm::CurrentPeer& current_peer) {
+                 kvm::layout_sync::Session& places, kvm::CurrentPeer& current_peer, const SideChannels& side) {
     const auto hello = handshake(conn);
     if (!hello) {
         return;
     }
     kvm::log::info("client '{}' connected from {}: screen {}x{}, dpi scale {:.2f}", hello->hostname, conn.peer(),
                    hello->screen_w, hello->screen_h, hello->dpi_scale);
-    conn.send(make_hello(opt.desk));
+    // From here the client may open the session's video and file channels, with this token.
+    auto reply = make_hello(opt.desk);
+    reply.session_token = side.session.open(side.peer);
+    reply.video_port = side.video_port;
+    reply.file_port = side.file_port;
+    conn.send(reply);
     // Where this client stands, kept per PC and the same on both: before KVM and desk mode use it.
     conn.send(places.begin(hello->hostname));
     current_peer.set([&conn](const proto::Message& m) { return conn.send_json(proto::encode(m)); });
@@ -293,8 +313,7 @@ void run_session(kvm::net::Connection& conn, kvm::KvmLink* kvm, kvm::clip::Clipb
             next_stats += kStatsInterval;
         }
     }
-    // The video channel is left alone: a reconnecting client may already have opened its new one
-    // (accepted on another thread), and closing here would kill that. A newer channel replaces it.
+    // The caller closes the session key and this session's video and file channels.
     kvm::log::info("client '{}' session ended", hello->hostname);
 }
 
@@ -427,7 +446,8 @@ int wmain(int argc, wchar_t** argv) {
         kvm::LauncherCommands commands(
             [&](const std::string& line) { kvm::handle_launcher_command(line, places, current_peer, pairing_prompt); });
         VideoSlot video;
-        std::jthread video_acceptor([&] { accept_video_loop(video_server, video, windows); });
+        kvm::net::SessionKey session;  // the live session: side channels must present its token
+        std::jthread video_acceptor([&] { accept_video_loop(video_server, video, windows, trust->me, session); });
 
         // Files (port 50502): drop window + Ctrl+Alt+Shift+F, received files land in Downloads\KVM.
         kvm::FileLink files;
@@ -466,10 +486,13 @@ int wmain(int argc, wchar_t** argv) {
         } clip_reset{clip_on ? &clip : nullptr};
         std::jthread file_acceptor([&] {
             while (g_running) {
-                if (auto channel = file_server.accept(files.callbacks())) {
-                    kvm::log::info("file channel from {}", channel->peer());
-                    files.set(std::move(channel));
-                }
+                auto pending = file_server.accept(trust->me);
+                if (!pending) continue;  // stop()
+                const std::string peer = pending->peer;
+                const bool admitted = kvm::net::admit_side_channel(*pending->stream, session, "files", peer, [&] {
+                    files.set(std::make_unique<kvm::files::FileTransfer>(std::move(*pending), files.callbacks()));
+                });
+                if (admitted) kvm::log::info("file channel from {}", peer);
             }
         });
         kvm::Hotkeys hotkeys;
@@ -498,10 +521,17 @@ int wmain(int argc, wchar_t** argv) {
                 if (discovery) discovery->set_busy(false);
                 continue;
             }
+            const auto peer_id = pending->stream->peer_id();
             auto conn = std::make_unique<kvm::net::Connection>(std::move(*pending));
             if (discovery) discovery->set_busy(true);  // other PCs list this one as taken meanwhile
             run_session(*conn, kvm_link ? &*kvm_link : nullptr, clip_on ? &clip : nullptr, video, opt,
-                        side.value_or(kvm::display::Side::Right), windows, places, current_peer);
+                        side.value_or(kvm::display::Side::Right), windows, places, current_peer,
+                        {session, peer_id, cfg.video_port, cfg.file_port});
+            // The session is over: its side channels go with it, and no new one is admitted (S4, S8).
+            session.close();
+            windows.set_video(nullptr);
+            video.set(nullptr);
+            files.set(nullptr);
             if (discovery) discovery->set_busy(false);
         }
         hotkeys.stop();

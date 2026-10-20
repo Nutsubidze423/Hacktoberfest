@@ -5,6 +5,7 @@
 #include <winsock2.h>
 
 #include <openssl/bn.h>
+#include <openssl/crypto.h>
 #include <openssl/err.h>
 #include <openssl/evp.h>
 #include <openssl/rand.h>
@@ -129,6 +130,20 @@ std::optional<DeviceId> from_hex(std::string_view hex) {
         id[i] = static_cast<std::uint8_t>(hi << 4 | lo);
     }
     return id;
+}
+
+std::string random_hex(std::size_t bytes) {
+    std::vector<unsigned char> raw(bytes);
+    if (RAND_bytes(raw.data(), static_cast<int>(raw.size())) != 1) throw std::runtime_error("tls: RAND_bytes failed");
+    std::string text;
+    text.reserve(bytes * 2);
+    for (const auto b : raw) text += std::format("{:02x}", b);
+    OPENSSL_cleanse(raw.data(), raw.size());
+    return text;
+}
+
+bool equal_secret(std::string_view a, std::string_view b) {
+    return a.size() == b.size() && CRYPTO_memcmp(a.data(), b.data(), a.size()) == 0;
 }
 
 std::string pairing_code(std::span<const std::uint8_t, 4> m) {
