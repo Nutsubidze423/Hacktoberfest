@@ -1,5 +1,7 @@
 # Sarke
 
+[![CI](https://github.com/Nutsubidze423/Hacktoberfest/actions/workflows/ci.yml/badge.svg)](https://github.com/Nutsubidze423/Hacktoberfest/actions/workflows/ci.yml)
+
 One desk, two Windows PCs.
 
 Sarke joins two Windows PCs on the same network into one workspace. Move the mouse past the edge

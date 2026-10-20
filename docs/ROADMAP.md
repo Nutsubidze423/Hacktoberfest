@@ -293,7 +293,7 @@ Task-level links that matter:
       - `desk_test` now gets `--settle 3`.
     - **Known issue:** `window_mover_test` and `capture_test` fail now and then in the full sequence, but pass on their own. This is P0.9.
 
-- [ ] **P0.3 GitHub Actions CI** (M), branch `phase0/ci`. Depends on P0.2.
+- [x] **P0.3 GitHub Actions CI** (M), branch `phase0/ci`. Depends on P0.2.
   - **Files:** `.github/workflows/ci.yml`.
   - **Steps:**
     1. Run on `windows-latest`.
@@ -307,6 +307,15 @@ Task-level links that matter:
   - **Done when:**
     - the PR shows a green run;
     - cold and warm build times are written here (measured, not guessed).
+  - **Result (2026-10-20, image `windows-latest` 20261018.275.1):**
+    - **Timings:**
+      - cold run 437 s;
+      - second run 438 s, with the vcpkg cache restored (8.2 MB entry);
+      - "configure, build, unit tests" takes about 360 s, nearly all of it compiling Sarke itself.
+
+      The cache will matter once OpenSSL arrives (P1.2).
+    - **Desktop probe:** all 7 `desktop` tests passed on the hosted runner in both runs (no failure annotation). They stay a non-required step until 5 runs in a row have passed; then they move into the required step.
+    - **Action versions:** checkout v7, cache v6 and upload-artifact v7. The v4 actions ran on Node 20, which is deprecated.
 
 - [ ] **P0.4 `/WX` and clang-format** (M), branch `phase0/format`.
   - **Files:**
