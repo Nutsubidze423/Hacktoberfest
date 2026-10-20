@@ -352,8 +352,22 @@ Task-level links that matter:
   - **License files (from P0.8):** `installer/sarke.iss` copies `LICENSE`, `NOTICE` and `THIRD_PARTY_NOTICES.md` into `{app}\licenses`, next to the VDD license.
   - **Website (D5):** the same installer is also uploaded to the website with [tools/publish_release.ps1](../tools/publish_release.ps1). Document the two-step release (GitHub Release, then website) in `docs/RELEASING.md`.
   - **Done when:**
-    - a fresh clone + `fetch_vdd.ps1` + `make_installer.ps1` produces an installer that works in Windows Sandbox (the existing method, commit `6b58d1f`);
+    - a fresh clone + `fetch_vdd.ps1` + `make_installer.ps1` produces an installer that works in Windows Sandbox;
     - a wrong hash makes the script fail.
+  - **Result so far (2026-10-20):**
+    - **Removed from git:** `releases/` and the VDD binaries. The website already downloads from Supabase, so nothing links to them.
+    - **`fetch_vdd.ps1`:** pins release 25.7.23 and checks the zip hash plus three file hashes. Its four checks pass:
+      - present → no download;
+      - missing → downloaded and verified;
+      - wrong zip hash → refused, nothing written;
+      - a corrupted file → downloaded again.
+    - **Fresh clone of the branch + `fetch_vdd.ps1` + ISCC:** builds the installer, which packs the driver, `LICENSE`, `NOTICE` and `THIRD_PARTY_NOTICES.md`.
+    - **`make_installer.ps1`:** passes end to end, and now only closes a Sarke started from the repo's build, never an installed one.
+    - **Inno Setup:** 6.7.3 installed per-user on this PC (signed by Pyrsys B.V.).
+    - **Tag:** `v1.1.0` on `356dacf`, pushed.
+    - **Remaining:**
+      1. **Demetre:** create the GitHub Release `v1.1.0` from the tag and attach the original `SarkeSetup-1.1.0.0.exe` (SHA-256 `5a38cefd…`, saved in `dist\release-1.1.0\`).
+      2. **Install test in Windows Sandbox:** Sandbox isn't enabled on this PC. Enabling it needs admin and a reboot; alternatively, a spare PC.
 
 - [ ] **P0.6 Rewrite CLAUDE.md; archive the hackathon docs** (S), branch `phase0/claude-md`. Depends on D2.
   - **New CLAUDE.md** (English):

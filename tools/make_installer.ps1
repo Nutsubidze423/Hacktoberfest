@@ -16,13 +16,22 @@ $iscc = @("$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe",
           "$env:ProgramFiles\Inno Setup 6\ISCC.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1
 if (-not $iscc) { throw 'Inno Setup 6 not found: winget install JRSoftware.InnoSetup' }
 
-# The build replaces the executables a running Sarke holds.
+# The build replaces the executables a running Sarke holds. Only a Sarke started from this repo's
+# build is asked to quit; an installed Sarke (Program Files) keeps running.
 $sarke = Join-Path $root 'build\x64-release\tools\sarke.exe'
-if ((Test-Path $sarke) -and (Get-Process sarke, kvm_host, kvm_client -ErrorAction SilentlyContinue)) {
-    Write-Host 'Asking the running Sarke to quit...'
+$build = Join-Path $root 'build\'
+$fromRepo = Get-Process sarke, kvm_host, kvm_client -ErrorAction SilentlyContinue |
+    Where-Object { $_.Path -and $_.Path.StartsWith($build, [StringComparison]::OrdinalIgnoreCase) }
+if ($fromRepo | Where-Object Name -eq 'sarke') {
+    # --quit reaches the one running Sarke (single instance): here, the repo's. It ends its apps too.
+    Write-Host 'Asking the running Sarke (this repo) to quit...'
     & $sarke --quit
     Start-Sleep -Seconds 4
 }
+# kvm_host / kvm_client started by hand from the build: --quit would reach an installed Sarke instead.
+Get-Process kvm_host, kvm_client -ErrorAction SilentlyContinue |
+    Where-Object { $_.Path -and $_.Path.StartsWith($build, [StringComparison]::OrdinalIgnoreCase) } |
+    ForEach-Object { Write-Host "Stopping $($_.Name) (this repo's build)..."; Stop-Process -Id $_.Id -Force }
 
 # Build inside a VS developer environment (cl, rc, ninja, VCPKG_ROOT).
 $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
