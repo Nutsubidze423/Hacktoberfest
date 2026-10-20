@@ -103,8 +103,10 @@ public:
         SECURITY_ATTRIBUTES inherit{sizeof(inherit), nullptr, TRUE};
         HANDLE out = CreateFileW(log_.c_str(), GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, &inherit,
                                  CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
-        HANDLE in = CreateFileW(L"NUL", GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, &inherit, OPEN_EXISTING,
-                                FILE_ATTRIBUTE_NORMAL, nullptr);
+        // stdin is a pipe, as when the launcher starts the app: send_line() writes launcher commands.
+        HANDLE in = INVALID_HANDLE_VALUE;
+        if (!CreatePipe(&in, &stdin_write_, &inherit, 0)) in = INVALID_HANDLE_VALUE;
+        if (stdin_write_) SetHandleInformation(stdin_write_, HANDLE_FLAG_INHERIT, 0);
         STARTUPINFOW si{sizeof(si)};
         si.dwFlags = STARTF_USESTDHANDLES;
         si.hStdInput = in;
@@ -124,9 +126,17 @@ public:
         if (in != INVALID_HANDLE_VALUE) CloseHandle(in);
     }
     ~Program() {
+        if (stdin_write_) CloseHandle(stdin_write_);
         if (!process_) return;
         if (WaitForSingleObject(process_, 0) == WAIT_TIMEOUT) TerminateProcess(process_, 1);
         CloseHandle(process_);
+    }
+
+    // One launcher command (kvm/launcher_commands.h), e.g. "pair yes".
+    bool send_line(std::string_view line) {
+        const std::string text = std::string(line) + '\n';
+        DWORD written = 0;
+        return stdin_write_ && WriteFile(stdin_write_, text.data(), static_cast<DWORD>(text.size()), &written, nullptr);
     }
     Program(const Program&) = delete;
     Program& operator=(const Program&) = delete;
@@ -157,6 +167,7 @@ public:
 
 private:
     fs::path log_;
+    HANDLE stdin_write_ = nullptr;
     HANDLE process_ = nullptr;
     DWORD pid_ = 0;
 };
@@ -359,6 +370,65 @@ int wmain(int argc, wchar_t** argv) {
         check(host_code == 0u,
               std::format("the host stops with exit code 0 (got {})", host_code ? static_cast<long>(*host_code) : -1L));
     }
+    // Pairing by code (docs/SECURITY.md 6.3): a host and a client that have never met, the client started
+    // the way the launcher starts it when the user picks a PC (--pair-unknown). The test plays both users:
+    // it answers each "pairing: code ..." line on the program's stdin, as the launcher does.
+    const auto code_in = [](const std::string& log) -> std::string {
+        const auto at = log.find("pairing: code ");
+        return at == std::string::npos || at + 21 > log.size() ? std::string() : log.substr(at + 14, 7);
+    };
+    for (const bool both_agree : {true, false}) {
+        const std::wstring tag = both_agree ? L"pair" : L"cancel";
+        kvm::log::info("{}",
+                       both_agree ? "7) pairing by code, both users confirm" : "8) pairing by code, one user cancels");
+        const std::uint16_t c = free_port(), v = free_port(), f = free_port();
+        const fs::path config = dir / (tag + L".json");
+        std::ofstream(config) << std::format(R"({{"control_port": {}, "video_port": {}, "file_port": {}}})", c, v, f)
+                              << "\n";
+        Program host(job, host_exe,
+                     L"--config \"" + config.wstring() + L"\" --no-discovery" + quiet + data(tag + L"-host"),
+                     dir / (tag + L"-host.log"));
+        check(host.started() && wait_until([&] { return host.log_has("listening on ports"); }, 15s),
+              "a new kvm_host listens");
+        Program client(
+            job, client_exe,
+            L"--config \"" + config.wstring() + L"\" --host 127.0.0.1 --pair-unknown" + quiet + data(tag + L"-client"),
+            dir / (tag + L"-client.log"));
+        const bool asked =
+            wait_until([&] { return host.log_has("pairing: code") && client.log_has("pairing: code"); }, 20s);
+        const std::string host_code = code_in(host.log()), client_code = code_in(client.log());
+        check(asked && host_code.size() == 7 && host_code == client_code,
+              std::format("both PCs show the same code: {} / {}", host_code, client_code));
+        check(!host.log_has("connected from") && !client.log_has("connected to host"),
+              "nothing connects before both users answer");
+        client.send_line("pair yes");
+        host.send_line(both_agree ? "pair yes" : "pair no");
+        if (both_agree) {
+            check(wait_until(
+                      [&] { return host.log_has("pairing: paired with") && client.log_has("pairing: paired with"); },
+                      10s),
+                  "both store the other");
+            check(
+                wait_until([&] { return client.log_has("connected to host") && host.log_has("connected from"); }, 15s),
+                "the client connects again, now as a paired PC");
+        } else {
+            check(wait_until(
+                      [&] {
+                          return host.log_has("pairing: cancelled on this PC") &&
+                                 client.log_has("pairing: cancelled on the other PC");
+                      },
+                      10s),
+                  "both see the cancel");
+            std::this_thread::sleep_for(3s);
+            check(!host.log_has("pairing: paired") && !client.log_has("pairing: paired") &&
+                      !client.log_has("connected to host"),
+                  "nothing is stored and nothing connects");
+        }
+        const auto client_code_exit = client.stop(10s);
+        const auto host_code_exit = host.stop(10s);
+        check(client_code_exit == 0u && host_code_exit == 0u, "both stop normally");
+    }
+
     CloseHandle(job);
 
     if (check.failed || keep) {

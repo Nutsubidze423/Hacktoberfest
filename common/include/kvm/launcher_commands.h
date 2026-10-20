@@ -3,6 +3,7 @@
 // Commands the Sarke launcher writes to the app's stdin, one per line (owner: Luka):
 //   layout <left|right|top|bottom>   the user moved the other PC in the Displays window
 //   identify                         the user pressed Identify: the other PC shows its numbers too
+//   pair yes | pair no               the user's answer to "pairing: code ..." (kvm/pairing.h)
 //
 //   kvm::CurrentPeer peer;                       // a session sets / clears where messages go
 //   kvm::LauncherCommands commands([&](const std::string& line) { kvm::handle_launcher_command(line, places, peer); });
@@ -18,6 +19,7 @@
 #include <thread>
 
 #include "kvm/layout_sync.h"
+#include "kvm/pairing.h"
 #include "kvm/protocol.h"
 
 namespace kvm {
@@ -56,6 +58,7 @@ private:
 };
 
 // What both apps do with a launcher command.
-void handle_launcher_command(const std::string& line, layout_sync::Session& places, CurrentPeer& peer);
+void handle_launcher_command(const std::string& line, layout_sync::Session& places, CurrentPeer& peer,
+                             pairing::Prompt& prompt);
 
 }  // namespace kvm

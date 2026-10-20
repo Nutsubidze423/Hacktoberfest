@@ -78,12 +78,15 @@ std::optional<Context> setup(const Options& opt, std::string_view computer_name)
     return context;
 }
 
-bool admit(paired::Store& paired, const tls::Stream& stream, std::string_view peer) {
+bool is_paired(paired::Store& paired, const tls::Stream& stream) {
     paired.reload();
-    if (paired.find(stream.peer_id())) {
-        paired.touch(stream.peer_id());
-        return true;
-    }
+    if (!paired.find(stream.peer_id())) return false;
+    paired.touch(stream.peer_id());
+    return true;
+}
+
+bool admit(paired::Store& paired, const tls::Stream& stream, std::string_view peer) {
+    if (is_paired(paired, stream)) return true;
     log::warn("trust: {} has the key {} ('{}'), which isn't paired with this PC - connection closed", peer,
               tls::short_id(stream.peer_id()), stream.peer_name());
     return false;

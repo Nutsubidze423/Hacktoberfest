@@ -6,6 +6,8 @@
 //   --no-clipboard  don't share copied text/images with the host
 //   --no-desk       no desk mode (the host's screen as one more monitor); Ctrl+Alt+Shift+W uses the viewer
 //   --desk-no-vdd   desk mode, but only show the host's windows (one-PC tests: the host owns the VDD)
+//   --pair-unknown  if the host's key isn't paired, start pairing (both users compare a code) instead of
+//                   refusing it: the launcher passes it when the user picked the host
 //   --data-dir <dir> --print-id --pair-with <device id> --recreate-identity: see kvm/trust.h
 
 #include <atomic>
@@ -27,6 +29,7 @@
 #include "kvm/clipboard.h"
 #include "kvm/config.h"
 #include "kvm/desk_region.h"
+#include "kvm/pairing.h"
 #include "kvm/trust.h"
 #include "kvm/discovery.h"
 #include "kvm/dpi.h"
@@ -61,9 +64,11 @@ std::atomic<bool> g_running{true};
 std::string g_device_id;  // this PC's device ID (hex), sent in hello
 std::atomic<bool> g_desk{false};        // desk mode may have the VDD attached
 std::atomic<bool> g_cleaned_up{false};  // wmain's objects are gone (windows home, VDD detached)
+std::atomic<kvm::pairing::Prompt*> g_pairing_prompt{nullptr};  // a pairing question must not hold up quitting
 
 BOOL WINAPI on_console_ctrl(DWORD type) {
     g_running = false;
+    if (auto* prompt = g_pairing_prompt.load()) prompt->cancel();
     if (type == CTRL_CLOSE_EVENT || type == CTRL_LOGOFF_EVENT || type == CTRL_SHUTDOWN_EVENT) {
         // Windows ends the process as soon as this returns: give the main thread time to bring the
         // windows home from the VDD, and never leave the VDD attached (windows would sit on an invisible monitor).
@@ -237,6 +242,7 @@ int wmain(int argc, wchar_t** argv) {
     bool clipboard_enabled = true;
     bool desk_enabled = true;
     bool desk_own_vdd = true;
+    bool pair_unknown = false;
     kvm::trust::Options trust_options;
     for (int i = 1; i < argc; ++i) {
         if (const int used = kvm::trust::parse_arg(trust_options, argc, argv, i)) {
@@ -258,6 +264,8 @@ int wmain(int argc, wchar_t** argv) {
             desk_enabled = false;
         } else if (arg == L"--desk-no-vdd") {
             desk_own_vdd = false;  // e.g. host and client on one PC: only the host uses the VDD
+        } else if (arg == L"--pair-unknown") {
+            pair_unknown = true;
         }
     }
 
@@ -369,8 +377,13 @@ int wmain(int argc, wchar_t** argv) {
                                              windows.set_peer_side(s);
                                          });
         kvm::CurrentPeer current_peer;
+        kvm::pairing::Prompt pairing_prompt;  // the launcher answers "pair yes" / "pair no"
+        g_pairing_prompt = &pairing_prompt;
+        struct PromptReset {
+            ~PromptReset() { g_pairing_prompt = nullptr; }
+        } prompt_reset;
         kvm::LauncherCommands commands(
-            [&](const std::string& line) { kvm::handle_launcher_command(line, places, current_peer); });
+            [&](const std::string& line) { kvm::handle_launcher_command(line, places, current_peer, pairing_prompt); });
 
         kvm::Hotkeys hotkeys;
         hotkeys.add('F', [&] { files.show_catcher_at_cursor(); });
@@ -397,10 +410,19 @@ int wmain(int argc, wchar_t** argv) {
             }
             if (auto pending = kvm::net::connect(cfg.host_ip, cfg.control_port, trust->me)) {
                 // Pinning: the host's key must be paired before a single message of it is read.
-                if (kvm::trust::admit(*trust->paired, *pending->stream, pending->peer)) {
+                if (kvm::trust::is_paired(*trust->paired, *pending->stream)) {
                     kvm::net::Connection conn(std::move(*pending));
                     run_session(conn, cfg, kvm_link ? &*kvm_link : nullptr, clip_on ? &clip : nullptr, files, windows,
                                 places, current_peer);
+                } else if (pair_unknown) {
+                    const auto paired = kvm::pairing::run(std::move(*pending), /*initiator=*/true, trust->me,
+                                                          make_hello(false).hostname, *trust->paired, pairing_prompt);
+                    if (paired.outcome == kvm::pairing::Outcome::Paired) continue;  // connect again, now paired
+                } else {
+                    kvm::log::warn(
+                        "trust: {} has the key {} ('{}'), which isn't paired with this PC - connection closed. "
+                        "Pick that PC in Sarke's tray to pair.",
+                        pending->peer, kvm::tls::short_id(pending->stream->peer_id()), pending->stream->peer_name());
                 }
             }
             if (g_running) {

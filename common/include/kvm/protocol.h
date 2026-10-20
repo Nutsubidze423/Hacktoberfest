@@ -221,6 +221,26 @@ struct Identify {
     static constexpr std::string_view kType = "identify";
 };
 
+// Pairing (docs/SECURITY.md 6.3): the only messages accepted from a PC whose key isn't paired yet.
+// The PC whose user picked the other one sends pair_request. Each side shows the code derived from
+// its own TLS session and sends pair_confirm with its user's answer. Each stores the other only when
+// both said yes, then sends pair_result.
+struct PairRequest {
+    static constexpr std::string_view kType = "pair_request";
+    std::string name;  // the sender's computer name, for the other user's prompt
+};
+
+struct PairConfirm {
+    static constexpr std::string_view kType = "pair_confirm";
+    bool ok = false;  // the user saw the same code and confirmed
+};
+
+struct PairResult {
+    static constexpr std::string_view kType = "pair_result";
+    bool ok = false;
+    std::string reason;  // when !ok, e.g. "cancelled", "timeout"
+};
+
 // Video channel header (port 50501), followed by `payload_len` bytes of encoded image.
 // layer "" = a window stream for the viewer window. layer "desk" = desk mode: the picture of one
 // window of the owner's virtual display (`window` = DeskWindow::id), drawn at that window's place
@@ -268,13 +288,16 @@ inline void to_json(nlohmann::json& j, const Identify&) {
     j = nlohmann::json::object();
 }
 inline void from_json(const nlohmann::json&, Identify&) {}
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(PairRequest, name)
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(PairConfirm, ok)
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(PairResult, ok, reason)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(FrameHeader, seq, t_capture_us, width, height, codec, layer, x, y,
                                                 desk_w, desk_h, rects, window, alpha_bytes)
 
 // Any message that travels on the control channel (port 50500).
-using Message =
-    std::variant<Hello, FocusEnter, FocusLeave, MouseMove, MouseButtonEvent, MouseWheel, Key, StreamStart, StreamStop,
-                 RemoteMouseMove, Clipboard, Ping, Pong, DeskMove, DeskCursor, DeskLayout, Layout, Identify>;
+using Message = std::variant<Hello, FocusEnter, FocusLeave, MouseMove, MouseButtonEvent, MouseWheel, Key, StreamStart,
+                             StreamStop, RemoteMouseMove, Clipboard, Ping, Pong, DeskMove, DeskCursor, DeskLayout,
+                             Layout, Identify, PairRequest, PairConfirm, PairResult>;
 
 // Serializes a message struct (including FrameHeader) to JSON with its "type" field set.
 template <class M>

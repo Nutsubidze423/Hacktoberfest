@@ -30,8 +30,18 @@ can take control, share windows, copy and send files. Every PC starts as a host;
   connection is closed **before anything is read from it**.
 - A peer that doesn't speak TLS (protocol v2) is closed at the handshake.
 
-Until roadmap task P1.6 adds pairing by code, `--pair-with <device id>` pairs two PCs by hand
-(`kvm_host --print-id` shows the ID). Ports 50501 and 50502 are still plain TCP until P1.7.
+**Pairing** ([SECURITY.md](SECURITY.md) §6.3) is the one exchange allowed with a key that isn't
+paired:
+1. The client starts it when its user picked the host in the launcher (`--pair-unknown`). It sends
+   `pair_request`.
+2. Each side derives a 6-digit code from its own TLS session and logs
+   `pairing: code 042 917 with 'name' (id) - confirm on both PCs`.
+3. The launcher asks its user and answers `pair yes` / `pair no` on the app's stdin.
+4. Each side sends `pair_confirm`, and stores the other only if both said yes (`pair_result`).
+5. The client then connects again as a paired PC.
+
+The host allows 3 pairing attempts per IP per 10 minutes. For development, `--pair-with <device id>`
+pairs by hand (`--print-id` shows the ID). Ports 50501 and 50502 are still plain TCP until P1.7.
 
 **Discovery.** A PC looking for others broadcasts `kvm_discover`. Every running host answers
 `kvm_here` with `name`, `control_port`, `protocol_version` and `busy` (a client is already
@@ -69,6 +79,9 @@ never hand-built JSON.
 | `layout` | both (after `hello`, and on Displays → Apply) | `you_are` (`left`/`right`/`top`/`bottom`: where the **receiver** stands relative to the sender), `set_at` (ms when the user set it; 0 = never). The newer setting wins; on a tie, the host's. Each PC keeps every peer's side in `config.json` `"peers": {name: {side, set_at}}` ([layout_sync](../common/include/kvm/layout_sync.h)) |
 | `identify` | both | none. The other PC shows its screen numbers too |
 | `ping` / `pong` | both | `t` (`pong` adds `t_peer`, for the clock offset) |
+| `pair_request` | pairing initiator → the other PC (key not paired yet) | `name` (shown to the other user only) |
+| `pair_confirm` | both, while pairing | `ok`: this user saw the same code and confirmed |
+| `pair_result` | both, while pairing | `ok`, `reason` (when not ok) |
 
 ## Video frames (port 50501)
 

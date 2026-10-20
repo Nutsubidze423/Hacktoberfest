@@ -32,6 +32,7 @@
 #include "kvm/config.h"
 #include "kvm/desk_region.h"
 #include "kvm/discovery.h"
+#include "kvm/pairing.h"
 #include "kvm/trust.h"
 #include "kvm/dpi.h"
 #include "kvm/file_link.h"
@@ -72,6 +73,7 @@ std::string g_device_id;  // this PC's device ID (hex), sent in hello
 std::atomic<kvm::net::Server*> g_server{nullptr};
 std::atomic<kvm::net::VideoServer*> g_video_server{nullptr};
 std::atomic<kvm::files::FileServer*> g_file_server{nullptr};
+std::atomic<kvm::pairing::Prompt*> g_pairing_prompt{nullptr};  // a pairing question must not hold up quitting
 std::atomic<bool> g_desk{false};          // desk mode may have the VDD attached
 std::atomic<bool> g_cleaned_up{false};    // wmain's objects are gone (windows home, VDD detached)
 
@@ -85,6 +87,9 @@ BOOL WINAPI on_console_ctrl(DWORD type) {
     }
     if (auto* files = g_file_server.load()) {
         files->stop();
+    }
+    if (auto* prompt = g_pairing_prompt.load()) {
+        prompt->cancel();
     }
     if (type == CTRL_CLOSE_EVENT || type == CTRL_LOGOFF_EVENT || type == CTRL_SHUTDOWN_EVENT) {
         // Windows ends the process as soon as this returns: give the main thread time to bring the
@@ -413,8 +418,14 @@ int wmain(int argc, wchar_t** argv) {
                                              windows.set_peer_side(s);
                                          });
         kvm::CurrentPeer current_peer;
+        kvm::pairing::Prompt pairing_prompt;  // the launcher answers "pair yes" / "pair no"
+        kvm::pairing::AttemptLimit pairing_limit;
+        g_pairing_prompt = &pairing_prompt;
+        struct PromptReset {
+            ~PromptReset() { g_pairing_prompt = nullptr; }
+        } prompt_reset;
         kvm::LauncherCommands commands(
-            [&](const std::string& line) { kvm::handle_launcher_command(line, places, current_peer); });
+            [&](const std::string& line) { kvm::handle_launcher_command(line, places, current_peer, pairing_prompt); });
         VideoSlot video;
         std::jthread video_acceptor([&] { accept_video_loop(video_server, video, windows); });
 
@@ -474,8 +485,17 @@ int wmain(int argc, wchar_t** argv) {
             if (!pending) {
                 continue;  // stop()
             }
-            // Pinning: an unpaired key is closed before a single message of it is read.
-            if (!kvm::trust::admit(*trust->paired, *pending->stream, pending->peer)) {
+            // Pinning: a key that isn't paired gets nothing but the pairing exchange (it must start with
+            // pair_request, or it is closed); a paired client then connects again.
+            if (!kvm::trust::is_paired(*trust->paired, *pending->stream)) {
+                if (!pairing_limit.allow(pending->peer)) {
+                    kvm::log::warn("trust: {} - too many pairing attempts, closed", pending->peer);
+                    continue;
+                }
+                if (discovery) discovery->set_busy(true);
+                kvm::pairing::run(std::move(*pending), /*initiator=*/false, trust->me, make_hello(false).hostname,
+                                  *trust->paired, pairing_prompt);
+                if (discovery) discovery->set_busy(false);
                 continue;
             }
             auto conn = std::make_unique<kvm::net::Connection>(std::move(*pending));

@@ -56,7 +56,8 @@ void LauncherCommands::run() {
     }
 }
 
-void handle_launcher_command(const std::string& line, layout_sync::Session& places, CurrentPeer& peer) {
+void handle_launcher_command(const std::string& line, layout_sync::Session& places, CurrentPeer& peer,
+                             pairing::Prompt& prompt) {
     if (line.starts_with("layout ")) {
         const auto side = display::parse_side(line.substr(7));
         if (!side) {
@@ -70,6 +71,8 @@ void handle_launcher_command(const std::string& line, layout_sync::Session& plac
         }
     } else if (line == "identify") {
         if (!peer.send(proto::Identify{})) log::info("identify: no PC connected");
+    } else if (line == "pair yes" || line == "pair no") {
+        if (!prompt.answer(line == "pair yes")) log::info("pairing: nothing to answer");
     } else {
         log::warn("launcher: unknown command \"{}\"", line);
     }

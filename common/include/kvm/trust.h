@@ -56,4 +56,7 @@ std::optional<Context> setup(const Options& opt, std::string_view computer_name)
 // first (the launcher may have paired or unpaired meanwhile). Logs a refusal; marks the PC as seen.
 bool admit(paired::Store& paired, const tls::Stream& stream, std::string_view peer);
 
+// The same check without the refusal log, for a caller that may pair with an unknown key next.
+bool is_paired(paired::Store& paired, const tls::Stream& stream);
+
 }  // namespace kvm::trust

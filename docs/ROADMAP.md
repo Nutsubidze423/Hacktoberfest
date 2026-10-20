@@ -676,7 +676,7 @@ Attempts are rate-limited.
     - **Measured** ([PERF.md](PERF.md)): TLS adds about 37 µs to a 64-byte round trip on the Celeron (loopback, median of 2000).
     - **Merge order:** merged together with P1.6. On its own, PCs could only pair with `--pair-with`.
 
-- [ ] **P1.6 Pairing flow and code UI** (M), branch `phase1/pairing`. Depends on P1.5 and D7.
+- [x] **P1.6 Pairing flow and code UI** (M), branch `phase1/pairing`. Depends on P1.5 and D7.
   - **Protocol:** `pair_request{name}`, `pair_confirm{ok}`, `pair_result{ok, reason}`.
   - **How the code reaches the user:**
     - `kvm_host`/`kvm_client` print `pairing: code 123 456 with <name>`;
@@ -687,6 +687,26 @@ Attempts are rate-limited.
     - unit: code derivation against the test vectors;
     - loopback: the test drives both stdins the way the launcher does, and checks paired / cancelled / timed out.
   - **Manual (two PCs):** pair them; the codes match; confirm; restart both and they reconnect without asking.
+  - **Result (2026-10-20):**
+    - **Protocol:** `pair_request`, `pair_confirm` and `pair_result`.
+    - **[kvm/pairing.h](../common/include/kvm/pairing.h):**
+      - `run()`: the code comes from the RFC 8446 exporter; the responder accepts only `pair_request` from an unknown key; each side stores the other only when both confirmed;
+      - `Prompt`, which is armed before the question is logged, so an instant answer isn't lost;
+      - `AttemptLimit`: 3 per IP per 10 minutes.
+    - **Host:** a key that isn't paired goes to the pairing responder.
+    - **Client:** `--pair-unknown` (the launcher passes it when the user picked the PC) pairs, then reconnects as a paired PC.
+    - **Answers:** `pair yes` / `pair no` on stdin. Ctrl+Break cancels a pending question.
+    - **Launcher:**
+      - `PairingCode` / `PairingDone` events;
+      - a TaskDialog ([client_b/pairing_dialog.h](../client_b/pairing_dialog.h)) asking "Does the other PC show 042 917?", with Pair / Cancel (Cancel is the default) and a 55 s countdown that cancels by itself;
+      - `pairing_dialog.cpp` declares Common Controls 6 for every program that links it.
+      - The dialog was checked by screenshot (`tools/ui_preview_pairing.exe`).
+    - **Tests:**
+      - `loopback_test`, 35 checks, 3 runs in a row: the two pairing runs show the same code on both sides (`035 856`), confirm → both store and the client reconnects, cancel → nothing stored and nothing connects;
+      - `launcher_test`: the pairing log lines;
+      - `protocol_test`: the new messages;
+      - `ctest --preset ci` 14/14.
+    - **Not run yet:** pairing on two physical PCs (R17).
 
 - [ ] **P1.7 TLS and session binding on video (50501) and files (50502)** (M), branch `phase1/side-channels`. Depends on P1.5.
   - **Files:**

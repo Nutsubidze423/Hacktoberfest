@@ -73,6 +73,21 @@ void log_lines() {
     check(as<launcher::Problem>(e) && as<launcher::Problem>(e)->text.starts_with("config: client_side"),
           "error line -> problem");
     e = launcher::parse_line(
+        "01:02:03.456 [info] pairing: code 042 917 with 'DESKTOP-1' (1A2B-3C4D-5E6F-7081) - confirm on both PCs");
+    check(as<launcher::PairingCode>(e) && as<launcher::PairingCode>(e)->code == "042 917" &&
+              as<launcher::PairingCode>(e)->name == "DESKTOP-1" &&
+              as<launcher::PairingCode>(e)->id == "1A2B-3C4D-5E6F-7081",
+          "pairing code line -> ask the user");
+    e = launcher::parse_line("01:02:03.456 [info] pairing: paired with 'DESKTOP-1' (1A2B-3C4D-5E6F-7081)");
+    check(as<launcher::PairingDone>(e) && as<launcher::PairingDone>(e)->paired, "paired line -> done, paired");
+    e = launcher::parse_line("01:02:03.456 [info] pairing: cancelled on the other PC");
+    check(as<launcher::PairingDone>(e) && !as<launcher::PairingDone>(e)->paired &&
+              as<launcher::PairingDone>(e)->text == "cancelled on the other PC",
+          "cancel line -> done, not paired");
+    check(
+        std::holds_alternative<std::monostate>(launcher::parse_line("01:02:03.456 [info] pairing: nothing to answer")),
+        "a stray answer isn't an event");
+    e = launcher::parse_line(
         "01:02:03.456 [info] layout: 'tabuladze' is on the right of this PC (set on the other PC)\r\n");
     check(as<launcher::PlaceSet>(e) && as<launcher::PlaceSet>(e)->name == "tabuladze" &&
               as<launcher::PlaceSet>(e)->side == "right",
