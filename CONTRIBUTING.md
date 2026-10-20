@@ -112,7 +112,7 @@ and should be extended rather than a test skipped:
 
 | Path | What |
 |---|---|
-| `common/` | static lib `kvm_common`: protocol, networking, video channel, discovery, files, clipboard, input hooks and injection, DPI, config, logging, queues |
+| `common/` | static lib `kvm_common`: protocol, networking, TLS (`kvm/tls.h`), video channel, discovery, files, clipboard, input hooks and injection, DPI, config, logging, queues |
 | `host_a/` | `kvm_host.exe` (listens): window sharing, capture, JPEG, the virtual display, desk mode on the owner's side |
 | `client_b/` | `kvm_client.exe` (connects) and the `sarke.exe` launcher UI: viewer, desk overlay, tray, display arrangement |
 | `tools/` | `sarke.exe` entry point, tests, fakes, UI previews, `sarke_driver.exe`, scripts |

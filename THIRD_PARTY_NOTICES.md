@@ -9,6 +9,7 @@ ships the third-party components below, each under its own license.
 | [libjpeg-turbo](https://libjpeg-turbo.org) | 3.2.0 | BSD-3-Clause, IJG, zlib | Compiled into every program (JPEG video frames) |
 | [libspng](https://libspng.org) | 0.7.4 | BSD-2-Clause, libpng-2.0 | Compiled in through libjpeg-turbo |
 | [zlib](https://zlib.net) | 1.3.2 | Zlib | Compiled in through libspng |
+| [OpenSSL](https://www.openssl.org) | 3.6.5 | Apache-2.0 | Compiled in: TLS 1.3 between PCs (`kvm/tls.h`) |
 | [Virtual Display Driver](https://github.com/VirtualDrivers/Virtual-Display-Driver) | 11.30.4.434 | MIT | Driver shipped by the installer (desk mode) |
 | [Geist Mono](https://github.com/vercel/geist-font) | — | SIL OFL 1.1 | Font shipped in `assets/fonts` |
 | Google Sans | — | SIL OFL 1.1 | Font shipped in `assets/fonts` |
@@ -286,6 +287,11 @@ Copyright notice:
   Jean-loup Gailly        Mark Adler
   jloup@gzip.org          madler@alumni.caltech.edu
 ```
+
+## OpenSSL
+
+Copyright The OpenSSL Project Authors. Licensed under the Apache License, Version 2.0: the same
+license text as Sarke's own [LICENSE](LICENSE) (OpenSSL's copy leaves out the appendix).
 
 ## Virtual Display Driver
 

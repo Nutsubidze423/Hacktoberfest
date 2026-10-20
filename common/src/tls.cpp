@@ -88,7 +88,9 @@ Wait wait_socket(SOCKET s, bool for_write, Clock::time_point deadline, const std
         FD_SET(s, &failed);
         timeval tv{0, static_cast<long>(std::chrono::duration_cast<std::chrono::microseconds>(slice).count())};
         const int n = select(0, for_write ? nullptr : &ready, for_write ? &ready : nullptr, &failed, &tv);
-        if (n == SOCKET_ERROR) return Wait::Error;
+        // abort() cancels the socket's pending I/O with CancelIoEx, and select() waits through such
+        // an I/O request: it then fails. That is an abort, not a socket error.
+        if (n == SOCKET_ERROR) return aborted ? Wait::Aborted : Wait::Error;
         if (n > 0) return Wait::Ready;  // ready, or an error OpenSSL will now report
     }
 }
@@ -368,7 +370,7 @@ int Stream::recv_exact(char* data, std::size_t size) {
             switch (wait_socket(impl_->sock, e == SSL_ERROR_WANT_WRITE, kForever, impl_->aborted)) {
             case Wait::Ready: continue;
             case Wait::Aborted: return WSAECONNABORTED;
-            default: return WSAECONNRESET;
+            default: return impl_->aborted ? WSAECONNABORTED : WSAECONNRESET;
             }
         case SSL_ERROR_SYSCALL: return impl_->aborted ? WSAECONNABORTED : (sys != 0 ? sys : WSAECONNRESET);
         default: return impl_->aborted ? WSAECONNABORTED : WSAECONNRESET;  // close_notify or a TLS error

@@ -297,11 +297,14 @@ int main() {
                 return p.client->recv_exact(&byte, 1);
             });
             std::this_thread::sleep_for(300ms);
+            const bool still_waiting = waiting.wait_for(0ms) == std::future_status::timeout;
+            check(still_waiting, "a read with nothing to read waits");
             const auto t0 = Clock::now();
             p.client->abort();
             const bool unblocked = waiting.wait_for(3s) == std::future_status::ready;
-            check(unblocked && waiting.get() == WSAECONNABORTED,
-                  std::format("abort() unblocks a waiting read ({} ms)",
+            const int code = unblocked ? waiting.get() : -1;
+            check(unblocked && code == WSAECONNABORTED,
+                  std::format("abort() unblocks it with WSAECONNABORTED (got {}, {} ms)", code,
                               std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now() - t0).count()));
             check(!p.client->send_all("x", 1), "and later sends fail");
         }
