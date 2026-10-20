@@ -389,7 +389,7 @@ Task-level links that matter:
     - **References fixed:** README, DESIGN, two code comments and `vdd_test`'s error message now point at the new places. `protocol.h` no longer says "frozen team contract".
     - **Links:** every relative link in the edited docs resolves; a link checker was run over them.
 
-- [ ] **P0.7 Loopback harness for the two-PC paths** (M), branch `phase0/loopback-harness`.
+- [x] **P0.7 Loopback harness for the two-PC paths** (M), branch `phase0/loopback-harness`.
   - **Files:**
     - new `tools/loopback_smoke_test.cpp`, label `loopback`. It:
       - starts `kvm_host.exe --no-kvm` and `kvm_client.exe --host 127.0.0.1 --no-kvm --desk-no-vdd`, each with its own `--config` in a temp folder;
@@ -400,6 +400,18 @@ Task-level links that matter:
   - **Done when:**
     - `ctest -L loopback` passes on this PC;
     - if `--no-kvm` is enough for the hosted runner, it is added to CI.
+  - **Result (2026-10-20):**
+    - **`tools/loopback_test.cpp`** (label `loopback`): starts the real `kvm_host` and `kvm_client` on ports Windows picks, each with its own config in a temp folder, with `--no-kvm --no-clipboard --no-desk`. It checks:
+      1. a peer speaking another protocol version is dropped, and the host logs the mismatch;
+      2. a peer speaking this version gets the host's `hello`;
+      3. the client connects on all three channels and both sides log `link: rtt`;
+      4. Ctrl+Break (the launcher's way of stopping them) ends both with exit code 0.
+
+      15 checks pass, in about 9 s.
+    - **New `kvm_host --no-discovery`**, so a test host is never listed on the network.
+    - **The peer in checks 1–2 is in-process** (`kvm::net::connect`) rather than a scriptable `kvm_fake_peer`. That's simpler, and TLS in P1.5 changes that code anyway.
+    - **New `ci` preset** (unit + loopback), which CI now runs; `local` includes loopback too.
+    - **`video_test` used a fixed port, 50599.** On this PC Windows reserves TCP 50503–50602 (`netsh interface ipv4 show excludedportrange protocol=tcp`; Hyper-V, WSL and Docker do this), so the test now uses a port Windows picks. The same risk for Sarke's own ports is P0.10.
 
 - [x] **P0.8 License** (S), branch `phase0/license`. D1 = Apache-2.0, and all four authors agree.
   - **Files:**
@@ -424,6 +436,13 @@ Task-level links that matter:
     2. Log the window rect over time after the attach.
     3. Then fix `send` (wait for the topology change to settle, or verify and retry once), plus a regression check in `window_mover_test`.
   - **Done when:** 20 runs of `ctest --preset local` in a row have no window-move failures.
+
+- [ ] **P0.10 Sarke's ports reserved by Windows** (S), branch `phase0/reserved-ports`. Found by P0.7.
+  - **Problem:** Hyper-V, WSL and Docker reserve TCP port ranges (`netsh interface ipv4 show excludedportrange protocol=tcp`), and the ranges can change on reboot. If one covers 50500–50502, `kvm_host` can't listen (WSAEACCES, 10013). On this PC 50503–50602 is reserved, one port above Sarke's.
+  - **Plan:**
+    - on WSAEACCES, log and show in the launcher which port is reserved, and how to free it or pick others (`control_port`/`video_port`/`file_port` in config.json);
+    - discovery already carries `control_port`, so the client follows a moved control port. Check that the video and file ports follow too (today the client takes them from its own config).
+  - **Done when:** a test that reserves a port first sees the clear message, and a host on custom ports is found and fully connected through discovery.
 
 ### Phase 0 acceptance
 - **Automated:**
@@ -1017,9 +1036,9 @@ Run it at the end of every task. The task's PR says which rows were run and whic
 
 | # | Check | How | Where |
 |---|---|---|---|
-| R1 | Build and unit tests | `cmake --build --preset x64-release`, `ctest --preset unit`; CI green | Auto |
+| R1 | Build and tests | `cmake --build --preset x64-release`, `ctest --preset ci` (unit + loopback); CI green | Auto |
 | R2 | Local suites | `ctest --preset local` at an unlocked desktop (desktop, vdd, loopback) | 1-PC |
-| R3 | Connect | Loopback smoke (P0.7). Two PCs: tray "Connect to ▸" shows the other PC within one 2.5 s scan; it connects; `link: rtt` appears in the logs | Auto + 2-PC |
+| R3 | Connect | `loopback_test` (P0.7). Two PCs: tray "Connect to ▸" shows the other PC within one 2.5 s scan; it connects; `link: rtt` appears in the logs | Auto + 2-PC |
 | R4 | KVM A → B | Cross the edge. Move, click (L/R/M/X1/X2), vertical and horizontal wheel, typing incl. extended keys (arrows, Ins/Del, Home/End, right Ctrl/Alt). Return over the edge with no stuck modifiers. **Ctrl+Alt+Shift+Q** brings control back | 2-PC (`kvm_link_test`, `input_*_test` cover parts, 1-PC) |
 | R5 | KVM B → A | The same as R4 in the other direction | 2-PC |
 | R6 | Takeover | Moving your own mouse takes your PC back; both crossing at once → the host wins | 2-PC (`kvm_link_test` 1-PC) |

@@ -25,7 +25,7 @@ Talk to the user in English. Code, comments, commit messages and docs are in Eng
 
 **Before a task counts as done**, all of these happen on the same branch:
 1. The build passes.
-2. `ctest --preset unit` passes, and `ctest --preset local` where the change can affect it.
+2. `ctest --preset ci` passes, and `ctest --preset local` where the change can affect it.
 3. CI is green.
 4. The [regression checklist](docs/ROADMAP.md#regression-checklist) is run; tell the user exactly
    which manual two-PC rows to run.
@@ -57,12 +57,13 @@ tools, CMake, Ninja, vcpkg). In a "Developer PowerShell for VS 2022":
 ```powershell
 cmake --preset x64-release
 cmake --build --preset x64-release
-ctest --preset unit     # headless tests, also in CI
+ctest --preset ci       # unit + loopback (the real kvm_host + kvm_client on 127.0.0.1), what CI runs
 ctest --preset local    # + desktop (hooks, SendInput, clipboard) and vdd tests: hands off the mouse
 ```
 
 **Test labels** ([tools/CMakeLists.txt](tools/CMakeLists.txt)):
 - `unit`: headless.
+- `loopback`: the real programs on 127.0.0.1, on ports Windows picks; `tools/loopback_test.cpp` is the place for two-PC path tests.
 - `desktop`: needs an unlocked session.
 - `vdd`: needs the Virtual Display Driver; Paint is opened by a fixture.
 - `bench`: timings only.

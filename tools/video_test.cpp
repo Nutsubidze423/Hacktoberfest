@@ -3,7 +3,7 @@
 // Loopback check for kvm/video.h: frames of many sizes arrive intact and in order, concurrent
 // senders do not interleave bytes, close() unblocks a receiver, garbage input is rejected, and a
 // rough throughput number for 1080p-sized JPEG frames.
-// Usage: video_test.exe   (exit code 0 = all passed; uses TCP port 50599 on 127.0.0.1)
+// Usage: video_test.exe   (exit code 0 = all passed; a free TCP port on 127.0.0.1, picked by Windows)
 
 #include <winsock2.h>
 #include <ws2tcpip.h>
@@ -24,7 +24,24 @@ namespace proto = kvm::proto;
 
 namespace {
 
-constexpr std::uint16_t kTestPort = 50599;
+// Picked by Windows at start: a fixed port can fall in a range Hyper-V/WSL reserve (WSAEACCES).
+std::uint16_t g_port = 0;
+
+std::uint16_t free_port() {
+    net::ensure_winsock();
+    const SOCKET s = ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = htonl(INADDR_ANY);
+    int len = sizeof(addr);
+    std::uint16_t port = 0;
+    if (s != INVALID_SOCKET && ::bind(s, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) == 0 &&
+        ::getsockname(s, reinterpret_cast<sockaddr*>(&addr), &len) == 0) {
+        port = ntohs(addr.sin_port);
+    }
+    if (s != INVALID_SOCKET) closesocket(s);
+    return port;
+}
 int g_failures = 0;
 
 void check(bool ok, const char* what) {
@@ -60,7 +77,7 @@ struct Pair {
 Pair connect_pair(net::VideoServer& server) {
     Pair pair;
     std::thread acceptor([&] { pair.server_side = server.accept(); });
-    pair.client_side = net::connect_video("127.0.0.1", kTestPort);
+    pair.client_side = net::connect_video("127.0.0.1", g_port);
     acceptor.join();
     return pair;
 }
@@ -142,7 +159,7 @@ void test_garbage_rejected(net::VideoServer& server) {
     const SOCKET raw = ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     sockaddr_in addr{};
     addr.sin_family = AF_INET;
-    addr.sin_port = htons(kTestPort);
+    addr.sin_port = htons(g_port);
     inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr);
     ::connect(raw, reinterpret_cast<const sockaddr*>(&addr), sizeof(addr));
     acceptor.join();
@@ -182,7 +199,8 @@ void test_throughput(net::VideoServer& server) {
 
 int main() {
     try {
-        net::VideoServer server(kTestPort);
+        g_port = free_port();
+        net::VideoServer server(g_port);
         test_sizes_and_order(server);
         test_concurrent_senders(server);
         test_close_unblocks(server);

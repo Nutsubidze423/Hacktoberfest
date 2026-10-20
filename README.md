@@ -111,7 +111,7 @@ Each `tools\*_test.cpp` builds into its own test executable, registered with cte
 that says what it needs:
 
 ```powershell
-ctest --preset unit    # headless tests, also run by CI
+ctest --preset ci      # headless tests + kvm_host and kvm_client talking on 127.0.0.1, also run by CI
 ctest --preset local   # + desktop (hooks, SendInput, clipboard) and vdd (Virtual Display Driver) tests
 ```
 

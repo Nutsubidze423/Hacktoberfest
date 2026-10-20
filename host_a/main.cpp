@@ -2,10 +2,11 @@
 
 // kvm_host.exe — runs on A (owns the physical mouse/keyboard, streams a window).
 // Usage: kvm_host.exe [--config <path>] [--log <file>] [--no-kvm] [--no-clipboard] [--no-desk]
-//                     [--test-video [--test-video-kb N] [--test-video-fps N]]
+//                     [--no-discovery] [--test-video [--test-video-kb N] [--test-video-fps N]]
 //   --no-kvm      don't install the input hooks (e.g. when only testing the video stream)
 //   --no-clipboard  don't share copied text/images with the client
 //   --no-desk     no desk mode (the client's screen as one more monitor); Ctrl+Alt+Shift+W uses the viewer
+//   --no-discovery  don't answer other PCs looking for hosts (tests: no other PC can find this one)
 //   --test-video  send synthetic frames (codec "test", random bytes, default 250 KB at 30 fps) so
 //                 network throughput and video latency can be measured before capture/viewer exist
 
@@ -56,6 +57,7 @@ struct Options {
     bool kvm_enabled = true;
     bool clipboard = true;
     bool desk = true;  // --no-desk, config "desk"
+    bool discovery = true;  // --no-discovery
     bool test_video = false;
     int test_video_kb = 250;
     int test_video_fps = 30;
@@ -300,6 +302,8 @@ Options parse_args(int argc, wchar_t** argv) {
             opt.clipboard = false;
         } else if (arg == L"--no-desk") {
             opt.desk = false;
+        } else if (arg == L"--no-discovery") {
+            opt.discovery = false;
         } else if (arg == L"--test-video") {
             opt.test_video = true;
         } else if (arg == L"--test-video-kb" && has_value) {
@@ -356,13 +360,17 @@ int wmain(int argc, wchar_t** argv) {
 
         // Lets the other PC find this one by name on the local network (no IP to type there).
         std::optional<kvm::discovery::Responder> discovery;
-        try {
-            const std::string name = make_hello(false).hostname;
-            discovery.emplace(name, cfg.control_port);
-            kvm::log::info("discovery: the other PC can find '{}' on the local network (UDP {})", name,
-                           kvm::discovery::kDiscoveryPort);
-        } catch (const std::exception& e) {
-            kvm::log::warn("{} - the other PC needs this PC's IP (--host)", e.what());
+        if (!opt.discovery) {
+            kvm::log::info("discovery: off (--no-discovery), the client needs --host");
+        } else {
+            try {
+                const std::string name = make_hello(false).hostname;
+                discovery.emplace(name, cfg.control_port);
+                kvm::log::info("discovery: the other PC can find '{}' on the local network (UDP {})", name,
+                               kvm::discovery::kDiscoveryPort);
+            } catch (const std::exception& e) {
+                kvm::log::warn("{} - the other PC needs this PC's IP (--host)", e.what());
+            }
         }
 
         // Windows A <-> B (Ctrl+Alt+Shift+W): a window of A goes to B's viewer and back; B's windows
