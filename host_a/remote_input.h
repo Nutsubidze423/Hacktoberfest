@@ -13,7 +13,6 @@
 //   input.release_all();   // share ended / link dropped: no stuck keys or buttons
 //
 // Windows keys are not replayed: Win+L would lock this computer and Win+D would hide its windows.
-// Ownership: proposed for Temo in ARTEFACT/ფანჯარა ორივე მხარეს (თემო → ლუკა, სანდრო).md.
 #pragma once
 
 #ifndef WIN32_LEAN_AND_MEAN

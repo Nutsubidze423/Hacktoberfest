@@ -1,166 +1,147 @@
-# CLAUDE.md — KVM + Window Streaming დემო (C++)
+# CLAUDE.md: working on Sarke
 
-## კომუნიკაცია
-- მომხმარებელთან **ქართულად** ისაუბრე. კოდი, კომენტარები, ცვლადების სახელები და commit-ები: **ინგლისურად**.
-- მომხმარებლები AI-ს დახმარებით სწავლობენ და აწყობენ პროექტს. ცვლილების შემდეგ მოკლედ ახსენი, რა გააკეთე და როგორ გაუშვან/შეამოწმონ.
-- ერთდროულად ერთ ამოცანაზე იმუშავე.
+Sarke joins Windows PCs on one network into one workspace: the mouse and keyboard cross screen
+edges (KVM, both ways), windows move to the other PC's screen while they keep running where they
+started (desk mode and the window viewer), and the clipboard and file drags work across. The goal
+(see [docs/ROADMAP.md](docs/ROADMAP.md)): *all your devices become one computer you can sit at from
+anywhere*.
 
-## გუნდი — წაიკითხე პირველ რიგში
-პროექტზე მუშაობს 4 დეველოპერი, თითოეული საკუთარ კომპიუტერზე, საკუთარ Claude-ის სესიაში (vibe coding). სრული დეტალები (ვადები, ამოცანები, ჩეკლისტები) — [docs/PLAN.md](docs/PLAN.md).
+Talk to the user in English. Code, comments, commit messages and docs are in English.
 
-| სახელი | ტრეკი | ფაილები | პირველი ამოცანა |
-|---|---|---|---|
-| **ლუკა** (lead) | Core / ქსელი / ინტეგრაცია; PR review და merge | root CMake, `CMakePresets.json`, `vcpkg.json`, `common/` (protocol, net, config, log, queue), `host_a/main.cpp`, `client_b/main.cpp`, `tools/ping_test.cpp` | M0: repo-ს ჩონჩხი (CMake + vcpkg + ცარიელი exe-ები) და `protocol.h` |
-| **დემეტრე** | KVM ინფუთი: hooks, კიდიდან გადასვლა, suppress, გადაუდებელი ღილაკი, ემულაცია B-ზე | `common/` — `win32_input.*`, `dpi.*`, `input_capture.*`, `input_inject.*`, `kvm_link.*`, `clipboard.*` | `win32_input` (SendInput wrappers) — სანდროსაც სჭირდება |
-| **თემო** | ვიდეო A-ზე: ფანჯრის არჩევა, WGC capture, JPEG, გაგზავნა | `host_a/window_picker.*`, `capture.*`, `jpeg_encoder.*`, `video_sender.*`, `tools/capture_test.cpp` | `window_picker`, მერე capture ფაილში შენახვით |
-| **სანდრო** | Viewer B-ზე + უკუ-ინფუთი A-ს ფანჯარაში | `client_b/viewer_window.*`, `jpeg_decoder.*`, `video_receiver.*`, `host_a/remote_input.*`, `tools/fake_streamer.cpp` | JPEG decode + viewer ფანჯარა ფაილიდან წაკითხული სურათით |
+## Start of every session
 
-### როცა მომხმარებელი წერს „მე ვარ <სახელი>“
-1. **წაიკითხე** `docs/PLAN.md` — მისი როლი, ფაილები, ფაზის ამოცანები და ჩეკლისტი („პროგრესი“ სექციაში).
-2. **შეამოწმე** `git status`, `git log --oneline -15`, მიმდინარე ბრენჩი და შესაბამისი ფაილები — რა არის რეალურად გაკეთებული (ჩეკლისტს ბრმად ნუ ენდობი).
-3. **აუხსენი** მოკლედ, ქართულად:
-   - ვინ არის გუნდში და რა არის მისი როლი (1–2 წინადადება);
-   - რა არის უკვე გაკეთებული მის ტრეკზე და დანარჩენ გუნდში, რაც მას ეხება (მაგ. დამოკიდებულება სხვის ფაილზე);
-   - რომელია შემდეგი ამოცანა, როგორ გავაკეთებთ და როგორ შევამოწმებთ, რომ მუშაობს.
-4. **დაიწყე მუშაობა** იმავე პასუხში — ახალი ბრენჩი (`<name>/<task>`) და პირველი ნაბიჯი. ნებართვას ნუ ელოდები, თუ რამე ნამდვილად გაუგებარი არ არის.
-5. თუ ამოცანა სხვის ჯერ დაუმთავრებელ კოდზეა დამოკიდებული — დროებითი stub/mock გააკეთე **საკუთარ ფაილებში** და უთხარი, ვის ელოდება.
+1. Read [docs/ROADMAP.md](docs/ROADMAP.md). It holds the decisions already made (don't reopen
+   them), the phases, the next unticked task and the working rules below.
+2. Check what is really done: `git status`, `git log --oneline -15`, the current branch. Don't trust
+   a checkbox blindly.
+3. Work on **one roadmap task at a time**.
 
-გარემოს შემოწმება პირველ სესიაზე: თუ `cmake`, `cl`, `ninja` ან `VCPKG_ROOT` არ არსებობს — ჯერ დაეხმარე Visual Studio 2022 („Desktop development with C++“) და vcpkg-ის დაყენებაში.
+## Working rules
 
-წესები გუნდურ მუშაობაზე:
-- შეცვალე **მხოლოდ იმ დეველოპერის ფაილები**, ვისთანაც მუშაობ. სხვისი ფაილის შეცვლა თუ საჭიროა — ნუ შეცვლი; უთხარი, ვის უნდა მიმართოს.
-- `common/include/kvm/protocol.h` იცვლება მხოლოდ ლუკასთან სესიაში.
-- თუ დეველოპერის სახელი არ იცი — ჰკითხე, სანამ კოდს შეცვლი.
-- ამოცანის დასრულებისას: build გადის → ტესტი გავლილია → მონიშნე პუნქტი (`[x]`) `docs/PLAN.md`-ში იმავე commit-ში.
-- ბრენჩი ამოცანაზე: `<სახელი ლათინურად>/<ამოცანა>`, მაგ. `temo/wgc-capture`. main-ში პირდაპირ commit არ გააკეთო.
+**One task at a time**
+- Every task gets its own branch, named `phaseN/<task>` (e.g. `phase1/tls`).
+- **Never commit to `main`.**
+- **Phase 1 (security) is merged before any Phase 2+ work lands.**
 
-## პროექტის მიზანი
-ორი Windows კომპიუტერი ერთ ლოკალურ ქსელში:
-- **A** — სახლის PC, 2 მონიტორი. ფლობს ფიზიკურ მაუსს და კლავიატურას. ეშვება **host** როლში.
-- **B** — ლეპტოპი, დგას A-ს გვერდით. ეშვება **client** როლში.
+**Before a task counts as done**, all of these happen on the same branch:
+1. The build passes.
+2. `ctest --preset unit` passes, and `ctest --preset local` where the change can affect it.
+3. CI is green.
+4. The [regression checklist](docs/ROADMAP.md#regression-checklist) is run; tell the user exactly
+   which manual two-PC rows to run.
+5. The task is ticked in `docs/ROADMAP.md`.
+6. The docs are updated.
 
-საბოლოო მიზანი: A-ს მაუსი/კლავიატურა გადადის B-ს ეკრანზე (როგორც Deskflow / Mouse Without Borders), და A-ს ცალკეული ფანჯარა (მაგ. Photoshop) ტრანსლირდება B-ზე ისე, თითქოს B იყოს A-ს მესამე მონიტორი. ფანჯრის პროცესი ყოველთვის A-ზე მუშაობს; B მხოლოდ აჩვენებს სურათს და აბრუნებს ინფუთს.
+**Change style**
+- Keep changes small and reviewable.
+- Explain how to run and test each one.
 
-## დემოს ფარგლები (≈10 საათი, 4 ადამიანი)
-**შედის — ყველაფერი ორივე მიმართულებით (A ⇄ B), protocol v2:**
-1. **KVM:** მაუსი/კლავიატურა ეკრანის კიდიდან გადასვლით — A-სი B-ზე და B-სი A-ზე.
-2. **ფანჯარა:** ერთი კონკრეტული ფანჯარა (hotkey `Ctrl+Alt+Shift+W` — წინა პლანის ფანჯარა) გადადის მეორე კომპიუტერზე: owner-ზე ის VDD-ზე (ვირტუალური მონიტორი, მზა ხელმოწერილი დრაივერი) „იმალება“, მეორე მხარეს viewer-ში ჩანს. viewer-ის დახურვა/ღილაკი → ბრუნდება.
-3. **viewer-ის ინფუთი:** კლიკები/სქროლი/კლავიატურა viewer-ში → owner-ის ორიგინალ ფანჯარას.
-4. **ფაილები:** გადათრევით კიდეზე, A → B და B → A, პორტი 50502, სამიზნე `Downloads\KVM\`.
-5. **Clipboard (დემეტრე):** კოპირება ერთ კომპიუტერზე → ჩასმა მეორეზე (ტექსტი UTF-8, სურათები PNG; ფაილები ჯერ არა).
-6. **Desk mode (თემო):** მეორე PC-ის ეკრანი = კიდევ ერთი მონიტორი. კავშირისას VDD peer-ის ზომით/მასშტაბით peer-ის მხარეს დგას; ფანჯარა კიდეზე გადაითრევა, owner-ზე მუშაობს და peer მას თავის desktop-ზე იმავე ადგილას ხატავს (`desk_share` → `desk_view`). კლიკი ფანჯარაზე owner-ზე რჩება, დანარჩენი peer-ის desktop-ს ეგზავნება; კლავიატურა ბოლო კლიკს მიჰყვება. `--no-desk` / `"desk": false` = ძველი viewer.
+**Dependencies**
+- No new dependency without saying why and noting its license.
+- Add it to [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) in the same change.
 
-დეტალები და ვინ რას აკეთებს: `ARTEFACT/გადაწყვეტილებები 2 (ლუკა → თემო, სანდრო, დემეტრე).md`.
+**Honesty**
+- If the plan proves wrong, stop and update the roadmap before continuing.
+- Never claim performance, compatibility or "it works" without having measured or run it.
+  Measured numbers go in `docs/PERF.md` (created by roadmap task P2.1).
 
-**არ შედის (მერე):** საკუთარი IddCx დრაივერის დაწერა, დაშიფვრა/დაწყვილება, ინსტალერი, პენის წნევა, ხმის გადატანა.
+**Third-party code**
+- Don't copy GPL code (Sunshine, Moonlight); Sarke is Apache-2.0.
+- Behaviour may be read as a reference.
 
-## ტექნოლოგიები
-- **C++20**, MSVC (Visual Studio 2022), **CMake ≥ 3.25 + Ninja**, **vcpkg** (manifest mode). მხოლოდ Windows 10/11 x64.
-- vcpkg: `nlohmann-json` (JSON), `libjpeg-turbo` (JPEG). C++/WinRT და D3D11 — Windows SDK-დან (≥ 10.0.19041).
-- ქსელი: Winsock2, ბლოკირებადი სოკეტები + ცალკე thread-ები.
-- A hooks: `SetWindowsHookEx` (`WH_MOUSE_LL`, `WH_KEYBOARD_LL`) + Raw Input relative მოძრაობისთვის.
-- ინფუთის ემულაცია: `SendInput`, `SetCursorPos`, `SetForegroundWindow`.
-- Capture: Windows.Graphics.Capture (C++/WinRT) → D3D11 → BGRA. Fallback: `PrintWindow`.
-- კომპრესია: v1 **JPEG** (TurboJPEG). v2: Media Foundation H.264 hardware MFT.
-- B-ზე ჩვენება: v1 Win32 + `StretchDIBits`; v2 D3D11 swapchain.
-- Thread-ებს შორის: `kvm::BlockingQueue<T>`, ვიდეოსთვის `kvm::LatestSlot<T>` (მხოლოდ ბოლო ფრეიმი).
+## Build and test
 
-A-ს ვიდეოკარტა: _TODO — შეავსე (NVIDIA / AMD / Intel)_. B: Intel UHD 620.
+One-time setup: `powershell -ExecutionPolicy Bypass -File tools\setup_env.ps1` (VS 2022 C++
+tools, CMake, Ninja, vcpkg). In a "Developer PowerShell for VS 2022":
 
-## სტრუქტურა
-```
-CMakeLists.txt             # root  (ლუკა)
-CMakePresets.json          # x64-debug / x64-release  (ლუკა)
-vcpkg.json                 # (ლუკა)
-config.json                # IP, პორტები, B-ს მდებარეობა (left/right), ხარისხი
-docs/PLAN.md               # როლები, ვადები, ჩეკლისტები
-common/                    # static lib kvm_common
-  include/kvm/
-    protocol.h             # შეტყობინებები (ლუკა) — გაყინული კონტრაქტი
-    net.h  video.h  config.h  log.h  queue.h  file_link.h  hotkeys.h  discovery.h   # (ლუკა)
-    win32_input.h  dpi.h  input_capture.h  input_inject.h  kvm_link.h  clipboard.h   # (დემეტრე)
-  src/*.cpp
-host_a/                    # kvm_host.exe
-  main.cpp                 # (ლუკა)
-  input_capture.h          # forwards to common/kvm/input_capture.h (დემეტრე)
-  window_picker.*  capture.*  jpeg_encoder.*  video_sender.*   # (თემო)
-  remote_input.*           # B-დან მოსული ინფუთი → A-ს ფანჯარა (სანდრო)
-client_b/                  # kvm_client.exe
-  main.cpp                 # (ლუკა)
-  input_inject.h           # forwards to common/kvm/input_inject.h (დემეტრე)
-  viewer_window.*  jpeg_decoder.*  video_receiver.*            # (სანდრო)
-tools/
-  protocol_test.cpp  queue_test.cpp  video_test.cpp   # ტესტები (ლუკა)
-  capture_test.cpp         # ფანჯარა → .jpg (თემო)
-  fake_streamer.cpp        # .jpg-ები → viewer (სანდრო)
-```
-
-## ქსელური პროტოკოლი
-- A არის სერვერი, B უკავშირდება.
-- პორტი **50500** — control + input: `[u32 len][JSON]`, big-endian.
-- პორტი **50501** — ვიდეო: `[u32 header_len][u32 payload_len][header JSON][payload]`, big-endian.
-- პორტი **50502** — ფაილები (თემო, `common/.../file_transfer.*`): იგივე framing, header-ები `file_begin` / `file_chunk` / `file_end` / `transfer_end`.
-- პორტი **50503** (UDP) — discovery (ლუკა, `common/.../discovery.*`): B ქსელში ეძებს (`kvm_discover`, broadcast), A პასუხობს (`kvm_here`: სახელი, პორტი, ვერსია, `busy` — client-ი უკვე მიერთებულია). Sarke (launcher) ყოველ 2.5 წმ-ში სკანირებს და tray-ში „Connect to ▸“ სიას აჩვენებს; ყოველი PC host-ად იწყებს, ავტომატურად უერთდება მხოლოდ „Connect automatically“-ით მონიშნულს (`settings.json` → `auto_connect`). config `"host_ip": "auto"` (ნაგულისხმევი) = IP-ს ჩაწერა არ სჭირდება; `--host <IP>` ხელით.
-- `TCP_NODELAY` ორივე სოკეტზე.
-
-შეტყობინებები (`type` ველით):
-| type | მიმართულება | ველები |
-|---|---|---|
-| `hello` | B→A, მერე A→B (პასუხი) | `protocol_version`, `screen_w`, `screen_h`, `dpi_scale`, `hostname`, `desk` (desk mode-ს აჩვენებს) |
-| `focus_enter` | ორივე (KVM controller → controlled) | `y_norm` (კურსორის შესვლის წერტილი), `desk` (კურსორი `desk_move`-ს მიჰყვება) |
-| `desk_move` | ორივე (desk mode, controller → controlled) | `x`, `y` — კურსორი controlled-ის primary მონიტორზე, px (= controller-ის VDD) |
-| `desk_cursor` | ორივე (window owner → viewer) | `shape` (`arrow`/`ibeam`/`hand`/`sizewe`/…) — კურსორის ფორმა owner-ის ფანჯრებზე |
-| `desk_layout` | ორივე (window owner → viewer) | `desk_w`, `desk_h`, `active` (owner-ის აქტიური ფანჯარა VDD-ზეა → viewer overlay-ს წინ წამოწევს), `windows` [`id`, `x`, `y`, `w`, `h`] — VDD-ზე მყოფი ფანჯრები (ზემოდან ქვემოთ); ფანჯრის გადაადგილება = მხოლოდ ეს შეტყობინება |
-| `focus_leave` | ორივე | `y_norm`. controller → controlled: „ინფუთი დავიბრუნე“; controlled → controller: „შენი კურსორი ჩემი კიდით დაბრუნდა“ |
-| `mouse_move` | ორივე (KVM controller → controlled) | `dx`, `dy` (relative) |
-| `mouse_button` | ორივე | `button` (`left`/`right`/`middle`/`x1`/`x2`), `down` (+ viewer → window owner-ზე `x_norm`, `y_norm`) |
-| `mouse_wheel` | ორივე | `delta`, `horizontal` |
-| `key` | ორივე | `vk`, `scan`, `down`, `extended` |
-| `stream_start` | window owner → viewer (ორივე) | `hwnd`, `title`, `width`, `height` |
-| `stream_stop` | ორივე | `hwnd`. owner → viewer: შეჩერდა; viewer → owner: „დამიბრუნე“ |
-| `remote_mouse_move` | viewer → window owner (ორივე) | `x_norm`, `y_norm` (სტრიმულ ფანჯარაში, 0..1) |
-| `clipboard` | ორივე | `seq`, `kind` (`text`/`png`), `total`, `offset`, `data` (base64, ≤ 32 KB) — ერთი კოპირება რამდენიმე ნაწილად |
-| `layout` | ორივე (hello-ს მერე და Displays → Apply-ზე) | `you_are` (`left`/`right`/`top`/`bottom` — სად დგას **მიმღები** გამგზავნის მიმართ), `set_at` (ms, როდის დააყენა მომხმარებელმა; 0 = არასოდეს). უფრო ახალი იგებს, თანაბარზე — host. თითოეული PC ინახავს config.json `"peers": {სახელი: {side, set_at}}` — ყველა კავშირს თავისი პოზიცია (`common/.../layout_sync.*`) |
-| `identify` | ორივე | — მეორე PC-ც აჩვენებს თავისი ეკრანების ნომრებს |
-| `ping` / `pong` | ორივე | `t` (+ `pong`-ში `t_peer` — clock offset-ისთვის) |
-| `frame` (50501 header) | window owner → viewer (ორივე, ერთი TCP არხი) | `seq`, `t_capture_us`, `width`, `height`, `codec`; desk mode: `layer:"desk"`, `window` (ერთი ფანჯრის სურათი, WGC window capture), `x`, `y` (ფანჯრის ჩარჩოში), `alpha_bytes` (payload = JPEG 4:4:4 + alpha runs `[u8 a][u16 n]` — მომრგვალებული კუთხეები) |
-
-## მნიშვნელოვანი წესები
-- **DPI:** ორივე პროცესი იწყება `SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2)`-ით (ან manifest-ით). ყოველთვის ფიზიკურ პიქსელებში იმუშავე.
-- **კოორდინატები სტრიმულ ფანჯარაზე:** B აგზავნის ნორმალიზებულ (0..1) კოორდინატებს. A გადაითვლის ფანჯრის **client area**-ს მიმდინარე rect-ით (ფანჯარა შეიძლება გადაადგილდეს).
-- **Hook-ები:** როცა კონტროლი B-ზეა, A-ს ლოკალური ინფუთი იბლოკება (hook აბრუნებს 1), relative მოძრაობა მოდის Raw Input-იდან და იგზავნება B-ზე.
-- **გადაუდებელი გამოსვლა:** `Ctrl+Alt+Shift+Q` ყოველთვის აბრუნებს კონტროლს A-ზე და აჩერებს hook-ებს. ეს არასოდეს წაშალო და არასოდეს დაბლოკო.
-- Hook callback-ებში მძიმე სამუშაო არ გააკეთო (არც ლოგი, არც ქსელი) — მხოლოდ queue-ში ჩადება. ნელ hook-ს Windows ჩუმად ხსნის.
-- ვიდეო: თუ ქსელი ვერ ასწრებს, ძველი ფრეიმები გადააგდე (ყოველთვის ბოლო ფრეიმი), queue არ დააგროვო.
-- ელევირებული (Admin) ფანჯრებში ინფუთი ჩვეულებრივი პროცესიდან არ გადის — თუ საჭიროა, host ადმინით გაუშვი.
-- RAII Win32/COM რესურსებისთვის (`winrt::com_ptr`, `wil`-ის მსგავსი wrapper-ები ან საკუთარი `unique_handle`). raw `new`/`delete` არა.
-
-## Build და გაშვება
-გარემოს დაყენება (ერთხელ): `powershell -ExecutionPolicy Bypass -File tools\setup_env.ps1` (VS 2022 + C++ + CMake + Ninja + vcpkg). Firewall-ისთვის ადმინით: იგივე `-Firewall`-ით.
-
-ახალი `.cpp` ფაილის დამატებისას CMakeLists-ის შეცვლა **არ არის საჭირო** — `common/src/`, `host_a/`, `client_b/` ფაილები ავტომატურად ერთვება (glob); თითოეული `tools/<name>.cpp` ხდება ცალკე `<name>.exe`. CMakeLists-ს ფლობს ლუკა.
-
-„Developer PowerShell for VS 2022“-ში:
-```
+```powershell
 cmake --preset x64-release
 cmake --build --preset x64-release
-# A-ზე:
-build\x64-release\host_a\kvm_host.exe
-# B-ზე:
-build\x64-release\client_b\kvm_client.exe --host <A-ს IP>
+ctest --preset unit     # headless tests, also in CI
+ctest --preset local    # + desktop (hooks, SendInput, clipboard) and vdd tests: hands off the mouse
 ```
-ლოკალური ტესტი ერთ კომპიუტერზე: ჯერ `kvm_host.exe`, მერე `kvm_client.exe --host 127.0.0.1` — ორივე ლოგში უნდა გამოჩნდეს `connected` და ყოველ 5 წმ-ში `link: rtt ...`.
-exe-ები static-ია: A-ზე ან B-ზე გადასატანად საკმარისია `.exe` + `config.json` (VS-ის დაყენება საჭირო არ არის).
 
-**ინსტალერი** (სხვა PC-ზე დასაყენებლად): `powershell -ExecutionPolicy Bypass -File tools\make_installer.ps1` → `dist\SarkeSetup-<ვერსია>.exe`. ერთი ფაილი აყენებს ყველაფერს: Sarke (`Program Files\Sarke`), VDD დრაივერი (`installer\vdd`, `tools\sarke_driver.cpp`), firewall-ის წესები, Start menu, სურვილისამებრ autostart და Defender-ის გამონაკლისი. დაინსტალირებული Sarke-ს config და ლოგები `%LOCALAPPDATA%\Sarke`-შია. ვერსია: `resources\version.h` (ყოველ ახალ ინსტალერზე გაზარდე). საჭიროა Inno Setup 6 (`winget install JRSoftware.InnoSetup`); სკრიპტი: `installer\sarke.iss`.
-Windows Firewall-ში დაუშვი `kvm_host.exe` პორტებზე 50500–50501 (Private network).
+**Test labels** ([tools/CMakeLists.txt](tools/CMakeLists.txt)):
+- `unit`: headless.
+- `desktop`: needs an unlocked session.
+- `vdd`: needs the Virtual Display Driver; Paint is opened by a fixture.
+- `bench`: timings only.
 
-## ჩეკლისტი (საერთო milestone-ები; დეტალური — docs/PLAN.md)
-- [ ] M0. ყველას აქვს VS 2022 + vcpkg; repo-ს ჩონჩხი აიწყობა 4-ივეზე; `protocol.h` გაყინულია
-- [ ] ფაზა 1. ყველა ტრეკი დამოუკიდებლად მუშაობს (net, hooks/inject, capture/encode, viewer)
-- [ ] M1. ფიზიკურ A+B-ზე: KVM A → B და ფანჯრის JPEG სტრიმი B-ზე
-- [ ] ფაზა 2. viewer → A: მაუსი/კლიკები/სქროლი/კლავიატურა/ფოკუსი; სქროლი და extended კლავიშები KVM-ში
-- [ ] M2. ტესტი Photoshop-ით; latency/ხარისხის მორგება; დემოს სცენარი
+Every `tools/*_test.cpp` must be in one group, or configure fails. `SARKE_STRICT_TIMING=1` (set in
+CI) turns timing floors into hard checks.
 
-## შემდეგი ეტაპები (დემოს მერე)
-H.264 (Media Foundation / NVENC) → D3D11 zero-copy pipeline (GPU crop) → ხმა owner-იდან viewer-ზე → TLS + PIN დაწყვილება → საკუთარი IddCx დრაივერი.
+**Two PCs on one machine.** Only one PC is usually available. Use loopback:
+
+```powershell
+build\x64-release\host_a\kvm_host.exe
+build\x64-release\client_b\kvm_client.exe --host 127.0.0.1 --desk-no-vdd
+```
+
+Both logs show `connected`, then `link: rtt ...` every 5 s. The fakes stand in for the other side:
+- `tools/kvm_fake_peer.cpp`: plays the other PC on the control channel.
+- `tools/fake_streamer.cpp`: sends JPEG frames on the video port.
+
+Extend them rather than skipping a test.
+
+**Code style**
+- C++20, MSVC, `/W4 /WX`: warnings are errors.
+- clang-format 19.1.5 (the version VS 2022 ships) with [.clang-format](.clang-format). CI rejects
+  unformatted code: run `clang-format -i` on the files you touched.
+- Sources are globbed: a new `.cpp` in `common/src`, `host_a`, `client_b` or `tools` needs no CMake
+  change.
+
+## Map
+
+| Path | What |
+|---|---|
+| `common/` | static lib `kvm_common`: protocol, net, video channel, discovery, files, clipboard, KVM hooks/injection, DPI, config, log, queues |
+| `host_a/` | `kvm_host.exe` (listens) + window share, WGC capture, JPEG encode, VDD control, desk mode owner side |
+| `client_b/` | `kvm_client.exe` (connects) + viewer, desk view, the launcher UI (`sarke.exe`: tray, Displays) |
+| `tools/` | `sarke.exe` entry point, tests, fakes, UI previews, `sarke_driver.exe`, scripts |
+| `installer/` | Inno Setup script; `vdd/` gets the driver from `tools\fetch_vdd.ps1` |
+| `docs/` | [ROADMAP](docs/ROADMAP.md), [PROTOCOL](docs/PROTOCOL.md), [DESIGN](docs/DESIGN.md) (UI design system), [RELEASING](docs/RELEASING.md); `archive/hackathon/` is history |
+
+Ports: 50500 control and input, 50501 video, 50502 files (TCP), 50503 discovery (UDP). Every
+message is in [docs/PROTOCOL.md](docs/PROTOCOL.md). Change it together with
+[protocol.h](common/include/kvm/protocol.h), and bump `kProtocolVersion` when old peers can't
+follow.
+
+## Rules the code depends on
+
+**Input and hooks**
+- **Ctrl+Alt+Shift+Q always returns control to the local PC and removes the hooks.** Never remove
+  or block it.
+- Hook callbacks (`WH_MOUSE_LL`, `WH_KEYBOARD_LL`) only queue work: no logging, no network, no
+  allocation-heavy code. Windows silently removes slow hooks.
+- Injected input carries the KVM marker, so our own hooks ignore it.
+- Elevated windows can't receive input from a normal process (UIPI).
+
+**Screens and windows**
+- Both processes are per-monitor DPI aware v2, and all math is in physical pixels.
+- Coordinates on a streamed window are normalized (0..1). The owner maps them onto the window's
+  *current* client rect.
+
+**Video**
+- Always the newest frame: drop old frames, never queue (`LatestSlot`).
+
+**Code**
+- Windows include order matters (`winsock2.h` before `windows.h`; `shellapi.h` after it). Includes
+  are never sorted automatically.
+- RAII for every Win32/COM resource; no raw `new`/`delete`.
+
+## Security
+
+**Today**
+- There is no authentication and no encryption: any device on the local subnet can connect.
+- Never widen that exposure: no internet listeners, no relaxed firewall rules.
+- Phase 1 of the roadmap fixes this with pairing, device keys and TLS 1.3.
+
+**Always**
+- No hand-rolled crypto.
+- Once Phase 1 lands, nothing from an unpaired peer is parsed.
+- Received files are written only through `safe_destination`.
+
+## Releasing
+
+[docs/RELEASING.md](docs/RELEASING.md): bump `resources/version.h`, `tools\make_installer.ps1`, test,
+tag, GitHub Release, then the website (`tools\publish_release.ps1`).

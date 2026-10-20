@@ -110,7 +110,9 @@ int main(int argc, char** argv) {
     print_displays("before");
     auto vdd = kvm::VirtualDisplay::find();
     if (!vdd) {
-        kvm::log::error("Virtual Display Driver not found. Install it first, see ARTEFACT/B როგორც მესამე მონიტორი.md");
+        kvm::log::error(
+            "Virtual Display Driver not found. Install Sarke (it sets the driver up), or run "
+            "tools\\fetch_vdd.ps1, then as administrator: sarke_driver.exe install installer\\vdd");
         return 1;
     }
     kvm::log::info("VDD output: {} (attached: {})", utf8(vdd->device()), vdd->attached());

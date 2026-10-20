@@ -143,8 +143,8 @@ listens.
 - **Files.** A drag that reaches the other screen is caught, the files are sent, and the drag goes
   on from the cursor over there until the button is released.
 
-Every message type is listed in [CLAUDE.md](CLAUDE.md) and every feature in
-[docs/BLUEPRINT.md](docs/BLUEPRINT.md).
+Every message type is listed in [docs/PROTOCOL.md](docs/PROTOCOL.md). The hackathon's catalogue of
+features is kept in [docs/archive/hackathon/BLUEPRINT.md](docs/archive/hackathon/BLUEPRINT.md).
 
 ## Project layout
 
@@ -153,8 +153,8 @@ common/      shared library: protocol, networking, input capture and replay, cli
 host_a/      kvm_host.exe: window capture, virtual display, desk mode on the sending side
 client_b/    kvm_client.exe and the tray app: viewer, desk overlay, launcher, UI
 tools/       sarke.exe entry point, tests, previews and scripts
-installer/   Inno Setup script and the bundled virtual display driver
-docs/        design, blueprint and plan
+installer/   Inno Setup script; the virtual display driver is fetched by tools\fetch_vdd.ps1
+docs/        roadmap, protocol, design system, releasing; archive/hackathon is history
 ```
 
 ## Limitations

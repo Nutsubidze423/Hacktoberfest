@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// Wire protocol between host A and client B. This is the frozen team contract:
-// change it only in a PR from the core/net owner, and update the table in CLAUDE.md with it.
+// Wire protocol between the two Sarke processes (kvm_host listens, kvm_client connects; once
+// connected, both sides can do everything). Every message is listed in docs/PROTOCOL.md: change
+// the two together, and bump kProtocolVersion when an older peer can't understand the change.
 //
 // Port 50500 (control + input): [u32 len][JSON], big-endian length.
 // Port 50501 (video):           [u32 header_len][u32 payload_len][header JSON][payload], big-endian.

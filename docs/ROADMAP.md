@@ -369,7 +369,7 @@ Task-level links that matter:
       1. **Demetre:** create the GitHub Release `v1.1.0` from the tag and attach the original `SarkeSetup-1.1.0.0.exe` (SHA-256 `5a38cefd…`, saved in `dist\release-1.1.0\`).
       2. **Install test in Windows Sandbox:** Sandbox isn't enabled on this PC. Enabling it needs admin and a reboot; alternatively, a spare PC.
 
-- [ ] **P0.6 Rewrite CLAUDE.md; archive the hackathon docs** (S), branch `phase0/claude-md`. Depends on D2.
+- [x] **P0.6 Rewrite CLAUDE.md; archive the hackathon docs** (S), branch `phase0/claude-md`. Depends on D2.
   - **New CLAUDE.md** (English):
     - the product, the architecture map, build/test commands, ctest labels;
     - the one-machine loopback recipe;
@@ -382,6 +382,12 @@ Task-level links that matter:
   - **Done when:**
     - no team-ownership rules remain (if D2 = a);
     - every link in README and CLAUDE.md resolves.
+  - **Result (2026-10-20):**
+    - **New `CLAUDE.md`:** session start, the working rules, build and test (labels, strict timing), loopback recipe, map, the rules the code depends on, security, releasing.
+    - **New `docs/PROTOCOL.md`:** the old Georgian table in English, checked against `protocol.h`. It adds clipboard kind `files`, which the old table missed.
+    - **Archived** to `docs/archive/hackathon/` with a README, all unchanged: `PLAN.md`, `BLUEPRINT.md`, `ARTEFACT/` and the old `CLAUDE.md`.
+    - **References fixed:** README, DESIGN, two code comments and `vdd_test`'s error message now point at the new places. `protocol.h` no longer says "frozen team contract".
+    - **Links:** every relative link in the edited docs resolves; a link checker was run over them.
 
 - [ ] **P0.7 Loopback harness for the two-PC paths** (M), branch `phase0/loopback-harness`.
   - **Files:**
