@@ -366,7 +366,7 @@ Task-level links that matter:
     - **Inno Setup:** 6.7.3 installed per-user on this PC (signed by Pyrsys B.V.).
     - **Tag:** `v1.1.0` on `356dacf`, pushed.
     - **Remaining:**
-      1. **Demetre:** create the GitHub Release `v1.1.0` from the tag and attach the original `SarkeSetup-1.1.0.0.exe` (SHA-256 `5a38cefd…`, saved in `dist\release-1.1.0\`).
+      1. ~~Create the GitHub Release `v1.1.0`~~: done 2026-10-20 through the API. The asset `SarkeSetup-1.1.0.0.exe` downloaded from `releases/latest` has SHA-256 `5a38cefd…`, the same as the original.
       2. **Install test in Windows Sandbox:** Sandbox isn't enabled on this PC. Enabling it needs admin and a reboot; alternatively, a spare PC.
 
 - [x] **P0.6 Rewrite CLAUDE.md; archive the hackathon docs** (S), branch `phase0/claude-md`. Depends on D2.
