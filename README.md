@@ -4,12 +4,12 @@
 PC. Drag a window across and it shows up there while it keeps running where it started. Copy on
 one PC, paste on the other; drag files across.
 
-[![CI](https://github.com/Nutsubidze423/Hacktoberfest/actions/workflows/ci.yml/badge.svg)](https://github.com/Nutsubidze423/Hacktoberfest/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/github/v/release/Nutsubidze423/Hacktoberfest?label=release)](https://github.com/Nutsubidze423/Hacktoberfest/releases/latest)
+[![CI](https://github.com/Nutsubidze423/Sarke/actions/workflows/ci.yml/badge.svg)](https://github.com/Nutsubidze423/Sarke/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/Nutsubidze423/Sarke?label=release)](https://github.com/Nutsubidze423/Sarke/releases/latest)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 ![Windows 10 | 11](https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-informational)
 
-[Download](https://github.com/Nutsubidze423/Hacktoberfest/releases/latest) ·
+[Download](https://github.com/Nutsubidze423/Sarke/releases/latest) ·
 [Website](https://sarke-nine.vercel.app) · [Roadmap](docs/ROADMAP.md) ·
 [Contributing](CONTRIBUTING.md) · [Security](docs/SECURITY.md)
 
@@ -47,7 +47,7 @@ has the plan.
 
 **Steps:**
 1. Download `SarkeSetup-<version>.exe` from the
-   [latest release](https://github.com/Nutsubidze423/Hacktoberfest/releases/latest) (or the
+   [latest release](https://github.com/Nutsubidze423/Sarke/releases/latest) (or the
    [website](https://sarke-nine.vercel.app)), and run it on **both** PCs. It installs:
    - Sarke;
    - the [Virtual Display Driver](https://github.com/VirtualDrivers/Virtual-Display-Driver) for desk mode;
