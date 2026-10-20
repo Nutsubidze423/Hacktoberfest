@@ -100,6 +100,10 @@ To build the installer (needs [Inno Setup 6](https://jrsoftware.org/isinfo.php))
 powershell -ExecutionPolicy Bypass -File tools\make_installer.ps1
 ```
 
+The build treats warnings as errors. C++ is formatted with clang-format 19.1.5 (the version Visual
+Studio 2022 ships) using [.clang-format](.clang-format); CI fails on unformatted code, so run
+`clang-format -i` on the files you changed, or let your editor format on save.
+
 Each `tools\*_test.cpp` builds into its own test executable, registered with ctest under a label
 that says what it needs:
 

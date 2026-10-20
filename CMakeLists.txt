@@ -12,7 +12,8 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 
 add_compile_definitions(WIN32_LEAN_AND_MEAN NOMINMAX UNICODE _UNICODE _WIN32_WINNT=0x0A00)
-add_compile_options(/W4 /permissive- /utf-8 /EHsc /Zc:__cplusplus)
+# Warnings are errors; headers included with <...> (Windows SDK, vcpkg) are external and not warned about.
+add_compile_options(/W4 /WX /external:anglebrackets /external:W0 /permissive- /utf-8 /EHsc /Zc:__cplusplus)
 
 find_package(nlohmann_json CONFIG REQUIRED)
 find_package(libjpeg-turbo CONFIG REQUIRED)

@@ -317,7 +317,7 @@ Task-level links that matter:
     - **Desktop probe:** all 7 `desktop` tests passed on the hosted runner in both runs (no failure annotation). They stay a non-required step until 5 runs in a row have passed; then they move into the required step.
     - **Action versions:** checkout v7, cache v6 and upload-artifact v7. The v4 actions ran on Node 20, which is deprecated.
 
-- [ ] **P0.4 `/WX` and clang-format** (M), branch `phase0/format`.
+- [x] **P0.4 `/WX` and clang-format** (M), branch `phase0/format`.
   - **Files:**
     - root `CMakeLists.txt`: add `/WX`, and `/external:anglebrackets /external:W0` so vcpkg headers don't fail the build;
     - `.clang-format` derived from the current style (4-space indent, ~120 columns; check it against existing files);
@@ -328,6 +328,12 @@ Task-level links that matter:
   - **Done when:**
     - CI fails on a deliberately added warning or a badly formatted line (test this in the PR, then revert it);
     - a clean build passes.
+  - **Result (2026-10-20):**
+    - **Options:** chosen by formatting a copy of the tree with 8 variants. The winner changes the fewest lines (2,928, about 10%): Google style, 4-space indent, 120 columns, short functions only inline, one-line `case` labels, unindented cases, includes never reordered.
+    - **Format-only commit:** `05371f0` (81 files), listed in `.git-blame-ignore-revs`. Split string literals stay one string at compile time, so the log lines the launcher parses don't change.
+    - **`/WX` on, plus `/external:anglebrackets /external:W0`:** the full rebuild has 0 warnings and 9/9 unit tests pass. The resource compiler accepts the flags.
+    - **CI** runs a clang-format 19.1.5 check (the same version VS 2022 ships, pinned from PyPI) before the build.
+    - **Not re-run:** the `local` suite. This change can't alter behaviour (formatting and compiler flags only).
 
 - [ ] **P0.5 Binaries out of git; VDD fetch script; GitHub Releases** (M), branch `phase0/releases`. Depends on D4 and D5.
   - **Files:**
