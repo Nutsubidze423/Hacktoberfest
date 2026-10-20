@@ -19,20 +19,21 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 60
     env:
-      VCPKG_ROOT: ${{ runner.temp }}\vcpkg
-      # vcpkg's x-gha cache provider is gone (vcpkg 2025.06.13): keep built packages in a folder and
-      # let actions/cache carry it between runs.
-      VCPKG_BINARY_CACHE_DIR: ${{ runner.temp }}\vcpkg-binary-cache
-      VCPKG_BINARY_SOURCES: clear;files,${{ runner.temp }}\vcpkg-binary-cache,readwrite
       VCPKG_DISABLE_METRICS: 1
 
     steps:
       - uses: actions/checkout@v5
 
-      - name: Runner image and Visual Studio
+      # The runner context isn't available in a job's env, hence the paths are set here.
+      # vcpkg's x-gha cache provider is gone (vcpkg 2025.06.13): built packages go to a folder that
+      # actions/cache carries between runs.
+      - name: Runner image, Visual Studio, vcpkg paths
         id: image
         shell: pwsh
         run: |
+          "VCPKG_ROOT=$env:RUNNER_TEMP\vcpkg" >> $env:GITHUB_ENV
+          "VCPKG_BINARY_CACHE_DIR=$env:RUNNER_TEMP\vcpkg-binary-cache" >> $env:GITHUB_ENV
+          "VCPKG_BINARY_SOURCES=clear;files,$env:RUNNER_TEMP\vcpkg-binary-cache,readwrite" >> $env:GITHUB_ENV
           "version=$env:ImageVersion" >> $env:GITHUB_OUTPUT
           "Runner image $env:ImageOS $env:ImageVersion"
           $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * `
