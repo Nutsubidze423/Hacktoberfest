@@ -10,10 +10,10 @@
 // as paired.json.broken-<time> by the next save, never silently overwritten.
 //
 // Several processes use the file (kvm_host and kvm_client pin against it and pair, the launcher sets
-// auto_connect and unpairs): reload() before a decision that must see the others' changes. Every
-// change re-reads the file and saves it under one named mutex per file, so no process writes back a
-// list without another's latest change. Saves are atomic (a temp file, then a replace). The methods
-// are thread-safe.
+// auto_connect and unpairs): reload() before a decision that must see the others' changes. Reads
+// and changes take one named mutex per file; a change re-reads the file first, so no process writes
+// back a list without another's latest change. Saves are atomic (a temp file, then a replace, retried
+// for about 1 s while another program has the file open). The methods are thread-safe.
 #pragma once
 
 #include <nlohmann/json.hpp>

@@ -40,6 +40,10 @@ using DeviceId = std::array<std::uint8_t, 32>;
 
 // "1A2B-3C4D-5E6F-7081": the first 8 bytes, for people.
 std::string short_id(const DeviceId& id);
+
+// What handshake() says when the peer starts with Sarke 1.1's plaintext hello (protocol v2).
+inline constexpr std::string_view kOlderSarke =
+    "an older Sarke (protocol v2) tried to connect - update both PCs to the same Sarke version";
 // All 32 bytes as lowercase hex, for files and logs.
 std::string to_hex(const DeviceId& id);
 std::optional<DeviceId> from_hex(std::string_view hex);
@@ -75,7 +79,8 @@ enum class Role { Client, Server };
 class Stream {
 public:
     // Runs the handshake within `timeout`. On failure returns nullptr, closes the socket and says
-    // why in `error` (e.g. "the peer doesn't speak TLS", "no certificate from the peer").
+    // why in `error` (e.g. "the peer doesn't speak TLS", "no certificate from the peer"). A server
+    // recognises an older Sarke's plaintext hello and says so (kOlderSarke, docs/SECURITY.md 6.7).
     static std::unique_ptr<Stream> handshake(SOCKET socket, Role role, const Credentials& me,
                                              std::chrono::milliseconds timeout, std::string& error);
     ~Stream();

@@ -101,6 +101,18 @@ void log_lines() {
         "01:02:03.456 [info] unpair: 1A2B-3C4D-5E6F-7081 is no longer paired with this PC - its session is closed");
     check(as<launcher::UnpairDone>(e) && as<launcher::UnpairDone>(e)->id == "1A2B-3C4D-5E6F-7081",
           "the app did \"unpair <id>\" -> UnpairDone");
+    e = launcher::parse_line(std::string("01:02:03.456 [warn] net: 10.0.0.5:51234: ") +
+                             std::string(kvm::tls::kOlderSarke));
+    check(as<launcher::VersionMismatch>(e) && as<launcher::VersionMismatch>(e)->ip == "10.0.0.5" &&
+              as<launcher::VersionMismatch>(e)->theirs == 2 && as<launcher::VersionMismatch>(e)->name.empty(),
+          "an older Sarke knocked -> VersionMismatch (v2, by IP)");
+    e = launcher::parse_line(
+        "01:02:03.456 [warn] version: 'DESK' at 10.0.0.5:50500 speaks protocol v4, this PC v3 - "
+        "update both PCs to the same Sarke version");
+    check(as<launcher::VersionMismatch>(e) && as<launcher::VersionMismatch>(e)->name == "DESK" &&
+              as<launcher::VersionMismatch>(e)->ip == "10.0.0.5" && as<launcher::VersionMismatch>(e)->theirs == 4 &&
+              as<launcher::VersionMismatch>(e)->ours == 3,
+          "a paired PC with another protocol version -> VersionMismatch");
     {
         constexpr std::int64_t now = 1'800'000'000'000;
         constexpr std::int64_t minute = 60'000;

@@ -276,6 +276,25 @@ std::unique_ptr<Stream> Stream::handshake(SOCKET socket, Role role, const Creden
 
     u_long non_blocking = 1;
     if (ioctlsocket(socket, FIONBIO, &non_blocking) != 0) return fail("tls: can't make the socket non-blocking");
+    const auto deadline = Clock::now() + timeout;
+
+    // A TLS client starts with a handshake record (0x16). Sarke 1.1 (protocol v2) starts with its
+    // plaintext hello, [u32 big-endian length]{"type":"hello",...}: name that, rather than an OpenSSL
+    // error, so the user learns which PC to update (docs/SECURITY.md 6.7). Nothing is consumed.
+    if (role == Role::Server) {
+        const Wait w = wait_socket(socket, false, deadline, impl->aborted);
+        if (w == Wait::Timeout) return fail(std::format("tls: no handshake within {} ms", timeout.count()));
+        if (w != Wait::Ready) return fail("tls: socket error during the handshake");
+        unsigned char first[5] = {};
+        const int got = recv(socket, reinterpret_cast<char*>(first), static_cast<int>(sizeof(first)), MSG_PEEK);
+        if (got == 0) return fail("tls: the peer closed the connection during the handshake");
+        if (got > 0 && first[0] != 0x16) {
+            // A v2 frame's length is under 64 KB: two zero bytes, then (once it arrived) the JSON's '{'.
+            const bool v2 = got >= 2 && first[0] == 0 && first[1] == 0 && (got < 5 || first[4] == '{');
+            return fail(v2 ? std::string(kOlderSarke)
+                           : std::format("tls: the peer doesn't speak TLS (it started with 0x{:02x})", first[0]));
+        }
+    }
 
     ERR_clear_error();
     const bool server = role == Role::Server;
@@ -303,7 +322,6 @@ std::unique_ptr<Stream> Stream::handshake(SOCKET socket, Role role, const Creden
         SSL_set_connect_state(impl->ssl.get());
     }
 
-    const auto deadline = Clock::now() + timeout;
     for (;;) {
         ERR_clear_error();
         const int r = SSL_do_handshake(impl->ssl.get());

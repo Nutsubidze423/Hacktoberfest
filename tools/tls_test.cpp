@@ -392,7 +392,17 @@ int main() {
         const auto stream = tls::Stream::handshake(s, tls::Role::Server, bob, 5s, why);
         const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now() - t0).count();
         closesocket(c);
-        check(!stream && !why.empty() && ms < 2000, std::format("a plaintext peer, in {} ms: {}", ms, why));
+        check(!stream && why == tls::kOlderSarke && ms < 2000,
+              std::format("Sarke 1.1's plaintext hello, in {} ms: named as an older Sarke", ms));
+    }
+    {
+        const auto [c, s] = socket_pair();
+        send(c, "GET / HTTP/1.1\r\n\r\n", 18, 0);
+        std::string why;
+        const auto stream = tls::Stream::handshake(s, tls::Role::Server, bob, 5s, why);
+        closesocket(c);
+        check(!stream && why.find("doesn't speak TLS") != std::string::npos,
+              std::format("another plaintext peer: {}", why));
     }
     {
         const auto [c, s] = socket_pair();

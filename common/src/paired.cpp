@@ -106,11 +106,13 @@ fs::path Store::default_file() {
 
 Store::Store(fs::path file) : file_(std::move(file)) {
     std::lock_guard lock(mutex_);
+    const FileLock file_lock(file_);  // a reader holding the file open makes another process's save fail
     load_locked();
 }
 
 void Store::reload() {
     std::lock_guard lock(mutex_);
+    const FileLock file_lock(file_);
     load_locked();
 }
 
@@ -166,9 +168,21 @@ bool Store::save_locked() {
         out << j.dump(2) << '\n';
         if (!out.flush()) return false;
     }
-    if (!MoveFileExW(temp.c_str(), file_.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+    // Another program (an antivirus, the search indexer, an editor) may have the file open for a
+    // moment: the replace fails with access denied or a sharing violation. Try again for about 1 s.
+    DWORD error = ERROR_SUCCESS;
+    for (int attempt = 0; attempt < 20; ++attempt) {
+        if (MoveFileExW(temp.c_str(), file_.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+            error = ERROR_SUCCESS;
+            break;
+        }
+        error = GetLastError();
+        if (error != ERROR_ACCESS_DENIED && error != ERROR_SHARING_VIOLATION) break;
+        Sleep(50);
+    }
+    if (error != ERROR_SUCCESS) {
         fs::remove(temp, ec);
-        log::error("paired: can't save {} ({})", utf8(file_), GetLastError());
+        log::error("paired: can't save {} (error {})", utf8(file_), error);
         return false;
     }
     load_error_.clear();
