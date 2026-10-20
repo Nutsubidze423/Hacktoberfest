@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Checks kvm/queue.h: ordering, bounded drop-oldest, LatestSlot overwrite, timeouts, close(),
 // and a multi-threaded producer/consumer run.
 // Usage: queue_test.exe   (exit code 0 = all passed)
@@ -109,7 +111,8 @@ void test_queue_threads() {
     }
     q.close();
     consumer.join();
-    check(count == kProducers * kPerProducer && ordered, "queue: 4 producers x 20000, none lost, per-producer order kept");
+    check(count == kProducers * kPerProducer && ordered,
+          "queue: 4 producers x 20000, none lost, per-producer order kept");
 }
 
 void test_slot() {

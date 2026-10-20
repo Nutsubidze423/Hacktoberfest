@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Sarke launcher (owner: Sandro): the app's face on a PC. Runs kvm_host.exe or kvm_client.exe in the
 // background (no console window) and adds what the apps don't have themselves yet: the tray icon
 // with the link state, Sarke's notification card on connect / disconnect, the Display arrangement
@@ -48,7 +50,8 @@ struct PlaceSet {  // where the connected PC stands was applied ("layout: 'name'
     std::string side;
 };
 struct IdentifyAsked {};  // the other PC pressed Identify: show this PC's screen numbers
-using Event = std::variant<std::monostate, Connected, LinkUp, SessionEnded, Searching, Rtt, Problem, PlaceSet, IdentifyAsked>;
+using Event =
+    std::variant<std::monostate, Connected, LinkUp, SessionEnded, Searching, Rtt, Problem, PlaceSet, IdentifyAsked>;
 
 Event parse_line(std::string_view line);
 

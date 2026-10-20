@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // file_transfer_test: the 50502 file channel on 127.0.0.1, both directions (T9). No second PC needed.
 //   1. safe_destination(): what a peer may and may not write.
 //   2. B -> A: a folder tree, a 3.5 MB file, an empty file and a Georgian file name, byte for byte.
@@ -127,7 +129,8 @@ bool raw_send(SOCKET s, const nlohmann::json& header, std::string_view payload =
 std::vector<fs::path> files_below(const fs::path& dir) {
     std::vector<fs::path> out;
     std::error_code ec;
-    for (auto it = fs::recursive_directory_iterator(dir, ec); !ec && it != fs::recursive_directory_iterator(); it.increment(ec)) {
+    for (auto it = fs::recursive_directory_iterator(dir, ec); !ec && it != fs::recursive_directory_iterator();
+         it.increment(ec)) {
         if (it->is_regular_file()) out.push_back(it->path());
     }
     return out;
@@ -160,9 +163,9 @@ int main() {
             const auto d = kvm::files::safe_destination(base, good);
             check(d.has_value(), std::format("allowed: \"{}\"", good));
         }
-        for (const std::string_view bad : {"", "../x", "dir/../../x", "/abs", "C:/x", "c:x", "\\\\?\\C:\\x", "a\\b",
-                                           "CON", "con.txt", "dir/NUL", "COM1.log", "a:stream", "dir//x", "x.", "x ",
-                                           "dir/", "./x", "a|b"}) {
+        for (const std::string_view bad :
+             {"", "../x", "dir/../../x", "/abs", "C:/x", "c:x", "\\\\?\\C:\\x", "a\\b", "CON", "con.txt", "dir/NUL",
+              "COM1.log", "a:stream", "dir//x", "x.", "x ", "dir/", "./x", "a|b"}) {
             check(!kvm::files::safe_destination(base, bad).has_value(), std::format("refused: \"{}\"", bad));
         }
     }
@@ -228,15 +231,16 @@ int main() {
         std::unique_ptr<kvm::files::FileTransfer> victim;
         std::thread acceptor([&] {
             const SOCKET s = accept(listener, nullptr, nullptr);
-            if (s != INVALID_SOCKET) victim = std::make_unique<kvm::files::FileTransfer>(s, "victim", inbox_v.callbacks(), dst_v);
+            if (s != INVALID_SOCKET)
+                victim = std::make_unique<kvm::files::FileTransfer>(s, "victim", inbox_v.callbacks(), dst_v);
         });
         const SOCKET raw = connect_loopback(port);
         acceptor.join();
         closesocket(listener);
 
         int id = 0;
-        for (const std::string_view path : {"../evil1.txt", "C:/evil2.txt", "CON", "sub/../../evil4.txt",
-                                            "\\\\?\\C:\\evil5.txt", "ok.txt"}) {
+        for (const std::string_view path :
+             {"../evil1.txt", "C:/evil2.txt", "CON", "sub/../../evil4.txt", "\\\\?\\C:\\evil5.txt", "ok.txt"}) {
             ++id;
             raw_send(raw, {{"type", "file_begin"}, {"id", id}, {"path", path}, {"size", 4}});
             raw_send(raw, {{"type", "file_chunk"}, {"id", id}, {"offset", 0}}, "evil");

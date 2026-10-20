@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 #include "window_picker.h"
 
 #include <dwmapi.h>
@@ -12,7 +14,9 @@ namespace kvm {
 namespace {
 
 struct HandleCloser {
-    void operator()(HANDLE h) const noexcept { if (h) CloseHandle(h); }
+    void operator()(HANDLE h) const noexcept {
+        if (h) CloseHandle(h);
+    }
 };
 using unique_handle = std::unique_ptr<void, HandleCloser>;
 
@@ -140,8 +144,7 @@ std::optional<WindowInfo> pick_window_console() {
                 }
                 return chosen;
             }
-        } catch (const std::exception&) {
-        }
+        } catch (const std::exception&) {}
         std::cout << "Invalid choice.\n";
     }
 }

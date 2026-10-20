@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The picture under the cursor during a file drag, exactly as the shell draws it (Explorer's icon or
 // thumbnail with the name, as when files go from one monitor to another). The drag that goes on on
 // the other PC shows this same picture.

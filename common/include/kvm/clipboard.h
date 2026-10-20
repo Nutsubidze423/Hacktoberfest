@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 #pragma once
 // Shared clipboard between the two PCs: copy on one, paste on the other.
 //

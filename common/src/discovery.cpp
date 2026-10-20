@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 #include "kvm/discovery.h"
 
 #include <winsock2.h>
@@ -44,10 +46,12 @@ std::vector<in_addr> broadcast_addresses() {
     ULONG size = 16 * 1024;
     std::vector<std::byte> buffer(size);
     const ULONG flags = GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST | GAA_FLAG_SKIP_DNS_SERVER;
-    ULONG rc = GetAdaptersAddresses(AF_INET, flags, nullptr, reinterpret_cast<IP_ADAPTER_ADDRESSES*>(buffer.data()), &size);
+    ULONG rc =
+        GetAdaptersAddresses(AF_INET, flags, nullptr, reinterpret_cast<IP_ADAPTER_ADDRESSES*>(buffer.data()), &size);
     if (rc == ERROR_BUFFER_OVERFLOW) {
         buffer.resize(size);
-        rc = GetAdaptersAddresses(AF_INET, flags, nullptr, reinterpret_cast<IP_ADAPTER_ADDRESSES*>(buffer.data()), &size);
+        rc = GetAdaptersAddresses(AF_INET, flags, nullptr, reinterpret_cast<IP_ADAPTER_ADDRESSES*>(buffer.data()),
+                                  &size);
     }
     if (rc != NO_ERROR) {
         return out;
@@ -113,21 +117,22 @@ void Responder::run() {
     while (running_) {
         sockaddr_in from{};
         int from_len = sizeof(from);
-        const int got = recvfrom(sock_, buf.data(), static_cast<int>(buf.size()), 0,
-                                 reinterpret_cast<sockaddr*>(&from), &from_len);
+        const int got =
+            recvfrom(sock_, buf.data(), static_cast<int>(buf.size()), 0, reinterpret_cast<sockaddr*>(&from), &from_len);
         if (got <= 0) {
             continue;  // timeout (checks running_) or an ICMP error from an earlier answer
         }
-        const auto j = nlohmann::json::parse(std::string_view(buf.data(), static_cast<std::size_t>(got)), nullptr, false);
+        const auto j =
+            nlohmann::json::parse(std::string_view(buf.data(), static_cast<std::size_t>(got)), nullptr, false);
         if (j.is_discarded() || !j.is_object() || j.value("type", "") != kQuery) {
             continue;
         }
-        const std::string answer = nlohmann::json{{"type", kAnswer},
-                                                  {"name", name_},
-                                                  {"control_port", control_port_},
-                                                  {"protocol_version", proto::kProtocolVersion},
-                                                  {"busy", busy_.load()}}
-                                       .dump();
+        const std::string answer = nlohmann::json{
+            {"type", kAnswer},
+            {"name", name_},
+            {"control_port", control_port_},
+            {"protocol_version", proto::kProtocolVersion},
+            {"busy", busy_.load()}}.dump();
         sendto(sock_, answer.data(), static_cast<int>(answer.size()), 0, reinterpret_cast<const sockaddr*>(&from),
                from_len);
         const auto now = std::chrono::steady_clock::now();
@@ -163,7 +168,8 @@ std::vector<Host> find(std::chrono::milliseconds wait, std::uint16_t port) {
             to.sin_family = AF_INET;
             to.sin_addr = target;
             to.sin_port = htons(port);
-            sendto(s, query.data(), static_cast<int>(query.size()), 0, reinterpret_cast<const sockaddr*>(&to), sizeof(to));
+            sendto(s, query.data(), static_cast<int>(query.size()), 0, reinterpret_cast<const sockaddr*>(&to),
+                   sizeof(to));
         }
     };
 
@@ -185,10 +191,11 @@ std::vector<Host> find(std::chrono::milliseconds wait, std::uint16_t port) {
 
         sockaddr_in from{};
         int from_len = sizeof(from);
-        const int got = recvfrom(s, buf.data(), static_cast<int>(buf.size()), 0, reinterpret_cast<sockaddr*>(&from),
-                                 &from_len);
+        const int got =
+            recvfrom(s, buf.data(), static_cast<int>(buf.size()), 0, reinterpret_cast<sockaddr*>(&from), &from_len);
         if (got <= 0) continue;
-        const auto j = nlohmann::json::parse(std::string_view(buf.data(), static_cast<std::size_t>(got)), nullptr, false);
+        const auto j =
+            nlohmann::json::parse(std::string_view(buf.data(), static_cast<std::size_t>(got)), nullptr, false);
         if (j.is_discarded() || !j.is_object() || j.value("type", "") != kAnswer) continue;
 
         Host h{.name = j.value("name", ""),

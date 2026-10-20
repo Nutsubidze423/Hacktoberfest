@@ -22,9 +22,9 @@ Viewer chrome, state screens, HUD (client B)	client_b/viewer_window.* (existing)
 Edge glow (both A and B)	common/include/kvm/ui/edge_glow.h, common/src/edge_glow.cpp	Demetre
 Preview tools	tools/ui_preview_picker.cpp (Temo), tools/ui_preview_viewer.cpp (Sandro), tools/ui_preview_glow.cpp (Demetre)	per owner
 
-If tokens/draw helpers do not exist yet when you start: create a temporary copy inside your own files (e.g. client_b/ui_tokens_tmp.h), tell the user it must be replaced once Luka's version lands, and continue.
+The tokens and draw helpers live in client_b/ui_tokens.h and client_b/ui_draw.*; every surface uses them.
 
-2. Design tokens (tokens.h; today client_b/ui_tokens_tmp.h + ui_draw_tmp.*)
+2. Design tokens (client_b/ui_tokens.h + client_b/ui_draw.*)
 2.1 Units
 Every size here is in dp (1 dp = 1/96 inch).
 Convert with int px(float dp, UINT dpi) { return (int)lround(dp * dpi / 96.0); }.
@@ -241,7 +241,7 @@ Footer: the status line (body; warn / ok / err / ink2), then the config path (mo
 Identify: on each real monitor, 48 dp from its bottom-left corner, a 200 dp rounded tile (radius lg, layered) with the number (96 dp, bold), the mark + "Sarke" and "W×H · scale"; 2.5 s, click to hide.
 Live: re-reads the monitors on WM_DISPLAYCHANGE, DPI and setting changes and every 2 s; re-reads config.json and peer.json when the window is activated (unless there are unsaved changes); repaints on a theme change. Apply keeps every other key of config.json and its order and never overwrites a file it can't parse.
 
-11. Launcher: sarke.exe (2026-10-18, Sandro). Code: client_b/launcher.*, tools/sarke.cpp. Behaviour: docs/BLUEPRINT.md 2.0 and 3.3.
+11. Launcher: sarke.exe (2026-10-18, Sandro). Code: client_b/launcher.*, tools/sarke.cpp. Behaviour: docs/archive/hackathon/BLUEPRINT.md 2.0 and 3.3.
 No window of its own: the tray icon (the mark), its menu and the notification cards (9.3) are its whole face; Display arrangement (10) opens from it.
 Tooltip: "Sarke · {Host|Client} · {state}" — states: Starting, Waiting for the other PC (host) / Looking for the host (client), Linked to {PC} · {rtt} ms, Connection lost, Stopped.
 Menu (Windows' own menu, sentence case, "…" on items that open a window): Sarke · This PC is the {role} (disabled) — Display arrangement… (default, bold) — Window quality ▸ — Frame rate ▸ — Desk mode (the other PC as a monitor) — Notifications ▸ — Open received files — Open config.json — Show log — This PC is the ▸ — Restart Sarke — Quit Sarke. Radio dots for one-of choices, check marks for on/off.

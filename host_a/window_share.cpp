@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 #include "window_share.h"
 
 #include <format>
@@ -34,14 +36,11 @@ std::unique_ptr<WindowShare> WindowShare::start(HWND hwnd, VideoSender::SendFn s
     share->rect_ = where->rect;
 
     switch (share->mover_.send(hwnd, share->rect_)) {
-        case WindowMover::Result::Ok:
-            break;
-        case WindowMover::Result::Elevated:
-            throw std::runtime_error("share: the window belongs to an admin process; run kvm_host as admin");
-        case WindowMover::Result::NotAWindow:
-            throw std::runtime_error("share: the window closed");
-        default:
-            throw std::runtime_error("share: can't move the window onto the VDD");
+    case WindowMover::Result::Ok: break;
+    case WindowMover::Result::Elevated:
+        throw std::runtime_error("share: the window belongs to an admin process; run kvm_host as admin");
+    case WindowMover::Result::NotAWindow: throw std::runtime_error("share: the window closed");
+    default: throw std::runtime_error("share: can't move the window onto the VDD");
     }
 
     share->capture_ = ScreenCapture::for_monitor(where->monitor);

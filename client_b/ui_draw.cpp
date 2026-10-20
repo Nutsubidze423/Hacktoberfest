@@ -1,4 +1,6 @@
-#include "ui_draw_tmp.h"
+// SPDX-License-Identifier: Apache-2.0
+
+#include "ui_draw.h"
 
 #include <dwmapi.h>
 #include <dwrite_3.h>
@@ -125,7 +127,8 @@ const Palette& pal() {
 }
 
 bool is_theme_change(UINT msg, LPARAM lp) {
-    return msg == WM_SETTINGCHANGE && lp != 0 && std::wcscmp(reinterpret_cast<const wchar_t*>(lp), L"ImmersiveColorSet") == 0;
+    return msg == WM_SETTINGCHANGE && lp != 0 &&
+           std::wcscmp(reinterpret_cast<const wchar_t*>(lp), L"ImmersiveColorSet") == 0;
 }
 
 void style_window(HWND hwnd, bool round_corners) {
@@ -190,7 +193,8 @@ void Graphics::load_fonts() {
     }
     ComPtr<IDWriteFontSet> set;
     ComPtr<IDWriteFontCollection1> collection;
-    if (FAILED(builder->CreateFontSet(&set)) || FAILED(factory5->CreateFontCollectionFromFontSet(set.Get(), &collection))) {
+    if (FAILED(builder->CreateFontSet(&set)) ||
+        FAILED(factory5->CreateFontCollectionFromFontSet(set.Get(), &collection))) {
         log::warn("ui: font collection from {} failed, using system fonts", utf8(dir->wstring()));
         return;
     }
@@ -250,7 +254,7 @@ ComPtr<IDWriteTextLayout> TextStyles::layout(TextStyle style, std::wstring_view 
     const Entry& e = entries_[index(style)];
     ComPtr<IDWriteTextLayout> layout;
     if (FAILED(Graphics::get().dwrite()->CreateTextLayout(text.data(), static_cast<UINT32>(text.size()), e.format.Get(),
-                                                         max_width, e.metrics.line_px, &layout))) {
+                                                          max_width, e.metrics.line_px, &layout))) {
         return nullptr;
     }
     if (e.spacing_px != 0 && !text.empty()) {
@@ -395,8 +399,8 @@ ID2D1RenderTarget* LayeredSurface::begin(int w, int h) {
     }
     if (!rt_) {
         const auto props = D2D1::RenderTargetProperties(
-            D2D1_RENDER_TARGET_TYPE_SOFTWARE, D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED),
-            96.0f, 96.0f);
+            D2D1_RENDER_TARGET_TYPE_SOFTWARE,
+            D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED), 96.0f, 96.0f);
         if (FAILED(Graphics::get().d2d()->CreateDCRenderTarget(&props, &rt_))) return nullptr;
         rt_->SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE);
         rt_->CreateSolidColorBrush(to_color(0), &brush_);

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 #include "kvm/file_transfer.h"
 
 #include <winsock2.h>
@@ -45,11 +47,13 @@ std::string megabytes(std::uint64_t bytes) {
 // "CON", "nul.txt", "COM1.log"...: Windows opens the device instead of a file with that name.
 bool is_device_name(std::string_view name) {
     std::string stem(name.substr(0, name.find('.')));
-    std::transform(stem.begin(), stem.end(), stem.begin(), [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
+    std::transform(stem.begin(), stem.end(), stem.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
     for (const std::string_view device : {"CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$"}) {
         if (stem == device) return true;
     }
-    return stem.size() == 4 && (stem.starts_with("COM") || stem.starts_with("LPT")) && std::isdigit(static_cast<unsigned char>(stem[3]));
+    return stem.size() == 4 && (stem.starts_with("COM") || stem.starts_with("LPT")) &&
+           std::isdigit(static_cast<unsigned char>(stem[3]));
 }
 
 // The first name in `dir` that's free: "cat.jpg" -> "cat (2).jpg", "project" -> "project (2)".
@@ -218,11 +222,12 @@ void FileTransfer::send_loop() {
             if (fs::is_regular_file(item, ec)) {
                 entries.push_back({item, utf8(item.filename()), fs::file_size(item, ec)});
             } else if (fs::is_directory(item, ec)) {
-                for (auto it = fs::recursive_directory_iterator(item, fs::directory_options::skip_permission_denied, ec);
+                for (auto it =
+                         fs::recursive_directory_iterator(item, fs::directory_options::skip_permission_denied, ec);
                      !ec && it != fs::recursive_directory_iterator(); it.increment(ec)) {
                     if (!it->is_regular_file(ec)) continue;
-                    entries.push_back({it->path(), utf8(item.filename() / it->path().lexically_relative(item)),
-                                       it->file_size(ec)});
+                    entries.push_back(
+                        {it->path(), utf8(item.filename() / it->path().lexically_relative(item)), it->file_size(ec)});
                 }
             } else {
                 log::warn("files: {} not found, skipped", utf8(item));
@@ -429,7 +434,8 @@ std::unique_ptr<FileTransfer> connect_files(const std::string& host, std::uint16
                                             fs::path target, std::chrono::milliseconds timeout) {
     const SOCKET s = connect_to(host, port, timeout);
     if (s == INVALID_SOCKET) return nullptr;
-    return std::make_unique<FileTransfer>(s, host + ":" + std::to_string(port), std::move(callbacks), std::move(target));
+    return std::make_unique<FileTransfer>(s, host + ":" + std::to_string(port), std::move(callbacks),
+                                          std::move(target));
 }
 
 }  // namespace kvm::files

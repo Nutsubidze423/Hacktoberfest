@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 #include "kvm/hotkeys.h"
 
 #include "kvm/log.h"

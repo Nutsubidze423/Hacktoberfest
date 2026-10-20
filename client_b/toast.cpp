@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 #include "toast.h"
 
 #include <windowsx.h>
@@ -70,8 +72,12 @@ bool register_class(WNDPROC wnd_proc) {
     return RegisterClassExW(&wc) != 0;
 }
 
-double ease_out(double t) { return 1 - (1 - t) * (1 - t) * (1 - t); }
-double ease_in(double t) { return t * t; }
+double ease_out(double t) {
+    return 1 - (1 - t) * (1 - t) * (1 - t);
+}
+double ease_in(double t) {
+    return t * t;
+}
 
 }  // namespace
 
@@ -137,7 +143,9 @@ bool Toast::show(Content content, std::function<void()> on_click, std::chrono::m
             held_ = milliseconds{0};
         }
         render();
-        place(phase_ == Phase::Hold ? 0.0 : 1.0 - ease_out(std::min(1.0, (now - phase_start_) / std::chrono::duration<double>(kInTime))),
+        place(phase_ == Phase::Hold
+                  ? 0.0
+                  : 1.0 - ease_out(std::min(1.0, (now - phase_start_) / std::chrono::duration<double>(kInTime))),
               phase_ == Phase::Hold ? 1.0 : alpha_ / 255.0);
     } else {
         phase_ = Phase::In;
@@ -182,7 +190,8 @@ void Toast::tick() {
         break;
     }
     case Phase::Hold: {
-        const auto used = held_ + (hover_ ? milliseconds{0} : std::chrono::duration_cast<milliseconds>(now - phase_start_));
+        const auto used =
+            held_ + (hover_ ? milliseconds{0} : std::chrono::duration_cast<milliseconds>(now - phase_start_));
         if (used >= hold_) dismiss();
         render();  // the time line
         place(0.0, 1.0);
@@ -198,9 +207,7 @@ void Toast::tick() {
         }
         break;
     }
-    case Phase::Hidden:
-        KillTimer(hwnd_, kTickTimer);
-        break;
+    case Phase::Hidden: KillTimer(hwnd_, kTickTimer); break;
     }
 }
 
@@ -233,8 +240,7 @@ LRESULT Toast::handle_message(UINT msg, WPARAM wp, LPARAM lp) {
     case WM_TIMER:
         if (wp == kTickTimer) tick();
         return 0;
-    case WM_MOUSEACTIVATE:
-        return MA_NOACTIVATE;
+    case WM_MOUSEACTIVATE: return MA_NOACTIVATE;
     case WM_MOUSEMOVE: {
         if (!tracking_leave_) {
             TRACKMOUSEEVENT tme{sizeof(tme), TME_LEAVE, hwnd, 0};
@@ -296,8 +302,7 @@ LRESULT Toast::handle_message(UINT msg, WPARAM wp, LPARAM lp) {
         hwnd_ = nullptr;
         phase_ = Phase::Hidden;
         break;
-    default:
-        break;
+    default: break;
     }
     return DefWindowProcW(hwnd, msg, wp, lp);
 }
@@ -334,7 +339,8 @@ void Toast::render() {
     const float caption_h = text_.metrics(TextStyle::Caption).line_px;
     const float title_h = text_.metrics(TextStyle::Title).line_px;
     const float body_h = content_.text.empty() ? 0 : text_.metrics(TextStyle::Body).line_px;
-    float ty = std::round(card.top + (card.bottom - card.top - P(kProgressInset) - (caption_h + P(kRowGap) + title_h + body_h)) / 2);
+    float ty = std::round(
+        card.top + (card.bottom - card.top - P(kProgressInset) - (caption_h + P(kRowGap) + title_h + body_h)) / 2);
     const float dot = P(kDot);
     p.circle({tx + dot / 2, ty + caption_h / 2}, dot / 2, kind_color(content_.kind));
     float x = tx + dot + P(6);
@@ -348,7 +354,8 @@ void Toast::render() {
     if (!content_.text.empty()) p.text(TextStyle::Body, content_.text, tx, ty, card.right - pad - tx, c.ink2);
 
     // Close: a round button that shows on hover.
-    if (close_hover_) p.circle({(close.left + close.right) / 2, (close.top + close.bottom) / 2}, P(kClose) / 2, c.fill_hi);
+    if (close_hover_)
+        p.circle({(close.left + close.right) / 2, (close.top + close.bottom) / 2}, P(kClose) / 2, c.fill_hi);
     const float g = P(kCloseGlyph);
     const float cx = std::round((close.left + close.right - g) / 2);
     const float cy = std::round((close.top + close.bottom - g) / 2);

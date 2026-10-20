@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 #include "kvm/dpi.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
@@ -53,8 +55,8 @@ char lower(char c) {
 }
 
 bool iequals(std::string_view a, std::string_view b) {
-    return a.size() == b.size() && std::equal(a.begin(), a.end(), b.begin(),
-                                              [](char x, char y) { return lower(x) == lower(y); });
+    return a.size() == b.size() &&
+           std::equal(a.begin(), a.end(), b.begin(), [](char x, char y) { return lower(x) == lower(y); });
 }
 
 }  // namespace
@@ -67,10 +69,10 @@ OuterEdge::OuterEdge(const std::vector<Monitor>& mons, Side side) : side_(side) 
 
         Segment edge{};
         switch (side) {
-            case Side::Left:   edge = {r.left, r.top, r.bottom}; break;
-            case Side::Right:  edge = {r.right - 1, r.top, r.bottom}; break;
-            case Side::Top:    edge = {r.top, r.left, r.right}; break;
-            case Side::Bottom: edge = {r.bottom - 1, r.left, r.right}; break;
+        case Side::Left: edge = {r.left, r.top, r.bottom}; break;
+        case Side::Right: edge = {r.right - 1, r.top, r.bottom}; break;
+        case Side::Top: edge = {r.top, r.left, r.right}; break;
+        case Side::Bottom: edge = {r.bottom - 1, r.left, r.right}; break;
         }
 
         // Spans of this edge that a neighbouring monitor continues past.
@@ -80,10 +82,10 @@ OuterEdge::OuterEdge(const std::vector<Monitor>& mons, Side side) : side_(side) 
             const Rect& o = n.rect;
             bool touches = false;
             switch (side) {
-                case Side::Left:   touches = o.right == r.left; break;
-                case Side::Right:  touches = o.left == r.right; break;
-                case Side::Top:    touches = o.bottom == r.top; break;
-                case Side::Bottom: touches = o.top == r.bottom; break;
+            case Side::Left: touches = o.right == r.left; break;
+            case Side::Right: touches = o.left == r.right; break;
+            case Side::Top: touches = o.bottom == r.top; break;
+            case Side::Bottom: touches = o.top == r.bottom; break;
             }
             if (!touches) continue;
             const int lo = std::max(along_x(side) ? o.left : o.top, edge.from);
@@ -145,10 +147,10 @@ std::optional<Side> parse_side(std::string_view s) {
 
 std::string_view to_string(Side s) {
     switch (s) {
-        case Side::Left: return "left";
-        case Side::Right: return "right";
-        case Side::Top: return "top";
-        default: return "bottom";
+    case Side::Left: return "left";
+    case Side::Right: return "right";
+    case Side::Top: return "top";
+    default: return "bottom";
     }
 }
 

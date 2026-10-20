@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // TCP transport for the control channel (port 50500): length-prefixed JSON messages.
 //
 //   Host A:  kvm::net::Server server(port);  auto conn = server.accept();

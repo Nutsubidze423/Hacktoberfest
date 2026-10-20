@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Plays "the other PC" against a real kvm_host / kvm_client for KVM debugging:
 // connects (or listens), says hello, takes control of that PC (focus_enter),
 // wiggles its cursor a few pixels and taps harmless keys (F13/F14) for a while,
@@ -41,8 +43,10 @@ int wmain(int argc, wchar_t** argv) {
         return 2;
     }
     const auto screen = kvm::display::primary_monitor();
-    conn->send(proto::Hello{.screen_w = screen.rect.width(), .screen_h = screen.rect.height(),
-                            .dpi_scale = screen.scale, .hostname = "fake-peer"});
+    conn->send(proto::Hello{.screen_w = screen.rect.width(),
+                            .screen_h = screen.rect.height(),
+                            .dpi_scale = screen.scale,
+                            .hostname = "fake-peer"});
     std::printf("connected, hello sent\n");
 
     const auto drain = [&] {

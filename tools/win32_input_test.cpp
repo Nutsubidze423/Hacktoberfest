@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Checks kvm/win32_input.h: installs low-level hooks, injects events and verifies
 // what the hooks see (flags, the KVM marker, exact pixel for absolute moves).
 // Clicks, keys and wheel are swallowed by the hook, so nothing reaches the desktop;
@@ -32,18 +34,26 @@ static std::vector<Ev> g_events;
 static std::atomic<bool> g_suppress{true};
 static int g_fail = 0, g_pass = 0;
 
-#define CHECK(cond, ...)                                   \
-    do {                                                   \
-        if (cond) { ++g_pass; }                            \
-        else { ++g_fail; std::printf("FAIL %s:%d: ", __FILE__, __LINE__); \
-               std::printf(__VA_ARGS__); std::printf("\n"); } \
+#define CHECK(cond, ...)                                     \
+    do {                                                     \
+        if (cond) {                                          \
+            ++g_pass;                                        \
+        } else {                                             \
+            ++g_fail;                                        \
+            std::printf("FAIL %s:%d: ", __FILE__, __LINE__); \
+            std::printf(__VA_ARGS__);                        \
+            std::printf("\n");                               \
+        }                                                    \
     } while (0)
 
 static LRESULT CALLBACK mouse_proc(int code, WPARAM wp, LPARAM lp) {
     if (code == HC_ACTION) {
         auto* m = reinterpret_cast<MSLLHOOKSTRUCT*>(lp);
         if (is_own_injection(m->dwExtraInfo)) {
-            { std::lock_guard l(g_mu); g_events.push_back({false, wp, m->mouseData, m->flags, 0, m->dwExtraInfo, m->pt}); }
+            {
+                std::lock_guard l(g_mu);
+                g_events.push_back({false, wp, m->mouseData, m->flags, 0, m->dwExtraInfo, m->pt});
+            }
             if (g_suppress && wp != WM_MOUSEMOVE) return 1;
         }
     }
@@ -54,7 +64,10 @@ static LRESULT CALLBACK key_proc(int code, WPARAM wp, LPARAM lp) {
     if (code == HC_ACTION) {
         auto* k = reinterpret_cast<KBDLLHOOKSTRUCT*>(lp);
         if (is_own_injection(k->dwExtraInfo)) {
-            { std::lock_guard l(g_mu); g_events.push_back({true, wp, k->vkCode, k->scanCode, k->flags, k->dwExtraInfo, {}}); }
+            {
+                std::lock_guard l(g_mu);
+                g_events.push_back({true, wp, k->vkCode, k->scanCode, k->flags, k->dwExtraInfo, {}});
+            }
             if (g_suppress) return 1;
         }
     }
@@ -64,7 +77,10 @@ static LRESULT CALLBACK key_proc(int code, WPARAM wp, LPARAM lp) {
 static std::vector<Ev> wait_events(size_t n, int ms = 1000) {
     auto end = std::chrono::steady_clock::now() + std::chrono::milliseconds(ms);
     while (std::chrono::steady_clock::now() < end) {
-        { std::lock_guard l(g_mu); if (g_events.size() >= n) break; }
+        {
+            std::lock_guard l(g_mu);
+            if (g_events.size() >= n) break;
+        }
         Sleep(1);
     }
     Sleep(20);  // catch extras
@@ -74,7 +90,11 @@ static std::vector<Ev> wait_events(size_t n, int ms = 1000) {
     return out;
 }
 
-static void clear_events() { Sleep(30); std::lock_guard l(g_mu); g_events.clear(); }
+static void clear_events() {
+    Sleep(30);
+    std::lock_guard l(g_mu);
+    g_events.clear();
+}
 
 static bool wait_cursor(int x, int y, POINT& got) {
     for (int i = 0; i < 200; ++i) {
@@ -110,7 +130,12 @@ int main() {
         if (hk) UnhookWindowsHookEx(hk);
     });
     while (!hook_tid) Sleep(1);
-    if (!hooks_ok) { std::printf("FATAL: hooks not installed\n"); PostThreadMessageW(hook_tid, WM_QUIT, 0, 0); hook_thread.join(); return 2; }
+    if (!hooks_ok) {
+        std::printf("FATAL: hooks not installed\n");
+        PostThreadMessageW(hook_tid, WM_QUIT, 0, 0);
+        hook_thread.join();
+        return 2;
+    }
 
     POINT orig{};
     GetCursorPos(&orig);
@@ -118,7 +143,8 @@ int main() {
     // --- get_cursor_pos
     {
         Point p;
-        CHECK(get_cursor_pos(p) && p.x == orig.x && p.y == orig.y, "get_cursor_pos %d,%d vs %ld,%ld", p.x, p.y, orig.x, orig.y);
+        CHECK(get_cursor_pos(p) && p.x == orig.x && p.y == orig.y, "get_cursor_pos %d,%d vs %ld,%ld", p.x, p.y, orig.x,
+              orig.y);
     }
 
     // --- relative move
@@ -136,9 +162,9 @@ int main() {
     {
         std::vector<RECT> mons;
         EnumDisplayMonitors(nullptr, nullptr, collect_monitor, reinterpret_cast<LPARAM>(&mons));
-        std::printf("monitors: %zu, virtual desktop %d,%d %dx%d\n", mons.size(),
-                    GetSystemMetrics(SM_XVIRTUALSCREEN), GetSystemMetrics(SM_YVIRTUALSCREEN),
-                    GetSystemMetrics(SM_CXVIRTUALSCREEN), GetSystemMetrics(SM_CYVIRTUALSCREEN));
+        std::printf("monitors: %zu, virtual desktop %d,%d %dx%d\n", mons.size(), GetSystemMetrics(SM_XVIRTUALSCREEN),
+                    GetSystemMetrics(SM_YVIRTUALSCREEN), GetSystemMetrics(SM_CXVIRTUALSCREEN),
+                    GetSystemMetrics(SM_CYVIRTUALSCREEN));
         int abs_fail = 0, abs_total = 0;
         for (const RECT& r : mons) {
             std::printf("  monitor %ld,%ld - %ld,%ld\n", r.left, r.top, r.right, r.bottom);
@@ -152,8 +178,10 @@ int main() {
             };
             for (int x = r.left; x < r.right; ++x) probe(x, cy);
             for (int y = r.top; y < r.bottom; ++y) probe(cx, y);
-            probe(r.left, r.top); probe(r.right - 1, r.top);
-            probe(r.left, r.bottom - 1); probe(r.right - 1, r.bottom - 1);
+            probe(r.left, r.top);
+            probe(r.right - 1, r.top);
+            probe(r.left, r.bottom - 1);
+            probe(r.right - 1, r.bottom - 1);
         }
         CHECK(abs_fail == 0, "abs moves: %d/%d wrong", abs_fail, abs_total);
         std::printf("abs moves checked: %d\n", abs_total);
@@ -168,7 +196,11 @@ int main() {
 
     // --- buttons (suppressed)
     {
-        struct { MouseButton b; WPARAM down, up; WORD xb; } cases[] = {
+        struct {
+            MouseButton b;
+            WPARAM down, up;
+            WORD xb;
+        } cases[] = {
             {MouseButton::Left, WM_LBUTTONDOWN, WM_LBUTTONUP, 0},
             {MouseButton::Right, WM_RBUTTONDOWN, WM_RBUTTONUP, 0},
             {MouseButton::Middle, WM_MBUTTONDOWN, WM_MBUTTONUP, 0},
@@ -178,9 +210,8 @@ int main() {
         for (auto& c : cases) {
             CHECK(send_mouse_button(c.b, true) && send_mouse_button(c.b, false), "send_mouse_button false");
             auto ev = wait_events(2);
-            bool ok = ev.size() == 2 && ev[0].msg == c.down && ev[1].msg == c.up &&
-                      HIWORD(ev[0].a) == c.xb && HIWORD(ev[1].a) == c.xb &&
-                      (ev[0].b & LLMHF_INJECTED) && ev[0].extra == kInjectedMarker;
+            bool ok = ev.size() == 2 && ev[0].msg == c.down && ev[1].msg == c.up && HIWORD(ev[0].a) == c.xb &&
+                      HIWORD(ev[1].a) == c.xb && (ev[0].b & LLMHF_INJECTED) && ev[0].extra == kInjectedMarker;
             CHECK(ok, "button %d: events=%zu", int(c.b), ev.size());
         }
         CHECK(!send_mouse_button(static_cast<MouseButton>(42), true), "invalid button should fail");
@@ -188,13 +219,12 @@ int main() {
 
     // --- wheel (suppressed)
     {
-        CHECK(send_wheel(120, false) && send_wheel(-240, false) && send_wheel(120, true) && send_wheel(-120, true), "send_wheel false");
+        CHECK(send_wheel(120, false) && send_wheel(-240, false) && send_wheel(120, true) && send_wheel(-120, true),
+              "send_wheel false");
         auto ev = wait_events(4);
-        bool ok = ev.size() == 4 &&
-                  ev[0].msg == WM_MOUSEWHEEL && short(HIWORD(ev[0].a)) == 120 &&
-                  ev[1].msg == WM_MOUSEWHEEL && short(HIWORD(ev[1].a)) == -240 &&
-                  ev[2].msg == WM_MOUSEHWHEEL && short(HIWORD(ev[2].a)) == 120 &&
-                  ev[3].msg == WM_MOUSEHWHEEL && short(HIWORD(ev[3].a)) == -120;
+        bool ok = ev.size() == 4 && ev[0].msg == WM_MOUSEWHEEL && short(HIWORD(ev[0].a)) == 120 &&
+                  ev[1].msg == WM_MOUSEWHEEL && short(HIWORD(ev[1].a)) == -240 && ev[2].msg == WM_MOUSEHWHEEL &&
+                  short(HIWORD(ev[2].a)) == 120 && ev[3].msg == WM_MOUSEHWHEEL && short(HIWORD(ev[3].a)) == -120;
         CHECK(ok, "wheel events=%zu", ev.size());
         CHECK(send_wheel(0, false), "zero wheel no-op");
         CHECK(wait_events(1, 100).empty(), "zero wheel injected something");
@@ -202,17 +232,19 @@ int main() {
 
     // --- keys (suppressed)
     {
-        auto key_case = [](const char* name, WORD vk, WORD scan, bool ext,
-                           DWORD want_vk, DWORD want_scan, bool want_ext) {
+        auto key_case = [](const char* name, WORD vk, WORD scan, bool ext, DWORD want_vk, DWORD want_scan,
+                           bool want_ext) {
             CHECK(send_key(vk, scan, true, ext) && send_key(vk, scan, false, ext), "%s: send_key false", name);
             auto ev = wait_events(2);
-            if (ev.size() != 2) { CHECK(false, "%s: events=%zu", name, ev.size()); return; }
+            if (ev.size() != 2) {
+                CHECK(false, "%s: events=%zu", name, ev.size());
+                return;
+            }
             for (int i = 0; i < 2; ++i) {
                 const bool up = i == 1;
                 CHECK(ev[i].keyboard && ev[i].a == want_vk && ev[i].b == want_scan &&
-                      bool(ev[i].flags & LLKHF_EXTENDED) == want_ext &&
-                      bool(ev[i].flags & LLKHF_UP) == up &&
-                      (ev[i].flags & LLKHF_INJECTED) && ev[i].extra == kInjectedMarker,
+                          bool(ev[i].flags & LLKHF_EXTENDED) == want_ext && bool(ev[i].flags & LLKHF_UP) == up &&
+                          (ev[i].flags & LLKHF_INJECTED) && ev[i].extra == kInjectedMarker,
                       "%s %s: vk=%lx scan=%lx flags=%lx", name, up ? "up" : "down", ev[i].a, ev[i].b, ev[i].flags);
             }
         };

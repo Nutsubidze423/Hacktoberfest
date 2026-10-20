@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Checks host_a/input_capture: edge switching, swallowing + forwarding while B
 // has control, held keys/buttons, losing the client, and Ctrl+Alt+Shift+Q.
 //
@@ -66,7 +68,10 @@ std::vector<Seen> g_seen;
 LRESULT CALLBACK observe_mouse(int code, WPARAM wp, LPARAM lp) {
     const auto& m = *reinterpret_cast<const MSLLHOOKSTRUCT*>(lp);
     if (code == HC_ACTION && m.dwExtraInfo == 0 && (m.flags & LLMHF_INJECTED) && wp != WM_MOUSEMOVE) {
-        { std::lock_guard l(g_mu); g_seen.push_back({false, wp, 0}); }
+        {
+            std::lock_guard l(g_mu);
+            g_seen.push_back({false, wp, 0});
+        }
         return 1;
     }
     return CallNextHookEx(nullptr, code, wp, lp);
@@ -75,7 +80,10 @@ LRESULT CALLBACK observe_mouse(int code, WPARAM wp, LPARAM lp) {
 LRESULT CALLBACK observe_key(int code, WPARAM wp, LPARAM lp) {
     const auto& k = *reinterpret_cast<const KBDLLHOOKSTRUCT*>(lp);
     if (code == HC_ACTION && k.dwExtraInfo == 0 && (k.flags & LLKHF_INJECTED)) {
-        { std::lock_guard l(g_mu); g_seen.push_back({true, wp, k.vkCode}); }
+        {
+            std::lock_guard l(g_mu);
+            g_seen.push_back({true, wp, k.vkCode});
+        }
         return 1;
     }
     return CallNextHookEx(nullptr, code, wp, lp);
@@ -158,7 +166,11 @@ bool cursor_at(display::Point p) {
 
 int main() {
     // Watchdog: whatever happens, the hooks die with the process.
-    std::thread([] { Sleep(40000); std::printf("\nwatchdog: test hung, exiting\n"); TerminateProcess(GetCurrentProcess(), 3); }).detach();
+    std::thread([] {
+        Sleep(40000);
+        std::printf("\nwatchdog: test hung, exiting\n");
+        TerminateProcess(GetCurrentProcess(), 3);
+    }).detach();
 
     check(display::enable_dpi_awareness(), "dpi awareness");
     POINT orig{};
@@ -191,19 +203,24 @@ int main() {
         check(!second.start(), "a second capture in the same process is refused");
 
         // -- no client: the edge does nothing
-        abs_move(inside); settle();
-        abs_move(edge_at(0.5)); settle();
+        abs_move(inside);
+        settle();
+        abs_move(edge_at(0.5));
+        settle();
         check(!cap.remote() && take_sent().empty(), "no client attached: edge does not switch");
 
         cap.set_client(sink);
 
         // -- our own injected moves are never treated as physical
-        abs_move(inside); settle();
-        kvm::input::move_cursor_abs(edge_at(0.5).x, edge_at(0.5).y); settle();
+        abs_move(inside);
+        settle();
+        kvm::input::move_cursor_abs(edge_at(0.5).x, edge_at(0.5).y);
+        settle();
         check(!cap.remote(), "own injected move to the edge (KVM marker) is ignored");
 
         // -- edge switch
-        abs_move(inside); settle();
+        abs_move(inside);
+        settle();
         abs_move(edge_at(0.25));
         check(wait_until([&] { return cap.remote(); }), "cursor hits the right edge -> control on B");
         settle();
@@ -215,20 +232,28 @@ int main() {
         take_seen();
 
         // -- while on B: everything swallowed and forwarded
-        rel_move(7, -3); rel_move(5, 1); settle();
-        mouse(MOUSEEVENTF_LEFTDOWN); mouse(MOUSEEVENTF_LEFTUP);
-        mouse(MOUSEEVENTF_XDOWN, XBUTTON2); mouse(MOUSEEVENTF_XUP, XBUTTON2);
-        mouse(MOUSEEVENTF_WHEEL, 120); mouse(MOUSEEVENTF_HWHEEL, static_cast<DWORD>(-240));
-        key(VK_F13, true); key(VK_F13, false);
+        rel_move(7, -3);
+        rel_move(5, 1);
+        settle();
+        mouse(MOUSEEVENTF_LEFTDOWN);
+        mouse(MOUSEEVENTF_LEFTUP);
+        mouse(MOUSEEVENTF_XDOWN, XBUTTON2);
+        mouse(MOUSEEVENTF_XUP, XBUTTON2);
+        mouse(MOUSEEVENTF_WHEEL, 120);
+        mouse(MOUSEEVENTF_HWHEEL, static_cast<DWORD>(-240));
+        key(VK_F13, true);
+        key(VK_F13, false);
         settle();
         {
             const auto sent = take_sent();
             int dx = 0, dy = 0;
             for (const auto& m : only<proto::MouseMove>(sent)) dx += m.dx, dy += m.dy;
-            check(dx == 12 && dy == -2, "raw input motion forwarded (dx " + std::to_string(dx) + ", dy " + std::to_string(dy) + ")");
+            check(dx == 12 && dy == -2,
+                  "raw input motion forwarded (dx " + std::to_string(dx) + ", dy " + std::to_string(dy) + ")");
             const auto buttons = only<proto::MouseButtonEvent>(sent);
             check(buttons.size() == 4 && buttons[0].button == proto::MouseButton::Left && buttons[0].down &&
-                      !buttons[1].down && buttons[2].button == proto::MouseButton::X2 && buttons[2].down && !buttons[3].down,
+                      !buttons[1].down && buttons[2].button == proto::MouseButton::X2 && buttons[2].down &&
+                      !buttons[3].down,
                   "buttons forwarded (left, x2)");
             const auto wheels = only<proto::MouseWheel>(sent);
             check(wheels.size() == 2 && wheels[0].delta == 120 && !wheels[0].horizontal && wheels[1].delta == -240 &&
@@ -249,13 +274,15 @@ int main() {
         check(only<proto::FocusLeave>(take_sent()).empty(), "B's own focus_leave is not echoed back");
 
         // -- local input reaches A again
-        key(VK_F14, true); settle();
+        key(VK_F14, true);
+        settle();
         check(take_seen().size() == 1, "local mode: keys reach A");
 
         // -- F14 is still held when control goes to B: its release belongs to A
         abs_move(edge_at(0.5));
         check(wait_until([&] { return cap.remote(); }), "switch to B while a key is held");
-        key(VK_F14, false); settle();
+        key(VK_F14, false);
+        settle();
         {
             const auto seen = take_seen();
             check(seen.size() == 1 && seen[0].key && seen[0].code == VK_F14 && seen[0].msg == WM_KEYUP,
@@ -271,9 +298,14 @@ int main() {
             std::lock_guard l(g_mu);
             drags.emplace_back(y, at);
         });
-        const auto drag_count = [&] { std::lock_guard l(g_mu); return drags.size(); };
-        mouse(MOUSEEVENTF_LEFTDOWN); settle();
-        abs_move(edge_at(0.5)); settle();
+        const auto drag_count = [&] {
+            std::lock_guard l(g_mu);
+            return drags.size();
+        };
+        mouse(MOUSEEVENTF_LEFTDOWN);
+        settle();
+        abs_move(edge_at(0.5));
+        settle();
         check(!cap.remote(), "left button held: edge does not switch");
         {
             std::lock_guard l(g_mu);
@@ -281,14 +313,19 @@ int main() {
                       drags[0].second.x == edge_at(0.5).x && drags[0].second.y == edge_at(0.5).y,
                   "drag reaching the edge is reported once, with the edge pixel (file drop, D1)");
         }
-        abs_move(edge_at(0.55)); settle();
+        abs_move(edge_at(0.55));
+        settle();
         check(drag_count() == 1, "...not again while it stays on the edge");
-        abs_move(inside); settle();
-        abs_move(edge_at(0.6)); settle();
+        abs_move(inside);
+        settle();
+        abs_move(edge_at(0.6));
+        settle();
         check(drag_count() == 2, "...again after leaving the edge and coming back");
-        mouse(MOUSEEVENTF_LEFTUP); settle();
+        mouse(MOUSEEVENTF_LEFTUP);
+        settle();
         cap.set_on_drag_at_edge(nullptr);
-        abs_move(inside); settle();
+        abs_move(inside);
+        settle();
         abs_move(edge_at(0.5));
         check(wait_until([&] { return cap.remote(); }), "button released: edge switches");
         take_sent();
@@ -301,8 +338,10 @@ int main() {
         g_sink_ok = true;
         key(VK_F13, false);
         settle();
-        abs_move(inside); settle();
-        abs_move(edge_at(0.5)); settle();
+        abs_move(inside);
+        settle();
+        abs_move(edge_at(0.5));
+        settle();
         check(!cap.remote(), "after a failed send the edge stays on A until a new client is attached");
         cap.set_client(sink);
         take_sent();
@@ -326,8 +365,10 @@ int main() {
         wait_until([&] { return cap.remote(); });
         cap.set_client(nullptr);
         check(wait_until([&] { return !cap.remote(); }), "client detached while on B -> control on A");
-        abs_move(inside); settle();
-        abs_move(edge_at(0.5)); settle();
+        abs_move(inside);
+        settle();
+        abs_move(edge_at(0.5));
+        settle();
         check(!cap.remote(), "no client: no switching");
         cap.set_client(sink);
         take_sent();
@@ -336,17 +377,27 @@ int main() {
         cap.switch_to_remote(0.5);
         wait_until([&] { return cap.remote(); });
         take_seen();
-        key(VK_LCONTROL, true); key(VK_LMENU, true); key(VK_LSHIFT, true); key('Q', true);
+        key(VK_LCONTROL, true);
+        key(VK_LMENU, true);
+        key(VK_LSHIFT, true);
+        key('Q', true);
         check(wait_until([&] { return cap.disabled(); }), "Ctrl+Alt+Shift+Q -> disabled");
         check(!cap.remote(), "...control on A");
         settle();
         check(only<proto::FocusLeave>(take_sent()).size() == 1, "...B told to let go (focus_leave)");
         check(take_seen().empty(), "...the Q never reached A");
-        key('Q', false); key(VK_LSHIFT, false); key(VK_LMENU, false); key(VK_LCONTROL, false);
-        key(VK_F15, true); key(VK_F15, false); settle();
+        key('Q', false);
+        key(VK_LSHIFT, false);
+        key(VK_LMENU, false);
+        key(VK_LCONTROL, false);
+        key(VK_F15, true);
+        key(VK_F15, false);
+        settle();
         check(take_seen().size() == 6, "...hooks removed: every key now reaches A");
-        abs_move(inside); settle();
-        abs_move(edge_at(0.5)); settle();
+        abs_move(inside);
+        settle();
+        abs_move(edge_at(0.5));
+        settle();
         check(!cap.remote() && take_sent().empty(), "...and the edge no longer switches");
 
         cap.stop();
@@ -359,8 +410,10 @@ int main() {
         InputCapture cap({.client_side = display::Side::Right, .edge_switching = false, .accept_injected = true});
         check(cap.start(), "restart with edge_switching = false");
         cap.set_client(sink);
-        abs_move(inside); settle();
-        abs_move(edge_at(0.5)); settle();
+        abs_move(inside);
+        settle();
+        abs_move(edge_at(0.5));
+        settle();
         check(!cap.remote(), "edge ignored when edge_switching = false");
         cap.switch_to_remote(0.5);
         check(wait_until([&] { return cap.remote(); }), "switch_to_remote() still works");
@@ -377,7 +430,9 @@ int main() {
         cap.switch_to_remote(0.5);
         check(wait_until([&] { return cap.remote(); }), "on B");
         take_sent();
-        rel_move(9, 4); rel_move(3, -1); settle();
+        rel_move(9, 4);
+        rel_move(3, -1);
+        settle();
         int dx = 0, dy = 0;
         for (const auto& m : only<proto::MouseMove>(take_sent())) dx += m.dx, dy += m.dy;
         check(dx == 12 && dy == 3, "Raw Input with a null device (touchpad) is forwarded (dx " + std::to_string(dx) +
@@ -398,15 +453,18 @@ int main() {
         InputCapture cap({.client_side = display::Side::Right, .switch_cooldown_ms = 250, .accept_injected = true});
         check(cap.start(), "start with switch_cooldown_ms = 250");
         cap.set_client(sink);
-        abs_move(inside); settle();
+        abs_move(inside);
+        settle();
         abs_move(edge_at(0.5));
         check(wait_until([&] { return cap.remote(); }), "edge -> B");
         cap.on_focus_leave({.y_norm = 0.5});
         wait_until([&] { return !cap.remote(); });
-        abs_move(edge_at(0.5)); Sleep(60);
+        abs_move(edge_at(0.5));
+        Sleep(60);
         check(!cap.remote(), "edge within the cooldown: stays on A");
         Sleep(300);
-        abs_move(inside); Sleep(30);
+        abs_move(inside);
+        Sleep(30);
         abs_move(edge_at(0.5));
         check(wait_until([&] { return cap.remote(); }), "edge after the cooldown: -> B");
     }
@@ -416,7 +474,8 @@ int main() {
         InputCapture cap({.client_side = display::Side::Right, .accept_injected = true, .raw_input = false});
         check(cap.start(), "start with raw_input = false");
         cap.set_client(sink);
-        abs_move(inside); settle();
+        abs_move(inside);
+        settle();
         const auto exit_at = edge_at(0.4);
         abs_move(exit_at);
         check(wait_until([&] { return cap.remote(); }), "edge -> B");
@@ -424,7 +483,10 @@ int main() {
         const display::Point park{(r.left + r.right) / 2, (r.top + r.bottom) / 2};
         check(wait_until([&] { return cursor_at(park); }), "cursor parked mid-monitor (the edge move was swallowed)");
         take_sent();
-        rel_move(10, 0); rel_move(10, 0); rel_move(0, -10); settle();
+        rel_move(10, 0);
+        rel_move(10, 0);
+        rel_move(0, -10);
+        settle();
         int dx = 0, dy = 0;
         for (const auto& m : only<proto::MouseMove>(take_sent())) dx += m.dx, dy += m.dy;
         check(dx > 0 && dy < 0, "hook motion forwarded (dx " + std::to_string(dx) + ", dy " + std::to_string(dy) + ")");

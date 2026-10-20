@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // HUD readout overlay of the viewer (docs/DESIGN.md 4.5). Unknown values are drawn as "—".
 #pragma once
 
@@ -6,7 +8,7 @@
 #include <cstdint>
 #include <optional>
 
-#include "ui_draw_tmp.h"
+#include "ui_draw.h"
 
 namespace kvm::viewer {
 

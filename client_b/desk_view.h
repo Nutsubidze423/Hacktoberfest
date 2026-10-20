@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Desk mode, viewer side (Temo): draws the other PC's windows that sit on its virtual display at the
 // same place on this PC's primary monitor, on top of everything, and nothing else. Between and around
 // them this PC's own desktop and windows stay visible and clickable, so the other PC's screen looks

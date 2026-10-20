@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Checks client_b/display_layout.h: side conversions host/client, drop-to-side, the crossing edge,
 // where the other PC is drawn, config.json round trips (other keys kept) and peer.json; then the
 // monitors of this machine.
@@ -56,7 +58,8 @@ void sides() {
         const std::string name(display::to_string(s));
         check(layout::client_side_for(Role::Host, s) == s, "host: other PC on the " + name + " -> client_side " + name);
         check(layout::client_side_for(Role::Client, s) == display::opposite(s),
-              "client: other PC on the " + name + " -> client_side " + std::string(display::to_string(display::opposite(s))));
+              "client: other PC on the " + name + " -> client_side " +
+                  std::string(display::to_string(display::opposite(s))));
         for (Role r : {Role::Host, Role::Client}) {
             check(layout::peer_side_from(r, layout::client_side_for(r, s)) == s, "round trip " + name);
         }
@@ -67,7 +70,8 @@ void sides() {
     const Rect wide{0, 0, 3840, 1080};
     check(layout::nearest_side(wide, {4200, 500}, true) == Side::Right, "drop right of a wide desktop -> right");
     check(layout::nearest_side(wide, {-300, 900}, true) == Side::Left, "drop left -> left");
-    check(layout::nearest_side(wide, {1900, -400}, true) == Side::Top, "drop above the middle of a wide desktop -> top");
+    check(layout::nearest_side(wide, {1900, -400}, true) == Side::Top,
+          "drop above the middle of a wide desktop -> top");
     check(layout::nearest_side(wide, {1900, 1500}, true) == Side::Bottom, "drop below -> bottom");
     check(layout::nearest_side(wide, {2000, -400}, false) == Side::Right, "no vertical: above the right half -> right");
     check(layout::nearest_side(wide, {1000, -400}, false) == Side::Left, "no vertical: above the left half -> left");
@@ -118,8 +122,9 @@ void config_files() {
     std::filesystem::create_directories(dir);
     const auto cfg = dir / L"config.json";
 
-    write_file(cfg, "{\n  \"host_ip\": \"192.168.1.10\",\n  \"client_side\": \"right\",\n  \"zz_unknown\": [1, 2],\n"
-                    "  \"jpeg_quality\": 80\n}\n");
+    write_file(cfg,
+               "{\n  \"host_ip\": \"192.168.1.10\",\n  \"client_side\": \"right\",\n  \"zz_unknown\": [1, 2],\n"
+               "  \"jpeg_quality\": 80\n}\n");
     auto st = layout::read_config(cfg);
     check(st.exists && st.error.empty() && st.client_side == "right" && st.host_ip == "192.168.1.10", "read_config");
     check(layout::save_client_side(cfg, Side::Left).empty(), "save left");
@@ -166,7 +171,9 @@ void roles() {
     check(layout::guess_role("some-other-pc") == Role::Client, "another PC's name -> client");
     check(layout::guess_role(layout::computer_name()) == Role::Host, "this PC's own name -> host");
     const auto running = layout::running_role();
-    std::printf("running here: %s\n", !running ? "no Sarke app (or both)" : *running == Role::Host ? "kvm_host" : "kvm_client");
+    std::printf("running here: %s\n", !running                 ? "no Sarke app (or both)"
+                                      : *running == Role::Host ? "kvm_host"
+                                                               : "kvm_client");
 }
 
 void this_machine() {

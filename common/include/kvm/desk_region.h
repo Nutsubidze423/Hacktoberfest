@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Desk mode (owner: Temo): the other PC's screen is one more monitor of this PC. A Virtual Display
 // Driver (VDD) monitor of the peer's size sits on the peer's side; windows dragged onto it keep
 // running here and are drawn on the peer's screen at the same place (desk_share / desk_view).

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The Virtual Display Driver (VDD) monitor on A: the "parking spot" for the window sent to B.
 // It is attached to the desktop only while a window is on B, next to A's monitors on the side where
 // B stands. Coordinates are physical pixels: call kvm::display::enable_dpi_awareness() first.

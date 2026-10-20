@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // One window "teleported" to the other computer: it leaves this screen for the VDD, the VDD is
 // captured, encoded and streamed; the other side shows it in a viewer and sends input back.
 // Destroying the share brings everything back in the right order: sender, capture, window, VDD.

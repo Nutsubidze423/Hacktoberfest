@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // capture_test: the A side of "send a window to B", without the network:
 //   pick a window -> VDD on (B's size, on the config.json client_side) -> window onto the VDD
 //   -> capture frames of the VDD -> captures/frame_NN.jpg -> window back -> VDD off.
@@ -113,13 +115,20 @@ int wmain(int argc, wchar_t** argv) {
     for (int i = 1; i < argc; ++i) {
         const std::wstring_view arg = argv[i];
         const bool has_value = i + 1 < argc;
-        if (arg == L"--title" && has_value) title = argv[++i];
-        else if (arg == L"--frames" && has_value) frames_wanted = static_cast<size_t>(std::wcstol(argv[++i], nullptr, 10));
-        else if (arg == L"--seconds" && has_value) seconds = static_cast<int>(std::wcstol(argv[++i], nullptr, 10));
-        else if (arg == L"--size" && has_value) swscanf_s(argv[++i], L"%dx%d", &width, &height);
-        else if (arg == L"--wiggle") wiggle = true;
-        else if (arg == L"--menu") menu = true;
-        else if (arg == L"--bmp") bmp = true;
+        if (arg == L"--title" && has_value)
+            title = argv[++i];
+        else if (arg == L"--frames" && has_value)
+            frames_wanted = static_cast<size_t>(std::wcstol(argv[++i], nullptr, 10));
+        else if (arg == L"--seconds" && has_value)
+            seconds = static_cast<int>(std::wcstol(argv[++i], nullptr, 10));
+        else if (arg == L"--size" && has_value)
+            swscanf_s(argv[++i], L"%dx%d", &width, &height);
+        else if (arg == L"--wiggle")
+            wiggle = true;
+        else if (arg == L"--menu")
+            menu = true;
+        else if (arg == L"--bmp")
+            bmp = true;
     }
     const auto side = kvm::display::parse_side(config.client_side).value_or(kvm::display::Side::Right);
 
@@ -214,9 +223,9 @@ int wmain(int argc, wchar_t** argv) {
 
     const int vdd_w = where->rect.right - where->rect.left, vdd_h = where->rect.bottom - where->rect.top;
     check(!frames.empty(), std::format("{} of {} frames in {} s", frames.size(), frames_wanted, seconds));
-    check(std::all_of(frames.begin(), frames.end(),
-                      [&](const auto& f) { return f.width == vdd_w && f.height == vdd_h; }),
-          std::format("every frame is {}x{} like the VDD", vdd_w, vdd_h));
+    check(
+        std::all_of(frames.begin(), frames.end(), [&](const auto& f) { return f.width == vdd_w && f.height == vdd_h; }),
+        std::format("every frame is {}x{} like the VDD", vdd_w, vdd_h));
     check(encode_ms.size() == frames.size(), std::format("{} JPEG(s) written to captures/", encode_ms.size()));
     if (!frames.empty()) {
         check(mean_brightness(frames.back()) > 5.0, "last frame is not black");

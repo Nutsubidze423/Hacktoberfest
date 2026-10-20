@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Moves one window of A onto the VDD monitor, maximized so it fills exactly what B shows, and back.
 //
 //   kvm::WindowMover mover;

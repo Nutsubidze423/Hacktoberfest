@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // vdd_test: checks host_a/virtual_display on this machine, step by step:
 //   list displays -> attach the VDD (1920x1080 @ 60 Hz, right) -> place on the opposite side and back
 //   -> detach -> attach again -> detach.
@@ -65,18 +67,20 @@ bool is_on_side(const kvm::VirtualDisplay& vdd, Side side) {
     int edge = 0;
     for (const auto& m : kvm::display::monitors()) {
         if (m.name == me) continue;
-        const int e = side == Side::Right ? m.rect.right : side == Side::Left ? m.rect.left
-                    : side == Side::Bottom ? m.rect.bottom : m.rect.top;
+        const int e = side == Side::Right    ? m.rect.right
+                      : side == Side::Left   ? m.rect.left
+                      : side == Side::Bottom ? m.rect.bottom
+                                             : m.rect.top;
         const bool further = side == Side::Right || side == Side::Bottom ? e > edge : e < edge;
         if (!any || further) edge = e;
         any = true;
     }
     if (!any) return true;
     switch (side) {
-        case Side::Right: return r->rect.left == edge;
-        case Side::Left: return r->rect.right == edge;
-        case Side::Bottom: return r->rect.top == edge;
-        default: return r->rect.bottom == edge;
+    case Side::Right: return r->rect.left == edge;
+    case Side::Left: return r->rect.right == edge;
+    case Side::Bottom: return r->rect.top == edge;
+    default: return r->rect.bottom == edge;
     }
 }
 
@@ -106,7 +110,9 @@ int main(int argc, char** argv) {
     print_displays("before");
     auto vdd = kvm::VirtualDisplay::find();
     if (!vdd) {
-        kvm::log::error("Virtual Display Driver not found. Install it first, see ARTEFACT/B როგორც მესამე მონიტორი.md");
+        kvm::log::error(
+            "Virtual Display Driver not found. Install Sarke (it sets the driver up), or run "
+            "tools\\fetch_vdd.ps1, then as administrator: sarke_driver.exe install installer\\vdd");
         return 1;
     }
     kvm::log::info("VDD output: {} (attached: {})", utf8(vdd->device()), vdd->attached());
@@ -141,8 +147,10 @@ int main(int argc, char** argv) {
 
     // What happens on connection when Windows had put the VDD back at the driver's small default.
     check(vdd->set_mode(800, 600, 60), "VDD at 800x600 (like Windows' default)");
-    check(vdd->match_peer(1920, 1200, side) && has_size(*vdd, 1920, 1080) && is_on_side(*vdd, side),
-          "match_peer(1920x1200): closest mode 1920x1080, on the side");
+    // Modes come from installer/vdd/vdd_settings.xml: 1920x1200 is one, 1920x1150 is not.
+    check(vdd->match_peer(1920, 1150, side) && has_size(*vdd, 1920, 1080) && is_on_side(*vdd, side),
+          "match_peer(1920x1150): closest mode 1920x1080, on the side");
+    check(vdd->match_peer(1920, 1200, side) && has_size(*vdd, 1920, 1200), "match_peer(1920x1200): exact");
     check(vdd->match_peer(1920, 1080, side) && has_size(*vdd, 1920, 1080), "match_peer(1920x1080): exact");
     const SIZE best = vdd->best_mode(2560, 1600);
     check(best.cx == 2560 && best.cy == 1440, std::format("best_mode(2560x1600) = {}x{}", best.cx, best.cy));

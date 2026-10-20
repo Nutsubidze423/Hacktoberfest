@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Checks kvm/dpi.h: outer-edge geometry on synthetic monitor layouts, then DPI
 // awareness and the monitor list on this machine.
 // Usage: dpi_test.exe   (exit code 0 = all passed)
@@ -72,11 +74,14 @@ void synthetic_layouts() {
 
     const std::vector<Monitor> single{mon(0, 0, 1920, 1080, true)};
     check(near(display::outer_edge_position(single, {1919, 0}, Side::Right), 0.5 / 1080), "single: top of right edge");
-    check(near(display::outer_edge_position(single, {1919, 1079}, Side::Right), 1079.5 / 1080), "single: bottom of right edge");
-    check(!display::outer_edge_position(single, {1918, 500}, Side::Right), "single: one pixel in from the edge -> nullopt");
+    check(near(display::outer_edge_position(single, {1919, 1079}, Side::Right), 1079.5 / 1080),
+          "single: bottom of right edge");
+    check(!display::outer_edge_position(single, {1918, 500}, Side::Right),
+          "single: one pixel in from the edge -> nullopt");
     check(!display::outer_edge_position(single, {1920, 500}, Side::Right), "single: off screen -> nullopt");
     check(!display::outer_edge_position(single, {0, 500}, Side::Right), "single: left edge is not the right edge");
-    check(same(display::point_on_outer_edge(single, Side::Right, 0.5), {1919, 540}), "single: right edge at 0.5 -> (1919, 540)");
+    check(same(display::point_on_outer_edge(single, Side::Right, 0.5), {1919, 540}),
+          "single: right edge at 0.5 -> (1919, 540)");
     check(same(display::point_on_outer_edge(single, Side::Left, 0.0), {0, 0}), "single: left edge at 0 -> (0, 0)");
     check(same(display::point_on_outer_edge(single, Side::Right, 1.0), {1919, 1079}), "single: t = 1 -> last pixel");
     check(same(display::point_on_outer_edge(single, Side::Right, -5.0), {1919, 0}), "single: t < 0 clamps");
@@ -89,8 +94,10 @@ void synthetic_layouts() {
     // 1080p + taller 1440p to its right, tops aligned.
     const std::vector<Monitor> side_by_side{mon(0, 0, 1920, 1080, true), mon(1920, 0, 2560, 1440)};
     check(!display::outer_edge_position(side_by_side, {1919, 500}, Side::Right), "side-by-side: inner edge -> nullopt");
-    check(near(display::outer_edge_position(side_by_side, {4479, 0}, Side::Right), 0.5 / 1440), "side-by-side: right edge is the 1440p's");
-    check(!display::outer_edge_position(side_by_side, {1920, 1079}, Side::Left), "side-by-side: covered part of 1440p left edge");
+    check(near(display::outer_edge_position(side_by_side, {4479, 0}, Side::Right), 0.5 / 1440),
+          "side-by-side: right edge is the 1440p's");
+    check(!display::outer_edge_position(side_by_side, {1920, 1079}, Side::Left),
+          "side-by-side: covered part of 1440p left edge");
     check(near(display::outer_edge_position(side_by_side, {1920, 1080}, Side::Left), 1080.5 / 1440),
           "side-by-side: 1440p left edge below the 1080p is outer");
     check(same(display::point_on_outer_edge(side_by_side, Side::Left, 0.99), {1920, 1425}),
@@ -104,15 +111,19 @@ void synthetic_layouts() {
     const std::vector<Monitor> negative{mon(0, 0, 1920, 1080, true), mon(-1280, -200, 1280, 1024)};
     check(near(display::outer_edge_position(negative, {-1, -200}, Side::Right), 0.5 / 1280),
           "negative: secondary right edge above the primary is outer");
-    check(!display::outer_edge_position(negative, {-1, 0}, Side::Right), "negative: secondary right edge beside primary -> nullopt");
-    check(near(display::outer_edge_position(negative, {1919, 0}, Side::Right), 200.5 / 1280), "negative: primary right edge follows");
-    check(near(display::outer_edge_position(negative, {-1280, -200}, Side::Left), 0.5 / 1280), "negative: left edge starts at secondary");
+    check(!display::outer_edge_position(negative, {-1, 0}, Side::Right),
+          "negative: secondary right edge beside primary -> nullopt");
+    check(near(display::outer_edge_position(negative, {1919, 0}, Side::Right), 200.5 / 1280),
+          "negative: primary right edge follows");
+    check(near(display::outer_edge_position(negative, {-1280, -200}, Side::Left), 0.5 / 1280),
+          "negative: left edge starts at secondary");
     round_trip(negative, Side::Right, 200 + 1080, "negative");
     round_trip(negative, Side::Left, 1024 + 256, "negative");
 
     // Two monitors stacked vertically.
     const std::vector<Monitor> stacked{mon(0, -1080, 1920, 1080), mon(0, 0, 1920, 1080, true)};
-    check(near(display::outer_edge_position(stacked, {0, 0}, Side::Left), 1080.5 / 2160), "stacked: left edge runs over both");
+    check(near(display::outer_edge_position(stacked, {0, 0}, Side::Left), 1080.5 / 2160),
+          "stacked: left edge runs over both");
     check(!display::outer_edge_position(stacked, {5, 0}, Side::Top), "stacked: inner top edge -> nullopt");
     round_trip(stacked, Side::Left, 2160, "stacked");
     round_trip(stacked, Side::Right, 2160, "stacked");
@@ -127,8 +138,10 @@ void synthetic_layouts() {
     const std::vector<Monitor> none;
     check(!display::outer_edge_position(none, {0, 0}, Side::Right), "no monitors -> nullopt");
     check(same(display::point_on_outer_edge(none, Side::Right, 0.5), {0, 0}), "no monitors -> (0, 0)");
-    check(display::virtual_desktop(side_by_side) == display::Rect{0, 0, 4480, 1440}, "virtual_desktop(mons) bounding box");
-    check(display::virtual_desktop(negative) == display::Rect{-1280, -200, 1920, 1080}, "virtual_desktop(mons) negative");
+    check(display::virtual_desktop(side_by_side) == display::Rect{0, 0, 4480, 1440},
+          "virtual_desktop(mons) bounding box");
+    check(display::virtual_desktop(negative) == display::Rect{-1280, -200, 1920, 1080},
+          "virtual_desktop(mons) negative");
 
     check(display::parse_side("right") == Side::Right && display::parse_side("Left") == Side::Left &&
               display::parse_side("TOP") == Side::Top && display::parse_side("bottom") == Side::Bottom,
@@ -169,8 +182,8 @@ void this_machine() {
     for (Side s : {Side::Left, Side::Right}) {
         const auto pt = display::point_on_outer_edge(mons, s, 0.5);
         const auto back = display::outer_edge_position(mons, pt, s);
-        check(back && std::abs(*back - 0.5) < 0.01, std::string("live ") + std::string(display::to_string(s)) +
-                                                       " edge midpoint round-trips");
+        check(back && std::abs(*back - 0.5) < 0.01,
+              std::string("live ") + std::string(display::to_string(s)) + " edge midpoint round-trips");
     }
 }
 

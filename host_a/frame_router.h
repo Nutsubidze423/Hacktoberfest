@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The video channel's only reader in WindowLink (Temo): desk-mode frames (layer "desk") go to the
 // DeskView overlay, window-stream frames to Sandro's viewer window — decoded the same way as his
 // VideoReceiver does (newest frame only, latency from the owner's capture time).

@@ -1,10 +1,9 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Direct2D / DirectWrite helpers for Sarke's surfaces (docs/DESIGN.md section 2).
 //
-// TEMPORARY copy in Sandro's files: the real home is common/include/kvm/ui/draw.h +
-// common/src/ui_draw.cpp (Luka). Replace once that lands.
-//
 // Everything here runs on the UI thread. Render targets use 96 dpi, so 1 D2D unit = 1 pixel and
-// all sizes go through px() from ui_tokens_tmp.h. Colours come from pal() (dark / light theme).
+// all sizes go through px() from ui_tokens.h. Colours come from pal() (dark / light theme).
 #pragma once
 
 #include <d2d1.h>
@@ -16,7 +15,7 @@
 #include <string>
 #include <string_view>
 
-#include "ui_tokens_tmp.h"
+#include "ui_tokens.h"
 
 namespace kvm::ui {
 
@@ -109,7 +108,8 @@ public:
     // Same, right-aligned so the text ends at `right`. Returns the text's left x.
     float text_right(TextStyle style, std::wstring_view s, float right, float top, std::uint32_t rgb);
     // One line centred in `r` (both ways). Returns the text's left x.
-    float text_center(TextStyle style, std::wstring_view s, const D2D1_RECT_F& r, std::uint32_t rgb, float alpha = 1.0f);
+    float text_center(TextStyle style, std::wstring_view s, const D2D1_RECT_F& r, std::uint32_t rgb,
+                      float alpha = 1.0f);
 
     const TextStyles& styles() const { return text_; }
     ID2D1RenderTarget* rt() const { return rt_; }

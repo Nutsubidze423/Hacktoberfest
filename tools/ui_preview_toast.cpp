@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Shows Sarke's notification card (client_b/toast.h) at the top-right of the main screen.
 // Usage: ui_preview_toast.exe [--kind connected|lost|info] [--title <text>] [--text <text>] [--hold <ms>]
 //                             [--motion on|off]   (default: Windows' "Animation effects" setting)
@@ -33,11 +35,17 @@ std::optional<Toast::Kind> parse_kind(std::wstring_view s) {
 Toast::Content sample(Toast::Kind kind) {
     switch (kind) {
     case Toast::Kind::Connected:
-        return {.kind = kind, .tag = L"Link", .title = L"Connected to tabuladze", .text = L"172.20.10.2 · 1920×1200 · 150%"};
+        return {.kind = kind,
+                .tag = L"Link",
+                .title = L"Connected to tabuladze",
+                .text = L"172.20.10.2 · 1920×1200 · 150%"};
     case Toast::Kind::Lost:
         return {.kind = kind, .tag = L"Link", .title = L"Connection lost", .text = L"reconnecting to 172.20.10.3"};
     default:
-        return {.kind = kind, .tag = L"Window", .title = L"Photoshop is on tabuladze", .text = L"Ctrl+Alt+Shift+W brings it back"};
+        return {.kind = kind,
+                .tag = L"Window",
+                .title = L"Photoshop is on tabuladze",
+                .text = L"Ctrl+Alt+Shift+W brings it back"};
     }
 }
 

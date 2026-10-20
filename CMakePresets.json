@@ -29,5 +29,31 @@
   "buildPresets": [
     { "name": "x64-debug", "configurePreset": "x64-debug" },
     { "name": "x64-release", "configurePreset": "x64-release" }
+  ],
+  "testPresets": [
+    {
+      "name": "unit",
+      "displayName": "Unit tests (headless)",
+      "configurePreset": "x64-release",
+      "output": { "outputOnFailure": true },
+      "filter": { "include": { "label": "^unit$" } },
+      "execution": { "noTestsAction": "error" }
+    },
+    {
+      "name": "ci",
+      "displayName": "What CI runs: unit + loopback (the real programs on 127.0.0.1)",
+      "configurePreset": "x64-release",
+      "output": { "outputOnFailure": true },
+      "filter": { "include": { "label": "^(unit|loopback)$" } },
+      "execution": { "noTestsAction": "error" }
+    },
+    {
+      "name": "local",
+      "displayName": "Everything that runs on one PC (unit + loopback + desktop + vdd); hands off the mouse",
+      "configurePreset": "x64-release",
+      "output": { "outputOnFailure": true },
+      "filter": { "include": { "label": "^(unit|loopback|desktop|vdd)$" } },
+      "execution": { "noTestsAction": "error" }
+    }
   ]
 }

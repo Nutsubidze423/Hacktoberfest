@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 #include "desk_share.h"
 
 #include <algorithm>
@@ -102,7 +104,8 @@ void DeskShare::on_windows(const std::vector<DeskTracker::Window>& windows) {
     region_.vdd_rect(vdd, live);
     // The active window is in front over there too: is the owner's foreground one of the VDD windows?
     const HWND foreground = GetForegroundWindow();
-    const bool active = std::any_of(windows.begin(), windows.end(), [&](const auto& w) { return w.hwnd == foreground; });
+    const bool active =
+        std::any_of(windows.begin(), windows.end(), [&](const auto& w) { return w.hwnd == foreground; });
     proto::DeskLayout layout{.desk_w = vdd.width(), .desk_h = vdd.height(), .active = active};
     for (const auto& w : windows) {
         layout.windows.push_back({.id = reinterpret_cast<std::uint64_t>(w.hwnd),
@@ -161,7 +164,8 @@ void DeskShare::sync(const std::vector<DeskTracker::Window>& windows) {
     if (need_screen && !screen_) {
         try {
             const POINT center{vdd_.left + vdd_.width() / 2, vdd_.top + vdd_.height() / 2};
-            screen_ = ScreenCapture::for_monitor(MonitorFromPoint(center, MONITOR_DEFAULTTONULL), /*capture_cursor=*/false);
+            screen_ =
+                ScreenCapture::for_monitor(MonitorFromPoint(center, MONITOR_DEFAULTTONULL), /*capture_cursor=*/false);
             screen_->start([this](CapturedFrame&& f) {
                 {
                     std::lock_guard lock(mutex_);
@@ -182,9 +186,9 @@ void DeskShare::sync(const std::vector<DeskTracker::Window>& windows) {
 void DeskShare::run(std::stop_token stop) {
     JpegEncoder jpeg(options_.jpeg_quality, /*full_chroma=*/true);
     std::vector<std::uint8_t> encoded, alpha;
-    const auto min_interval = options_.max_fps > 0
-                                  ? std::chrono::duration_cast<Clock::duration>(std::chrono::seconds(1)) / options_.max_fps
-                                  : Clock::duration::zero();
+    const auto min_interval =
+        options_.max_fps > 0 ? std::chrono::duration_cast<Clock::duration>(std::chrono::seconds(1)) / options_.max_fps
+                             : Clock::duration::zero();
     std::uint32_t seq = 0;
     auto period_start = Clock::now();
     std::uint64_t period_frames = 0, period_bytes = 0, period_pixels = 0;
@@ -199,8 +203,15 @@ void DeskShare::run(std::stop_token stop) {
         } else {
             alpha.clear();
         }
-        proto::FrameHeader header{.seq = seq++, .t_capture_us = t_capture_us, .width = width, .height = height,
-                                  .layer = "desk", .x = x, .y = y, .desk_w = vdd_.width(), .desk_h = vdd_.height()};
+        proto::FrameHeader header{.seq = seq++,
+                                  .t_capture_us = t_capture_us,
+                                  .width = width,
+                                  .height = height,
+                                  .layer = "desk",
+                                  .x = x,
+                                  .y = y,
+                                  .desk_w = vdd_.width(),
+                                  .desk_h = vdd_.height()};
         header.window = w.id;
         header.alpha_bytes = static_cast<std::uint32_t>(alpha.size());
         encoded.insert(encoded.end(), alpha.begin(), alpha.end());  // payload = JPEG + alpha runs
@@ -221,7 +232,8 @@ void DeskShare::run(std::stop_token stop) {
         proto::DeskLayout layout;
         {
             std::unique_lock lock(mutex_);
-            cv_.wait_for(lock, kPoll, [&] { return stop.stop_requested() || new_windows_ || frames_ready_ || resend_; });
+            cv_.wait_for(lock, kPoll,
+                         [&] { return stop.stop_requested() || new_windows_ || frames_ready_ || resend_; });
             changed = std::exchange(new_windows_, std::nullopt);
             screen = std::exchange(screen_frame_, std::nullopt);
             frames_ready_ = false;

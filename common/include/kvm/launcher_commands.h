@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Commands the Sarke launcher writes to the app's stdin, one per line (owner: Luka):
 //   layout <left|right|top|bottom>   the user moved the other PC in the Displays window
 //   identify                         the user pressed Identify: the other PC shows its numbers too

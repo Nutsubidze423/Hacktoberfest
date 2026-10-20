@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Replays the viewer's input (from the other computer) into the shared window on the VDD.
 // The viewer sends positions normalized to the stream (0..1); they land on the VDD monitor rect,
 // where WindowShare keeps the window maximized. Clicks and keys go to the shared app, which is
@@ -11,7 +13,6 @@
 //   input.release_all();   // share ended / link dropped: no stuck keys or buttons
 //
 // Windows keys are not replayed: Win+L would lock this computer and Win+D would hide its windows.
-// Ownership: proposed for Temo in ARTEFACT/ფანჯარა ორივე მხარეს (თემო → ლუკა, სანდრო).md.
 #pragma once
 
 #ifndef WIN32_LEAN_AND_MEAN

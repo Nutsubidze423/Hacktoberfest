@@ -1,5 +1,7 @@
 # Sarke
 
+[![CI](https://github.com/Nutsubidze423/Hacktoberfest/actions/workflows/ci.yml/badge.svg)](https://github.com/Nutsubidze423/Hacktoberfest/actions/workflows/ci.yml)
+
 One desk, two Windows PCs.
 
 Sarke joins two Windows PCs on the same network into one workspace. Move the mouse past the edge
@@ -36,8 +38,9 @@ and that PC stays fully usable with its own apps, mouse and keyboard.
 
 ## Install
 
-1. Download [`SarkeSetup-1.1.0.0.exe`](releases/SarkeSetup-1.1.0.0.exe) from the `releases` folder
-   and run it on both PCs. It installs Sarke, the virtual display driver and the firewall rules for
+1. Download `SarkeSetup-<version>.exe` from the
+   [latest release](https://github.com/Nutsubidze423/Hacktoberfest/releases/latest) (or the
+   [website](https://sarke-nine.vercel.app)) and run it on both PCs. It installs Sarke, the virtual display driver and the firewall rules for
    the local network.
 2. Start Sarke on both PCs. It runs in the system tray and shows the PCs running Sarke on the
    network.
@@ -74,6 +77,11 @@ from source uses the one in the repository. Most of them can be changed from the
 | `max_fps` | `30` | Frame rate limit, `0` for none |
 | `desk` | `true` | Desk mode; `false` uses the window viewer |
 
+If Sarke says it can't listen on a port, the message names the program holding it, or says that
+Windows reserved it: Hyper-V, WSL and Docker reserve TCP port ranges
+(`netsh interface ipv4 show excludedportrange protocol=tcp`). Then set free ports in
+`control_port`, `video_port` and `file_port`, the same on both PCs.
+
 Logs are in `%LOCALAPPDATA%\Sarke\logs\`.
 
 ## Building from source
@@ -92,14 +100,29 @@ build\x64-release\tools\sarke.exe
 The executables are statically linked: copying `sarke.exe`, `kvm_host.exe`, `kvm_client.exe`,
 `config.json` and `assets\fonts` to another PC is enough to run them there.
 
-To build the installer (needs [Inno Setup 6](https://jrsoftware.org/isinfo.php)):
+To build the installer (needs [Inno Setup 6](https://jrsoftware.org/isinfo.php); the script fetches
+the Virtual Display Driver with `tools\fetch_vdd.ps1`, pinned and hash-checked, since its binaries
+aren't kept in git). Releasing it is described in [docs/RELEASING.md](docs/RELEASING.md):
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File tools\make_installer.ps1
 ```
 
-Each `tools\*_test.cpp` builds into its own test executable. To try both sides on one PC, start
-`kvm_host.exe`, then `kvm_client.exe --host 127.0.0.1 --desk-no-vdd`.
+The build treats warnings as errors. C++ is formatted with clang-format 19.1.5 (the version Visual
+Studio 2022 ships) using [.clang-format](.clang-format); CI fails on unformatted code, so run
+`clang-format -i` on the files you changed, or let your editor format on save.
+
+Each `tools\*_test.cpp` builds into its own test executable, registered with ctest under a label
+that says what it needs:
+
+```powershell
+ctest --preset ci      # headless tests + kvm_host and kvm_client talking on 127.0.0.1, also run by CI
+ctest --preset local   # + desktop (hooks, SendInput, clipboard) and vdd (Virtual Display Driver) tests
+```
+
+`local` moves the mouse, attaches the virtual display and opens a Paint window for about three
+minutes, so keep your hands off the mouse and keyboard while it runs. To try both sides on one PC,
+start `kvm_host.exe`, then `kvm_client.exe --host 127.0.0.1 --desk-no-vdd`.
 
 ## How it works
 
@@ -125,8 +148,8 @@ listens.
 - **Files.** A drag that reaches the other screen is caught, the files are sent, and the drag goes
   on from the cursor over there until the button is released.
 
-Every message type is listed in [CLAUDE.md](CLAUDE.md) and every feature in
-[docs/BLUEPRINT.md](docs/BLUEPRINT.md).
+Every message type is listed in [docs/PROTOCOL.md](docs/PROTOCOL.md). The hackathon's catalogue of
+features is kept in [docs/archive/hackathon/BLUEPRINT.md](docs/archive/hackathon/BLUEPRINT.md).
 
 ## Project layout
 
@@ -135,8 +158,8 @@ common/      shared library: protocol, networking, input capture and replay, cli
 host_a/      kvm_host.exe: window capture, virtual display, desk mode on the sending side
 client_b/    kvm_client.exe and the tray app: viewer, desk overlay, launcher, UI
 tools/       sarke.exe entry point, tests, previews and scripts
-installer/   Inno Setup script and the bundled virtual display driver
-docs/        design, blueprint and plan
+installer/   Inno Setup script; the virtual display driver is fetched by tools\fetch_vdd.ps1
+docs/        roadmap, protocol, design system, releasing; archive/hackathon is history
 ```
 
 ## Limitations
@@ -150,13 +173,20 @@ docs/        design, blueprint and plan
 - Builds are not code-signed, so Microsoft Defender may flag the input hooks. The installer can add
   an exclusion.
 
+## License
+
+Sarke is open source under the [Apache License 2.0](LICENSE). The third-party components it
+includes keep their own licenses; their full texts are in
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
 ## Credits
 
-Built by Luka, Demetre, Temo and Sandro.
+Built by Luka, Demetre, Temo and Sandro (see [AUTHORS](AUTHORS)).
 
 Sarke includes or uses:
 
 - [Virtual Display Driver](https://github.com/VirtualDrivers/Virtual-Display-Driver) (MIT)
-- [libjpeg-turbo](https://libjpeg-turbo.org) (BSD-style licenses)
+- [libjpeg-turbo](https://libjpeg-turbo.org) (BSD-3-Clause, IJG, zlib), with
+  [libspng](https://libspng.org) (BSD-2-Clause) and [zlib](https://zlib.net) (Zlib)
 - [nlohmann/json](https://github.com/nlohmann/json) (MIT)
 - Google Sans and Geist Mono fonts (SIL Open Font License 1.1)

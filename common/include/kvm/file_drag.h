@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Continues a file drag on this PC with files that arrived from the other PC (T10, owner: Temo), the
 // way Mouse Without Borders does it: the user grabbed files on the other PC, KVM brought the cursor
 // here mid-drag, and the drag goes on here until the button goes up over any folder or the desktop,
@@ -45,7 +47,8 @@ public:
     // source's thread. False if a drag is already running or `files` is empty.
     // image: the picture to show under the cursor (the one the other PC's shell drew for these files,
     // so the drag looks the same on both screens); without it the shell draws a generic one.
-    bool start(std::vector<std::filesystem::path> files, OnDone on_done = {}, std::optional<DragImage> image = std::nullopt);
+    bool start(std::vector<std::filesystem::path> files, OnDone on_done = {},
+               std::optional<DragImage> image = std::nullopt);
 
     bool dragging() const { return dragging_; }
 

@@ -1,5 +1,7 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Reads window-stream frames from the video channel, decodes the newest one and shows it in the
-// viewer (ARTEFACT "გადაწყვეტილებები 2", S1).
+// viewer.
 //
 // main.cpp owns the channel: one FrameChannel carries frames both ways (A's window to B and B's
 // window to A), and connecting / reconnecting is main.cpp's job. The receiver only reads from it:

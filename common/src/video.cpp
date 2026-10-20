@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 #include "kvm/video.h"
 
 #include <winsock2.h>
@@ -97,8 +99,7 @@ std::optional<Frame> FrameChannel::recv_frame() {
     const auto type = j.is_object() ? j.find("type") : j.end();
     if (j.is_discarded() || type == j.end() || !type->is_string() ||
         type->get_ref<const std::string&>() != proto::FrameHeader::kType) {
-        log::error("video: bad frame header from {}: {}", peer_,
-                   std::string_view(header_json).substr(0, 200));
+        log::error("video: bad frame header from {}: {}", peer_, std::string_view(header_json).substr(0, 200));
         return fail(0);
     }
 

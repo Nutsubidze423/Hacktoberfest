@@ -1,9 +1,10 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Design tokens (docs/DESIGN.md section 2): the same system as the Sarke website
 // (sarke-nine.vercel.app, D:\sarke-web\src\app\globals.css). Apple-like restraint: a neutral
 // black / white / grey base, one blue for actions and links, solid rounded tiles, no borders or
 // glows. Dark and light themes; the app follows Windows' app mode like the site follows the system.
 //
-// TEMPORARY copy in Sandro's files: the real home is common/include/kvm/ui/tokens.h (Luka).
 // Every color/size used by Sarke's surfaces lives here; drawing code must not contain magic numbers.
 #pragma once
 
@@ -47,16 +48,44 @@ struct Palette {
 };
 
 inline constexpr Palette kDark{
-    .bg = 0x050506, .bg_alt = 0x0B0B0D, .tile = 0x1D1D1F, .fill = 0x2C2C2E, .fill_hi = 0x3A3A3C, .seg_on = 0x545458,
-    .ink = 0xF5F5F7, .ink2 = 0xA1A1A6, .ink3 = 0x86868B,
-    .accent = 0x0071E3, .accent_hover = 0x0077ED, .accent_ink = 0x2997FF, .on_accent = 0xFFFFFF,
-    .ok = 0x30D158, .warn = 0xFF9F0A, .err = 0xFF453A, .halo1 = 0x6276A4, .halo2 = 0x485474,
+    .bg = 0x050506,
+    .bg_alt = 0x0B0B0D,
+    .tile = 0x1D1D1F,
+    .fill = 0x2C2C2E,
+    .fill_hi = 0x3A3A3C,
+    .seg_on = 0x545458,
+    .ink = 0xF5F5F7,
+    .ink2 = 0xA1A1A6,
+    .ink3 = 0x86868B,
+    .accent = 0x0071E3,
+    .accent_hover = 0x0077ED,
+    .accent_ink = 0x2997FF,
+    .on_accent = 0xFFFFFF,
+    .ok = 0x30D158,
+    .warn = 0xFF9F0A,
+    .err = 0xFF453A,
+    .halo1 = 0x6276A4,
+    .halo2 = 0x485474,
 };
 inline constexpr Palette kLight{
-    .bg = 0xFBFBFD, .bg_alt = 0xF5F5F7, .tile = 0xF5F5F7, .fill = 0xE8E8ED, .fill_hi = 0xDCDCE1, .seg_on = 0xFFFFFF,
-    .ink = 0x1D1D1F, .ink2 = 0x424245, .ink3 = 0x6E6E73,
-    .accent = 0x0071E3, .accent_hover = 0x0077ED, .accent_ink = 0x0066CC, .on_accent = 0xFFFFFF,
-    .ok = 0x248A3D, .warn = 0xB25000, .err = 0xD70015, .halo1 = 0x7896D2, .halo2 = 0x96A0C8,
+    .bg = 0xFBFBFD,
+    .bg_alt = 0xF5F5F7,
+    .tile = 0xF5F5F7,
+    .fill = 0xE8E8ED,
+    .fill_hi = 0xDCDCE1,
+    .seg_on = 0xFFFFFF,
+    .ink = 0x1D1D1F,
+    .ink2 = 0x424245,
+    .ink3 = 0x6E6E73,
+    .accent = 0x0071E3,
+    .accent_hover = 0x0077ED,
+    .accent_ink = 0x0066CC,
+    .on_accent = 0xFFFFFF,
+    .ok = 0x248A3D,
+    .warn = 0xB25000,
+    .err = 0xD70015,
+    .halo1 = 0x7896D2,
+    .halo2 = 0x96A0C8,
 };
 
 // Windows 11's own caption close button (hover fill, glyph), so ours feels native.
@@ -99,13 +128,13 @@ struct TextStyleSpec {
 
 inline constexpr TextStyleSpec text_style_spec(TextStyle s) {
     switch (s) {
-    case TextStyle::Caption:    return {12, 16, 400, FontRole::Sans, 0};
-    case TextStyle::Body:       return {14, 20, 400, FontRole::Sans, -0.005f};
+    case TextStyle::Caption: return {12, 16, 400, FontRole::Sans, 0};
+    case TextStyle::Body: return {14, 20, 400, FontRole::Sans, -0.005f};
     case TextStyle::BodyStrong: return {14, 20, 500, FontRole::Sans, -0.005f};
-    case TextStyle::Title:      return {17, 22, 600, FontRole::Sans, -0.01f};
-    case TextStyle::Headline:   return {28, 32, 700, FontRole::Sans, -0.02f};
-    case TextStyle::Display:    return {44, 48, 700, FontRole::Sans, -0.03f};
-    case TextStyle::Mono:       return {12, 16, 400, FontRole::Mono, 0};
+    case TextStyle::Title: return {17, 22, 600, FontRole::Sans, -0.01f};
+    case TextStyle::Headline: return {28, 32, 700, FontRole::Sans, -0.02f};
+    case TextStyle::Display: return {44, 48, 700, FontRole::Sans, -0.03f};
+    case TextStyle::Mono: return {12, 16, 400, FontRole::Mono, 0};
     case TextStyle::MonoStrong: return {13, 18, 500, FontRole::Mono, 0};
     }
     return {14, 20, 400, FontRole::Sans, 0};

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 #pragma once
 // Both directions of the KVM on one PC: this PC's mouse and keyboard can go to
 // the other PC (InputCapture), and the other PC's can come here (InputInject).

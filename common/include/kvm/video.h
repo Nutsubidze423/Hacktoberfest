@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Video channel (port 50501): one encoded frame per message.
 // Wire format: [u32 header_len][u32 payload_len][header JSON (proto::FrameHeader)][payload], big-endian.
 //

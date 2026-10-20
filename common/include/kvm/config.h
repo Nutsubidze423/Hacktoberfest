@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Runtime settings from config.json (see repo root).
 #pragma once
 

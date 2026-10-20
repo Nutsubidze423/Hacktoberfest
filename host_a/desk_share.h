@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Desk mode, window owner (Temo): sends the windows on the virtual display (VDD) to the other PC,
 // which draws them at the same place on its screen (client_b/desk_view).
 //

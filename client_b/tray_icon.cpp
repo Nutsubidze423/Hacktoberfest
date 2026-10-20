@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 #include "tray_icon.h"
 
 #include <windowsx.h>
@@ -8,7 +10,7 @@
 #include <type_traits>
 
 #include "kvm/log.h"
-#include "ui_tokens_tmp.h"
+#include "ui_tokens.h"
 
 #pragma comment(lib, "shell32.lib")
 
@@ -116,10 +118,9 @@ void TrayIcon::set_state_word(std::wstring_view word) {
 }
 
 void TrayIcon::notify(std::wstring_view title, std::wstring_view text, Toast::Kind kind) {
-    if (toast_.show({.kind = kind, .tag = L"Link", .title = std::wstring(title), .text = std::wstring(text)},
-                    [this] {
-                        if (actions_.open) actions_.open();
-                    })) {
+    if (toast_.show({.kind = kind, .tag = L"Link", .title = std::wstring(title), .text = std::wstring(text)}, [this] {
+            if (actions_.open) actions_.open();
+        })) {
         return;
     }
     if (!hwnd_) {
@@ -137,12 +138,8 @@ void TrayIcon::notify(std::wstring_view title, std::wstring_view text, Toast::Ki
 
 void TrayIcon::on_link_change(LinkState before, LinkState now, std::wstring_view endpoint, bool reconnects) {
     switch (now) {
-    case LinkState::Waiting:
-        set_state_word(L"WAITING");
-        break;
-    case LinkState::Connecting:
-        set_state_word(L"CONNECTING");
-        break;
+    case LinkState::Waiting: set_state_word(L"WAITING"); break;
+    case LinkState::Connecting: set_state_word(L"CONNECTING"); break;
     case LinkState::Linked:
         set_state_word(L"LINKED");
         if (before != LinkState::Linked) {
@@ -252,11 +249,8 @@ LRESULT TrayIcon::handle_message(UINT msg, WPARAM wp, LPARAM lp) {
                 actions_.open();
             }
             break;
-        case WM_CONTEXTMENU:
-            show_menu(GET_X_LPARAM(wp), GET_Y_LPARAM(wp));
-            break;
-        default:
-            break;
+        case WM_CONTEXTMENU: show_menu(GET_X_LPARAM(wp), GET_Y_LPARAM(wp)); break;
+        default: break;
         }
         return 0;
     }

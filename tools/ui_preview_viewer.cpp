@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // ui_preview_viewer: the viewer window in every state with FAKE data, no network
 // (docs/DESIGN.md section 7). For design review only — none of these values are real.
 //
@@ -38,7 +40,7 @@ using Clock = std::chrono::steady_clock;
 namespace {
 
 enum class Phase { Waiting, Connecting, Linked, Streaming, Stalled, Lost };
-constexpr std::array kCycle = {Phase::Waiting, Phase::Connecting, Phase::Linked,
+constexpr std::array kCycle = {Phase::Waiting,   Phase::Connecting, Phase::Linked,
                                Phase::Streaming, Phase::Stalled,    Phase::Lost};
 
 // Fake values, chosen to exercise the UI (long Georgian title -> font fallback + ellipsis).
@@ -79,10 +81,26 @@ kvm::BgraImage make_pattern() {
             std::uint8_t b = static_cast<std::uint8_t>(60 + 30 * y / img.height);
             if (grid) r = g = b = 90;
             const int c = 160;
-            if (x < c && y < c) { r = 255; g = 0; b = 0; }                                    // top-left red
-            if (x >= img.width - c && y < c) { r = 0; g = 255; b = 0; }                       // top-right green
-            if (x < c && y >= img.height - c) { r = 0; g = 0; b = 255; }                      // bottom-left blue
-            if (x >= img.width - c && y >= img.height - c) { r = 255; g = 255; b = 255; }     // bottom-right white
+            if (x < c && y < c) {
+                r = 255;
+                g = 0;
+                b = 0;
+            }                                    // top-left red
+            if (x >= img.width - c && y < c) {
+                r = 0;
+                g = 255;
+                b = 0;
+            }                       // top-right green
+            if (x < c && y >= img.height - c) {
+                r = 0;
+                g = 0;
+                b = 255;
+            }                      // bottom-left blue
+            if (x >= img.width - c && y >= img.height - c) {
+                r = 255;
+                g = 255;
+                b = 255;
+            }     // bottom-right white
             px[0] = b;
             px[1] = g;
             px[2] = r;
@@ -134,9 +152,7 @@ private:
             viewer_.set_rtt_ms(std::nullopt);
             viewer_.set_link_state(kvm::LinkState::Waiting);
             break;
-        case Phase::Connecting:
-            viewer_.set_link_state(kvm::LinkState::Connecting);
-            break;
+        case Phase::Connecting: viewer_.set_link_state(kvm::LinkState::Connecting); break;
         case Phase::Linked:
             viewer_.set_link_state(kvm::LinkState::Linked);
             viewer_.set_rtt_ms(kFakeRttMs);
@@ -146,7 +162,8 @@ private:
             viewer_.set_link_state(kvm::LinkState::Linked);
             viewer_.set_rtt_ms(kFakeRttMs);
             if (!streaming_) {
-                viewer_.start_stream({.hwnd = kFakeHwnd, .title = kFakeTitle, .width = base_.width, .height = base_.height});
+                viewer_.start_stream(
+                    {.hwnd = kFakeHwnd, .title = kFakeTitle, .width = base_.width, .height = base_.height});
                 streaming_ = true;
             }
             break;
@@ -155,7 +172,8 @@ private:
             viewer_.set_link_state(kvm::LinkState::Linked);
             viewer_.set_rtt_ms(kFakeRttMs);
             if (!streaming_) {
-                viewer_.start_stream({.hwnd = kFakeHwnd, .title = kFakeTitle, .width = base_.width, .height = base_.height});
+                viewer_.start_stream(
+                    {.hwnd = kFakeHwnd, .title = kFakeTitle, .width = base_.width, .height = base_.height});
                 streaming_ = true;
             }
             break;
@@ -177,7 +195,8 @@ private:
             draw_marker(frame, frame_++);
 
             seq_ += seq_ % kFakeDropEvery == 0 ? 2 : 1;
-            const auto capture = kvm::steady_now_us() - std::chrono::duration_cast<std::chrono::microseconds>(kFakeLatency).count();
+            const auto capture =
+                kvm::steady_now_us() - std::chrono::duration_cast<std::chrono::microseconds>(kFakeLatency).count();
             viewer_.count_payload_bytes(kFakePayloadBytes);
             viewer_.present(frame, {.seq = seq_, .t_capture_local_us = capture});
 
@@ -246,8 +265,8 @@ int wmain(int argc, wchar_t** argv) {
     kvm::DisplaySettings displays;
     kvm::TrayIcon tray;
     tray.create(kvm::ui::kAppName, {.open = [&] { viewer.bring_to_front(); },
-                                .displays = [&] { displays.show({.role = kvm::layout::Role::Client}); },
-                                .quit = [&] { PostMessageW(viewer.hwnd(), WM_CLOSE, 0, 0); }});
+                                    .displays = [&] { displays.show({.role = kvm::layout::Role::Client}); },
+                                    .quit = [&] { PostMessageW(viewer.hwnd(), WM_CLOSE, 0, 0); }});
     viewer.set_link_listener(
         [&](kvm::LinkState before, kvm::LinkState now) { tray.on_link_change(before, now, endpoint, true); });
     // No owner here: messages the viewer would send (input, stream_stop) are only logged.

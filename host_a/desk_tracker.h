@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Desk mode, window owner (Temo): which windows are on the virtual display (VDD) right now.
 //
 //   kvm::DeskTracker tracker(region, [&](const auto& windows) { ... });  // region.set_vdd(...) first
@@ -39,7 +41,7 @@ public:
     struct Window {
         HWND hwnd = nullptr;
         display::Rect frame;  // the whole frame (no shadow), screen coordinates
-        display::Rect rect;   // the part of it on the VDD that takes clicks (incl. resize borders), screen coordinates
+        display::Rect rect;  // the part of it on the VDD that takes clicks (incl. resize borders), screen coordinates
         std::string cls;
         std::string title;
     };

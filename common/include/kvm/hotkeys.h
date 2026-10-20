@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Global hotkeys Ctrl+Alt+Shift+<key> for kvm_host / kvm_client (RegisterHotKey on its own thread).
 //
 //   kvm::Hotkeys keys;

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Sarke display arrangement: where the other PC stands next to this one (client_b/display_settings.h).
 // Detects this PC's monitors live, shows the other PC (as last seen), writes config.json client_side.
 //
@@ -45,8 +47,9 @@ bool parse_size(std::wstring_view s, kvm::layout::Peer& peer) {
 }
 
 int usage() {
-    std::fputs("usage: sarke_displays.exe [--config <path>] [--role host|client] [--peer <W>x<H>[@<scale>] <hostname>]\n",
-               stderr);
+    std::fputs(
+        "usage: sarke_displays.exe [--config <path>] [--role host|client] [--peer <W>x<H>[@<scale>] <hostname>]\n",
+        stderr);
     return 2;
 }
 

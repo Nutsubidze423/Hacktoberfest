@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 #include "capture.h"
 
 // Classic COM headers must come before C++/WinRT so winrt::com_ptr / as<> work with them.
@@ -92,9 +94,9 @@ void try_disable_border(const wgc::GraphicsCaptureSession& session) {
             try {
                 const auto status =
                     wgc::GraphicsCaptureAccess::RequestAccessAsync(wgc::GraphicsCaptureAccessKind::Borderless).get();
-                ok = status == winrt::Windows::Security::Authorization::AppCapabilityAccess::AppCapabilityAccessStatus::Allowed;
-            } catch (const winrt::hresult_error&) {
-            }
+                ok = status ==
+                     winrt::Windows::Security::Authorization::AppCapabilityAccess::AppCapabilityAccessStatus::Allowed;
+            } catch (const winrt::hresult_error&) {}
         }).join();
         if (!ok) log::warn("capture: borderless capture not allowed, Windows will draw a border");
         return ok;
@@ -201,8 +203,8 @@ void ScreenCapture::Impl::copy_to_cpu(const winrt::com_ptr<ID3D11Texture2D>& tex
     out.bgra.resize(row_bytes * static_cast<size_t>(out.height));
     const auto* src = static_cast<const std::uint8_t*>(mapped.pData);
     for (int y = 0; y < out.height; ++y) {
-        std::memcpy(out.bgra.data() + row_bytes * static_cast<size_t>(y), src + static_cast<size_t>(mapped.RowPitch) * y,
-                    row_bytes);
+        std::memcpy(out.bgra.data() + row_bytes * static_cast<size_t>(y),
+                    src + static_cast<size_t>(mapped.RowPitch) * y, row_bytes);
     }
     context->Unmap(staging.get(), 0);
 }
@@ -279,15 +281,16 @@ void ScreenCapture::start(FrameCallback on_frame, ClosedCallback on_closed) {
 
         s.pool_size = s.item.Size();
         // Free-threaded: FrameArrived runs on a WGC worker thread, no message loop needed.
-        s.pool = wgc::Direct3D11CaptureFramePool::CreateFreeThreaded(s.device, kPixelFormat, kFramePoolBuffers,
-                                                                     s.pool_size);
+        s.pool =
+            wgc::Direct3D11CaptureFramePool::CreateFreeThreaded(s.device, kPixelFormat, kFramePoolBuffers, s.pool_size);
         s.session = s.pool.CreateCaptureSession(s.item);
         if (ApiInformation::IsPropertyPresent(kSessionClass, L"IsCursorCaptureEnabled")) {
             s.session.IsCursorCaptureEnabled(s.capture_cursor);
         }
         try_disable_border(s.session);
 
-        s.frame_arrived = s.pool.FrameArrived(winrt::auto_revoke, [impl = &s](auto&&, auto&&) { impl->handle_frame(); });
+        s.frame_arrived =
+            s.pool.FrameArrived(winrt::auto_revoke, [impl = &s](auto&&, auto&&) { impl->handle_frame(); });
         s.closed = s.item.Closed(winrt::auto_revoke, [impl = &s](auto&&, auto&&) { impl->handle_closed(); });
         s.session.StartCapture();
         s.started = true;
@@ -310,8 +313,7 @@ void ScreenCapture::stop() {
     try {
         s.session.Close();
         s.pool.Close();
-    } catch (const winrt::hresult_error&) {
-    }
+    } catch (const winrt::hresult_error&) {}
 }
 
 }  // namespace kvm

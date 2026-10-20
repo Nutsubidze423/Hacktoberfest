@@ -1,7 +1,10 @@
+// SPDX-License-Identifier: Apache-2.0
+
 #include "kvm/net.h"
 
 #include <winsock2.h>
 #include <ws2tcpip.h>
+#include <iphlpapi.h>
 
 #include <algorithm>
 #include <array>
@@ -66,7 +69,8 @@ std::string socket_error_text(int code) {
         while (!w.empty() && (w.back() == L'\r' || w.back() == L'\n' || w.back() == L'.')) {
             w.remove_suffix(1);
         }
-        const int len = WideCharToMultiByte(CP_UTF8, 0, w.data(), static_cast<int>(w.size()), nullptr, 0, nullptr, nullptr);
+        const int len =
+            WideCharToMultiByte(CP_UTF8, 0, w.data(), static_cast<int>(w.size()), nullptr, 0, nullptr, nullptr);
         std::string narrow(len, '\0');
         WideCharToMultiByte(CP_UTF8, 0, w.data(), static_cast<int>(w.size()), narrow.data(), len, nullptr, nullptr);
         text += " (" + narrow + ")";
@@ -78,6 +82,63 @@ std::string socket_error_text(int code) {
 std::string last_error_text() {
     return socket_error_text(WSAGetLastError());
 }
+
+namespace {
+
+// The program listening on TCP `port` (IPv4), as "name.exe (pid N)", or empty if none is.
+std::string listener_of(std::uint16_t port) {
+    std::vector<std::uint8_t> buffer(16 * 1024);
+    ULONG size = static_cast<ULONG>(buffer.size());
+    DWORD result = 0;
+    while ((result = GetExtendedTcpTable(buffer.data(), &size, FALSE, AF_INET, TCP_TABLE_OWNER_PID_LISTENER, 0)) ==
+           ERROR_INSUFFICIENT_BUFFER) {
+        buffer.resize(size);
+    }
+    if (result != NO_ERROR) return {};
+    const auto* table = reinterpret_cast<const MIB_TCPTABLE_OWNER_PID*>(buffer.data());
+    for (DWORD i = 0; i < table->dwNumEntries; ++i) {
+        if (ntohs(static_cast<u_short>(table->table[i].dwLocalPort)) != port) continue;
+        const DWORD pid = table->table[i].dwOwningPid;
+        std::string name = "process";
+        if (HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid)) {
+            wchar_t path[MAX_PATH]{};
+            DWORD length = MAX_PATH;
+            if (QueryFullProcessImageNameW(process, 0, path, &length)) {
+                std::wstring_view file(path, length);
+                if (const auto slash = file.find_last_of(L'\\'); slash != std::wstring_view::npos) {
+                    file.remove_prefix(slash + 1);
+                }
+                const int len = WideCharToMultiByte(CP_UTF8, 0, file.data(), static_cast<int>(file.size()), nullptr, 0,
+                                                    nullptr, nullptr);
+                name.assign(len, '\0');
+                WideCharToMultiByte(CP_UTF8, 0, file.data(), static_cast<int>(file.size()), name.data(), len, nullptr,
+                                    nullptr);
+            }
+            CloseHandle(process);
+        }
+        return name + " (pid " + std::to_string(pid) + ")";
+    }
+    return {};
+}
+
+// Why `port` can't be listened on, in words a user can act on.
+std::string listen_error_text(std::uint16_t port, int code) {
+    if (code == WSAEADDRINUSE || code == WSAEACCES) {
+        if (const std::string owner = listener_of(port); !owner.empty()) {
+            return "it is in use by " + owner +
+                   ". Close that program, or give Sarke other ports in config.json "
+                   "(control_port, video_port, file_port; the same on both PCs)";
+        }
+        if (code == WSAEACCES) {
+            return "Windows reserved it (Hyper-V, WSL and Docker reserve port ranges: see `netsh interface ipv4 "
+                   "show excludedportrange protocol=tcp`). Give Sarke free ports in config.json (control_port, "
+                   "video_port, file_port; the same on both PCs)";
+        }
+    }
+    return socket_error_text(code);
+}
+
+}  // namespace
 
 void set_nodelay(SOCKET s) {
     BOOL on = TRUE;
@@ -132,9 +193,10 @@ SOCKET listen_on(std::uint16_t port) {
     addr.sin_port = htons(port);
     if (::bind(s, reinterpret_cast<const sockaddr*>(&addr), sizeof(addr)) == SOCKET_ERROR ||
         ::listen(s, SOMAXCONN) == SOCKET_ERROR) {
-        const std::string err = last_error_text();
+        const int code = WSAGetLastError();
         closesocket(s);
-        throw std::runtime_error("cannot listen on port " + std::to_string(port) + ": " + err);
+        throw std::runtime_error("cannot listen on port " + std::to_string(port) + ": " +
+                                 listen_error_text(port, code));
     }
     return s;
 }

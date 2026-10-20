@@ -1,0 +1,5 @@
+# Commits that only reformat code: `git blame` skips them (GitHub does this on its own; locally run
+# `git config blame.ignoreRevsFile .git-blame-ignore-revs` once).
+
+# P0.4: clang-format the whole tree
+05371f09acb4d81843c06a5ad422df81fc4966e3

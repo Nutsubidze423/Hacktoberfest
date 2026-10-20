@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // kvm_client.exe — runs on B (receives input and the window stream from A).
 // Usage: kvm_client.exe [--host <A's IP>] [--config <path>] [--log <file>] [--no-kvm] [--no-clipboard] [--no-desk]
 //   --no-kvm        don't install the input hooks (A can still control B)
@@ -102,9 +104,9 @@ kvm::clip::Chunk to_chunk(const proto::Clipboard& m) {
     return {.seq = m.seq, .kind = m.kind, .total = m.total, .offset = m.offset, .data = m.data};
 }
 
-void run_session(kvm::net::Connection& conn, const kvm::Config& cfg, kvm::KvmLink* kvm,
-                 kvm::clip::ClipboardSync* clip, kvm::FileLink& files, kvm::WindowLink& windows,
-                 kvm::layout_sync::Session& places, kvm::CurrentPeer& current_peer) {
+void run_session(kvm::net::Connection& conn, const kvm::Config& cfg, kvm::KvmLink* kvm, kvm::clip::ClipboardSync* clip,
+                 kvm::FileLink& files, kvm::WindowLink& windows, kvm::layout_sync::Session& places,
+                 kvm::CurrentPeer& current_peer) {
     if (!conn.send(make_hello(cfg.desk))) {
         return;
     }
@@ -265,14 +267,15 @@ int wmain(int argc, wchar_t** argv) {
             kvm::log::info("kvm_client: protocol v{}, host: found on the local network. Ctrl+C to quit.",
                            proto::kProtocolVersion);
         } else {
-            kvm::log::info("kvm_client: protocol v{}, host {}:{}. Ctrl+C to quit.", proto::kProtocolVersion, cfg.host_ip,
-                           cfg.control_port);
+            kvm::log::info("kvm_client: protocol v{}, host {}:{}. Ctrl+C to quit.", proto::kProtocolVersion,
+                           cfg.host_ip, cfg.control_port);
         }
 
         // client_side says where B stands next to A, so A is on the opposite side of B.
         const auto side = kvm::display::parse_side(cfg.client_side);
         if (!side) {
-            kvm::log::error("config: client_side must be \"left\", \"right\", \"top\" or \"bottom\", got \"{}\"", cfg.client_side);
+            kvm::log::error("config: client_side must be \"left\", \"right\", \"top\" or \"bottom\", got \"{}\"",
+                            cfg.client_side);
             return 1;
         }
         const auto host_side = kvm::display::opposite(*side);
@@ -378,8 +381,8 @@ int wmain(int argc, wchar_t** argv) {
                 cfg.control_port = found->control_port;
             }
             if (auto conn = kvm::net::connect(cfg.host_ip, cfg.control_port)) {
-                run_session(*conn, cfg, kvm_link ? &*kvm_link : nullptr, clip_on ? &clip : nullptr, files, windows, places,
-                            current_peer);
+                run_session(*conn, cfg, kvm_link ? &*kvm_link : nullptr, clip_on ? &clip : nullptr, files, windows,
+                            places, current_peer);
             }
             if (g_running) {
                 kvm::log::info("reconnecting in {} s...", kReconnectDelay.count());

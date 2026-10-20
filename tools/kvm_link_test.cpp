@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Checks common/kvm_link: both KVM directions on one PC, the guard that keeps
 // them exclusive, the "both crossed at once" rule and detach.
 //
@@ -127,7 +129,11 @@ kvm::KvmOptions options(bool is_host) {
 }  // namespace
 
 int main() {
-    std::thread([] { Sleep(40000); std::printf("\nwatchdog: test hung, exiting\n"); TerminateProcess(GetCurrentProcess(), 3); }).detach();
+    std::thread([] {
+        Sleep(40000);
+        std::printf("\nwatchdog: test hung, exiting\n");
+        TerminateProcess(GetCurrentProcess(), 3);
+    }).detach();
     check(display::enable_dpi_awareness(), "dpi awareness");
     const auto orig = cursor();
 
@@ -168,7 +174,8 @@ int main() {
         check(count<proto::FocusEnter>(take_sent()) == 0, "...and no focus_enter is sent");
 
         // -- the peer's input is injected here
-        check(kvm.handle(proto::Key{.vk = VK_F13, .scan = 0x64, .down = true}), "key from the peer is KVM while controlled");
+        check(kvm.handle(proto::Key{.vk = VK_F13, .scan = 0x64, .down = true}),
+              "key from the peer is KVM while controlled");
         check(kvm.handle(proto::MouseButtonEvent{.button = proto::MouseButton::Left, .down = false}),
               "button from the peer is KVM while controlled");
         Sleep(60);
@@ -184,7 +191,8 @@ int main() {
         check(g_keys_seen == 2, "held key released when control left");
 
         // -- now this PC can control the peer
-        abs_move(inside); Sleep(60);
+        abs_move(inside);
+        Sleep(60);
         abs_move(right.point(0.3));
         check(wait_until([&] { return kvm.controlling_peer(); }), "guard lifted: our edge -> we control the peer");
         Sleep(60);
@@ -192,7 +200,8 @@ int main() {
 
         // -- while we control the peer, its focus_leave means "your cursor is back"
         kvm.handle(proto::FocusLeave{.y_norm = 0.6});
-        check(wait_until([&] { return !kvm.controlling_peer(); }), "focus_leave while controlling -> control back here");
+        check(wait_until([&] { return !kvm.controlling_peer(); }),
+              "focus_leave while controlling -> control back here");
         const auto back = display::inward(right.point(0.6), display::Side::Right, 2);
         check(wait_until([&] { return cursor_at(back); }), "cursor returns at the peer's crossing point");
 
@@ -208,7 +217,8 @@ int main() {
         kvm.handle(proto::FocusEnter{.y_norm = 0.5});
         kvm.handle(proto::FocusLeave{.y_norm = 0.5});
         check(!kvm.controlled_by_peer(), "peer's focus_leave while controlled -> released");
-        abs_move(inside); Sleep(60);
+        abs_move(inside);
+        Sleep(60);
         abs_move(right.point(0.5));
         check(wait_until([&] { return kvm.controlling_peer(); }), "...and our edge works again");
         take_sent();
@@ -219,14 +229,25 @@ int main() {
         take_sent();
         kvm.handle(proto::FocusEnter{.y_norm = 0.5});
         Sleep(60);
-        rel_move(1, 0); Sleep(30); rel_move(-1, 1); Sleep(30); rel_move(1, -1); Sleep(120);
+        rel_move(1, 0);
+        Sleep(30);
+        rel_move(-1, 1);
+        Sleep(30);
+        rel_move(1, -1);
+        Sleep(120);
         check(kvm.controlled_by_peer() && count<proto::FocusLeave>(take_sent()) == 0,
               "a few pixels of our own jitter: the peer keeps control");
-        rel_move(12, 0); Sleep(20); rel_move(12, 0); Sleep(20); rel_move(12, 0);
-        check(wait_until([&] { return !kvm.controlled_by_peer(); }), "our own mouse moves -> PC taken back from the peer");
+        rel_move(12, 0);
+        Sleep(20);
+        rel_move(12, 0);
+        Sleep(20);
+        rel_move(12, 0);
+        check(wait_until([&] { return !kvm.controlled_by_peer(); }),
+              "our own mouse moves -> PC taken back from the peer");
         Sleep(60);
         check(count<proto::FocusLeave>(take_sent()) == 1, "...the peer is told (focus_leave) so its cursor goes home");
-        abs_move(inside); Sleep(60);
+        abs_move(inside);
+        Sleep(60);
         abs_move(right.point(0.5));
         check(wait_until([&] { return kvm.controlling_peer(); }), "...and our edge works right away");
         take_sent();  // still controlling the peer, as the next check expects
@@ -253,12 +274,14 @@ int main() {
         kvm::KvmLink kvm(options(/*is_host=*/false));
         check(kvm.start(), "client: start()");
         kvm.attach(sink);
-        abs_move(inside); Sleep(60);
+        abs_move(inside);
+        Sleep(60);
         abs_move(right.point(0.5));
         check(wait_until([&] { return kvm.controlling_peer(); }), "client controls the host");
         take_sent();
         kvm.handle(proto::FocusEnter{.y_norm = 0.5});
-        check(wait_until([&] { return !kvm.controlling_peer(); }), "host's focus_enter wins: client gives control back");
+        check(wait_until([&] { return !kvm.controlling_peer(); }),
+              "host's focus_enter wins: client gives control back");
         check(kvm.controlled_by_peer(), "...and is controlled by the host");
         Sleep(60);
         check(count<proto::FocusLeave>(take_sent()) == 0, "...without a focus_leave the host would misread");

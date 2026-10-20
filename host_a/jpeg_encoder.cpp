@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 #include "jpeg_encoder.h"
 
 #include <turbojpeg.h>
@@ -11,7 +13,9 @@
 namespace kvm {
 
 JpegEncoder::JpegEncoder(int quality, bool full_chroma)
-    : handle_(tj3Init(TJINIT_COMPRESS)), quality_(std::clamp(quality, 1, 100)), subsamp_(full_chroma ? TJSAMP_444 : TJSAMP_420) {
+    : handle_(tj3Init(TJINIT_COMPRESS)),
+      quality_(std::clamp(quality, 1, 100)),
+      subsamp_(full_chroma ? TJSAMP_444 : TJSAMP_420) {
     if (!handle_) throw std::runtime_error("jpeg: tj3Init failed");
     tj3Set(handle_, TJPARAM_QUALITY, quality_);
     tj3Set(handle_, TJPARAM_SUBSAMP, subsamp_);

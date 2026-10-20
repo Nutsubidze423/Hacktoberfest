@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 #include "display_settings.h"
 
 #include <windowsx.h>
@@ -73,7 +75,9 @@ std::wstring widen(std::string_view s) {
     return out;
 }
 
-std::wstring side_word(Side s) { return widen(display::to_string(s)); }
+std::wstring side_word(Side s) {
+    return widen(display::to_string(s));
+}
 
 // "right" -> "Right" (sentence case, like the website).
 std::wstring capitalized(std::wstring s) {
@@ -81,18 +85,28 @@ std::wstring capitalized(std::wstring s) {
     return s;
 }
 
-std::wstring percent(double scale) { return std::format(L"{}%", std::lround(scale * 100)); }
+std::wstring percent(double scale) {
+    return std::format(L"{}%", std::lround(scale * 100));
+}
 
-std::wstring size_text(int w, int h) { return std::format(L"{}{}{}", w, ui::kTimes, h); }
+std::wstring size_text(int w, int h) {
+    return std::format(L"{}{}{}", w, ui::kTimes, h);
+}
 
 int monitor_number(const display::Monitor& m, std::size_t index) {
     const int n = layout::display_number(m.name);
     return n > 0 ? n : static_cast<int>(index) + 1;
 }
 
-float width(const D2D1_RECT_F& r) { return r.right - r.left; }
-float height(const D2D1_RECT_F& r) { return r.bottom - r.top; }
-bool contains(const D2D1_RECT_F& r, float x, float y) { return x >= r.left && x < r.right && y >= r.top && y < r.bottom; }
+float width(const D2D1_RECT_F& r) {
+    return r.right - r.left;
+}
+float height(const D2D1_RECT_F& r) {
+    return r.bottom - r.top;
+}
+bool contains(const D2D1_RECT_F& r, float x, float y) {
+    return x >= r.left && x < r.right && y >= r.top && y < r.bottom;
+}
 
 bool register_class(const wchar_t* name, WNDPROC proc) {
     WNDCLASSEXW wc{};
@@ -146,8 +160,7 @@ public:
 private:
     static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         switch (msg) {
-        case WM_MOUSEACTIVATE:
-            return MA_NOACTIVATE;
+        case WM_MOUSEACTIVATE: return MA_NOACTIVATE;
         case WM_LBUTTONDOWN:
             ShowWindow(hwnd, SW_HIDE);  // click it away
             return 0;
@@ -158,8 +171,7 @@ private:
                 return 0;
             }
             break;
-        default:
-            break;
+        default: break;
         }
         return DefWindowProcW(hwnd, msg, wp, lp);
     }
@@ -193,10 +205,12 @@ private:
         // This PC's name: with both PCs showing their numbers, each tile says whose screen it is.
         wchar_t computer[MAX_COMPUTERNAME_LENGTH + 1]{};
         DWORD computer_len = MAX_COMPUTERNAME_LENGTH + 1;
-        const std::wstring name = GetComputerNameW(computer, &computer_len) ? std::wstring(computer) : std::wstring(ui::kAppName);
-        p.text(TextStyle::BodyStrong, name, pad + logo + P(6), s - pad - 2 * line - P(4), s - 2 * pad - logo - P(6), c.ink);
-        p.text(TextStyle::Caption, std::format(L"{}{}{}", size_text(m.rect.width(), m.rect.height()), ui::kSeparator,
-                                               percent(m.scale)),
+        const std::wstring name =
+            GetComputerNameW(computer, &computer_len) ? std::wstring(computer) : std::wstring(ui::kAppName);
+        p.text(TextStyle::BodyStrong, name, pad + logo + P(6), s - pad - 2 * line - P(4), s - 2 * pad - logo - P(6),
+               c.ink);
+        p.text(TextStyle::Caption,
+               std::format(L"{}{}{}", size_text(m.rect.width(), m.rect.height()), ui::kSeparator, percent(m.scale)),
                pad, s - pad - line, s - 2 * pad, c.ink2);
         canvas_.end();
     }
@@ -260,8 +274,8 @@ bool DisplaySettings::show(Options options) {
     const RECT& work = mi.rcWork;
     const int w = std::min(px(kInitialW, dpi_), static_cast<int>(work.right - work.left));
     const int h = std::min(px(kInitialH, dpi_), static_cast<int>(work.bottom - work.top));
-    SetWindowPos(hwnd, nullptr, work.left + (work.right - work.left - w) / 2, work.top + (work.bottom - work.top - h) / 2,
-                 w, h, SWP_NOZORDER | SWP_FRAMECHANGED);
+    SetWindowPos(hwnd, nullptr, work.left + (work.right - work.left - w) / 2,
+                 work.top + (work.bottom - work.top - h) / 2, w, h, SWP_NOZORDER | SWP_FRAMECHANGED);
     apply_dpi(GetDpiForWindow(hwnd));
 
     SetTimer(hwnd, kRefreshTimer, kRefreshMs, nullptr);
@@ -321,14 +335,12 @@ LRESULT DisplaySettings::handle_message(UINT msg, WPARAM wp, LPARAM lp) {
             return 0;
         }
         break;
-    case WM_NCHITTEST:
-        return hit_test_nc({GET_X_LPARAM(lp), GET_Y_LPARAM(lp)});
+    case WM_NCHITTEST: return hit_test_nc({GET_X_LPARAM(lp), GET_Y_LPARAM(lp)});
     case WM_PAINT:
         render();
         ValidateRect(hwnd, nullptr);
         return 0;
-    case WM_ERASEBKGND:
-        return 1;
+    case WM_ERASEBKGND: return 1;
     case WM_SIZE:
         if (rt_) rt_->Resize(D2D1::SizeU(LOWORD(lp), HIWORD(lp)));
         InvalidateRect(hwnd, nullptr, FALSE);
@@ -409,14 +421,16 @@ LRESULT DisplaySettings::handle_message(UINT msg, WPARAM wp, LPARAM lp) {
             const float w = width(drag_box_);
             const float h = height(drag_box_);
             // The box follows the pointer but its centre stays on the map.
-            const float left = std::clamp(static_cast<float>(pt.x) - drag_grab_.x, l.map.left - w / 2, l.map.right - w / 2);
-            const float top = std::clamp(static_cast<float>(pt.y) - drag_grab_.y, l.map.top - h / 2, l.map.bottom - h / 2);
+            const float left =
+                std::clamp(static_cast<float>(pt.x) - drag_grab_.x, l.map.left - w / 2, l.map.right - w / 2);
+            const float top =
+                std::clamp(static_cast<float>(pt.y) - drag_grab_.y, l.map.top - h / 2, l.map.bottom - h / 2);
             drag_box_ = {left, top, left + w, top + h};
             const auto desk = map_transform(l).to_client(display::virtual_desktop(mons_));
             const display::Rect around{static_cast<int>(desk.left), static_cast<int>(desk.top),
                                        static_cast<int>(desk.right), static_cast<int>(desk.bottom)};
-            drag_side_ = layout::nearest_side(
-                around, {static_cast<int>(left + w / 2), static_cast<int>(top + h / 2)}, layout::kVerticalSidesAccepted);
+            drag_side_ = layout::nearest_side(around, {static_cast<int>(left + w / 2), static_cast<int>(top + h / 2)},
+                                              layout::kVerticalSidesAccepted);
             InvalidateRect(hwnd, nullptr, FALSE);
             return 0;
         }
@@ -497,13 +511,10 @@ LRESULT DisplaySettings::handle_message(UINT msg, WPARAM wp, LPARAM lp) {
                 PostMessageW(hwnd, WM_CLOSE, 0, 0);
             }
             return 0;
-        default:
-            break;
+        default: break;
         }
         break;
-    case WM_CLOSE:
-        DestroyWindow(hwnd);
-        return 0;
+    case WM_CLOSE: DestroyWindow(hwnd); return 0;
     case WM_DESTROY:
         close_identify();
         KillTimer(hwnd, kRefreshTimer);
@@ -522,8 +533,7 @@ LRESULT DisplaySettings::handle_message(UINT msg, WPARAM wp, LPARAM lp) {
         if (auto on_close = on_close_) on_close();
         return DefWindowProcW(hwnd, msg, wp, lp);
     }
-    default:
-        break;
+    default: break;
     }
     return DefWindowProcW(hwnd, msg, wp, lp);
 }
@@ -586,7 +596,8 @@ void DisplaySettings::reload_config() {
     status_text_.clear();
 
     // Missing client_side: the apps use "right".
-    const auto client_side = cfg_.client_side.empty() ? std::optional(Side::Right) : display::parse_side(cfg_.client_side);
+    const auto client_side =
+        cfg_.client_side.empty() ? std::optional(Side::Right) : display::parse_side(cfg_.client_side);
     if (!cfg_.error.empty()) {
         saved_valid_ = false;
         status_ = Status::Error;
@@ -595,16 +606,19 @@ void DisplaySettings::reload_config() {
     } else if (!client_side) {
         saved_valid_ = false;
         status_ = Status::Error;
-        status_text_ = std::format(L"config.json says client_side \"{}\" - Sarke won't start with that. Pick a side and press Apply.",
-                                   widen(cfg_.client_side));
+        status_text_ = std::format(
+            L"config.json says client_side \"{}\" - Sarke won't start with that. Pick a side and press Apply.",
+            widen(cfg_.client_side));
         saved_side_ = layout::peer_side_from(role_, Side::Right);
     } else {
         saved_side_ = layout::peer_side_from(role_, *client_side);
         if (!layout::side_accepted(*client_side)) {
             saved_valid_ = false;
             status_ = Status::Error;
-            status_text_ = std::format(L"config.json says client_side \"{}\" - Sarke takes only left or right for now. Pick a side and press Apply.",
-                                       widen(cfg_.client_side));
+            status_text_ = std::format(
+                L"config.json says client_side \"{}\" - Sarke takes only left or right for now. Pick a side and press "
+                L"Apply.",
+                widen(cfg_.client_side));
         }
     }
     // The connected (or last) PC keeps its own place ("peers", kvm/layout_sync.h), the same on both PCs.
@@ -724,15 +738,20 @@ void DisplaySettings::activate(Hit hit) {
     }
 }
 
-bool DisplaySettings::dirty() const { return !saved_valid_ || pending_side_ != saved_side_; }
+bool DisplaySettings::dirty() const {
+    return !saved_valid_ || pending_side_ != saved_side_;
+}
 
-std::wstring DisplaySettings::peer_name() const { return peer_.known() ? widen(peer_.hostname) : L"the other PC"; }
+std::wstring DisplaySettings::peer_name() const {
+    return peer_.known() ? widen(peer_.hostname) : L"the other PC";
+}
 
 // ---- layout ------------------------------------------------------------------------------------
 
 D2D1_RECT_F DisplaySettings::MapTransform::to_client(const display::Rect& r) const {
     return {static_cast<float>(std::round(r.left * scale + dx)), static_cast<float>(std::round(r.top * scale + dy)),
-            static_cast<float>(std::round(r.right * scale + dx)), static_cast<float>(std::round(r.bottom * scale + dy))};
+            static_cast<float>(std::round(r.right * scale + dx)),
+            static_cast<float>(std::round(r.bottom * scale + dy))};
 }
 
 DisplaySettings::Layout DisplaySettings::compute_layout() const {
@@ -796,7 +815,8 @@ DisplaySettings::Layout DisplaySettings::compute_layout() const {
 
     // Footer: "Windows display settings ›" is a link (accent text), Identify a grey pill.
     const float pad2 = 2 * P(ui::space::s16);
-    const float ws_w = std::round(text_.measure(TextStyle::BodyStrong, L"Windows display settings \u203A")) + P(ui::space::s8);
+    const float ws_w =
+        std::round(text_.measure(TextStyle::BodyStrong, L"Windows display settings \u203A")) + P(ui::space::s8);
     l.windows_settings = {l.x1 - ws_w, l.footer.top, l.x1, l.footer.bottom};
     const float id_w = std::round(text_.measure(TextStyle::BodyStrong, L"Identify")) + pad2;
     l.identify = {l.windows_settings.left - P(ui::space::s16) - id_w, l.footer.top,
@@ -813,7 +833,8 @@ DisplaySettings::MapTransform DisplaySettings::map_transform(const Layout& l) co
     for (Side s : kSides) {
         if (!layout::side_accepted(s) && s != pending_side_ && s != saved_side_) continue;
         const auto r = layout::peer_rect(mons_, s, peer_w(), peer_h());
-        u = {std::min(u.left, r.left), std::min(u.top, r.top), std::max(u.right, r.right), std::max(u.bottom, r.bottom)};
+        u = {std::min(u.left, r.left), std::min(u.top, r.top), std::max(u.right, r.right),
+             std::max(u.bottom, r.bottom)};
     }
     const double margin = px(kMapMargin, dpi_);
     const double aw = std::max(1.0, width(l.map) - 2 * margin);
@@ -995,8 +1016,8 @@ void DisplaySettings::draw_map(ui::Painter& p, const Layout& l) {
             ty += caption_h;
         }
         if (fits(caption_h)) {
-            p.text(TextStyle::Caption, m.primary ? percent(m.scale) + ui::kSeparator + L"Main" : percent(m.scale), tx, ty,
-                   tw, c.ink3);
+            p.text(TextStyle::Caption, m.primary ? percent(m.scale) + ui::kSeparator + L"Main" : percent(m.scale), tx,
+                   ty, tw, c.ink3);
         }
     }
 
@@ -1032,8 +1053,8 @@ void DisplaySettings::draw_map(ui::Painter& p, const Layout& l) {
             ty += caption_h + P(2);
         }
         if (fits(strong_h)) {
-            p.text(TextStyle::BodyStrong, peer_.known() ? widen(peer_.hostname) : std::wstring(ui::kUnknown), tx, ty, tw,
-                   c.ink);
+            p.text(TextStyle::BodyStrong, peer_.known() ? widen(peer_.hostname) : std::wstring(ui::kUnknown), tx, ty,
+                   tw, c.ink);
             ty += strong_h;
         }
         if (fits(caption_h)) {
@@ -1045,8 +1066,11 @@ void DisplaySettings::draw_map(ui::Painter& p, const Layout& l) {
         }
         if (fits(caption_h)) {
             const bool live = peer_live_ && peer_.known();
-            p.text(TextStyle::Caption, live ? L"Connected" : peer_.known() ? L"Last seen" : L"Not connected yet", tx, ty,
-                   tw, live ? c.ok : c.ink3);
+            p.text(TextStyle::Caption,
+                   live            ? L"Connected"
+                   : peer_.known() ? L"Last seen"
+                                   : L"Not connected yet",
+                   tx, ty, tw, live ? c.ok : c.ink3);
         }
     }
 
@@ -1067,8 +1091,8 @@ void DisplaySettings::draw_button(ui::Painter& p, const D2D1_RECT_F& r, std::wst
     // Segments (sides, roles): `selected` = the raised segment. Buttons: primary = blue pill,
     // otherwise a grey pill. Disabled = faded.
     const ui::Palette& c = pal();
-    const bool segment = hit == Hit::SideLeft || hit == Hit::SideRight || hit == Hit::SideTop || hit == Hit::SideBottom ||
-                         hit == Hit::RoleHost || hit == Hit::RoleClient;
+    const bool segment = hit == Hit::SideLeft || hit == Hit::SideRight || hit == Hit::SideTop ||
+                         hit == Hit::SideBottom || hit == Hit::RoleHost || hit == Hit::RoleClient;
     const bool enabled = hit_enabled(hit) || selected;
     const bool hot = enabled && (hover_ == hit || pressed_ == hit);
     if (segment) {
@@ -1077,7 +1101,8 @@ void DisplaySettings::draw_button(ui::Painter& p, const D2D1_RECT_F& r, std::wst
         } else if (hot) {
             p.pill(r, c.fill_hi);
         }
-        p.text_center(TextStyle::BodyStrong, text, r, selected || hot ? c.ink : c.ink2, enabled ? 1.0f : ui::alpha::disabled);
+        p.text_center(TextStyle::BodyStrong, text, r, selected || hot ? c.ink : c.ink2,
+                      enabled ? 1.0f : ui::alpha::disabled);
         return;
     }
     if (primary) {
@@ -1114,7 +1139,7 @@ void DisplaySettings::draw_panel(ui::Painter& p, const Layout& l) {
 
     // Connection: who this PC is linked to, and one button to connect or disconnect.
     const bool connected = peer_live_ && peer_.known();
-    const std::wstring conn_status = connected  ? L"Connected to " + widen(peer_.hostname)
+    const std::wstring conn_status = connected               ? L"Connected to " + widen(peer_.hostname)
                                      : role_ == Role::Client ? std::wstring(L"Looking for the other PC…")
                                                              : std::wstring(L"Waiting for the other PC to connect");
     p.text(TextStyle::Caption, conn_status, pl, l.role_label_top, pr - pl, connected ? c.ok : c.ink3);
@@ -1170,17 +1195,17 @@ void DisplaySettings::draw_footer(ui::Painter& p, const Layout& l) {
     const std::wstring other = peer_name();
     const std::wstring this_side = side_word(display::opposite(pending_side_));
     switch (status_) {
-    case Status::Error:
-        rgb = c.err;
-        break;
+    case Status::Error: rgb = c.err; break;
     case Status::Saved:
         rgb = c.ok;
         if (peer_live_ && peer_.known()) {
             text = std::format(L"Saved \u2014 {} has this PC on its {} now, too.", other, this_side);
         } else {
             text = options_.app_restarts
-                       ? std::format(L"Saved \u2014 Sarke restarted with it. On {}, this PC must be on the {}.", other, this_side)
-                       : std::format(L"Saved. Restart Sarke on this PC \u2014 and on {}, this PC must be on the {}.", other, this_side);
+                       ? std::format(L"Saved \u2014 Sarke restarted with it. On {}, this PC must be on the {}.", other,
+                                     this_side)
+                       : std::format(L"Saved. Restart Sarke on this PC \u2014 and on {}, this PC must be on the {}.",
+                                     other, this_side);
         }
         break;
     default:
@@ -1190,14 +1215,19 @@ void DisplaySettings::draw_footer(ui::Painter& p, const Layout& l) {
             if (peer_live_ && peer_.known()) {
                 text = std::format(L"Not saved yet. Apply moves {} there on both PCs at once.", other);
             } else {
-                text = options_.app_restarts
-                           ? std::format(L"Not saved yet. Apply writes client_side \"{}\" to config.json and restarts Sarke.", cs)
-                           : std::format(L"Not saved yet. Apply writes client_side \"{}\" to config.json, then restart Sarke.", cs);
+                text =
+                    options_.app_restarts
+                        ? std::format(
+                              L"Not saved yet. Apply writes client_side \"{}\" to config.json and restarts Sarke.", cs)
+                        : std::format(
+                              L"Not saved yet. Apply writes client_side \"{}\" to config.json, then restart Sarke.",
+                              cs);
             }
         } else if (!cfg_.exists) {
             text = L"No config.json yet \u2014 Sarke uses \"right\". Apply creates it next to the app.";
         } else if (peer_live_ && peer_.known()) {
-            text = std::format(L"In sync with {}: there, this PC is on the {}. Each PC keeps its own place.", other, this_side);
+            text = std::format(L"In sync with {}: there, this PC is on the {}. Each PC keeps its own place.", other,
+                               this_side);
         } else {
             text = std::format(L"Saved per PC and kept in sync: on {}, this PC is on the {}.", other, this_side);
         }

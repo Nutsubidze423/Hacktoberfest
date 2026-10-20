@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Display arrangement window (owner: Sandro): "Where is the other PC?"
 //
 // Shows this PC's real monitors (live: re-read on WM_DISPLAYCHANGE / DPI changes), the other PC
@@ -29,7 +31,7 @@
 
 #include "app_logo.h"
 #include "display_layout.h"
-#include "ui_draw_tmp.h"
+#include "ui_draw.h"
 
 namespace kvm {
 
@@ -63,7 +65,9 @@ public:
 
     // Runs on the UI thread after Apply wrote config.json, with where the other PC stands now (the
     // launcher has the running app move it at once, on both PCs; or restarts the app).
-    void set_applied_handler(std::function<void(display::Side peer_side)> on_applied) { on_applied_ = std::move(on_applied); }
+    void set_applied_handler(std::function<void(display::Side peer_side)> on_applied) {
+        on_applied_ = std::move(on_applied);
+    }
 
     // Runs on the UI thread when the user presses Identify (the launcher asks the other PC to show
     // its numbers too).
@@ -87,9 +91,21 @@ public:
     void follow_role(layout::Role role);
 
     enum class Hit {
-        None, Minimize, Close, Peer,
-        SideLeft, SideRight, SideTop, SideBottom,
-        RoleHost, RoleClient, Connect, Apply, Revert, Identify, WindowsSettings,
+        None,
+        Minimize,
+        Close,
+        Peer,
+        SideLeft,
+        SideRight,
+        SideTop,
+        SideBottom,
+        RoleHost,
+        RoleClient,
+        Connect,
+        Apply,
+        Revert,
+        Identify,
+        WindowsSettings,
     };
 
 private:

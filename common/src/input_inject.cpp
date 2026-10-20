@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 #include "kvm/input_inject.h"
 
 #include <windows.h>
@@ -32,62 +34,61 @@ InputInject::~InputInject() {
 }
 
 bool InputInject::handle(const proto::Message& msg) {
-    return std::visit(
-        overloaded{
-            [&](const proto::FocusEnter& m) {
-                if (m.desk) {
-                    enter_desk();
-                } else {
-                    enter(m.y_norm);
-                }
-                return true;
-            },
-            [&](const proto::DeskMove& m) {
-                if (active_ && desk_) {
-                    ++received_.moves;
-                    desk_move(m.x, m.y);
-                }
-                return true;
-            },
-            [&](const proto::FocusLeave&) {
-                if (active_) {
-                    log::info("input inject: the other PC took its input back");
-                    log_received();
-                }
-                release_all();
-                return true;
-            },
-            [&](const proto::MouseMove& m) {
-                if (active_) {
-                    ++received_.moves;
-                    move(m.dx, m.dy);
-                }
-                return true;
-            },
-            [&](const proto::MouseButtonEvent& m) {
-                if (active_) {
-                    ++received_.buttons;
-                    button(m.button, m.down);
-                }
-                return true;
-            },
-            [&](const proto::MouseWheel& m) {
-                if (active_) {
-                    ++received_.wheels;
-                    check(input::send_wheel(m.delta, m.horizontal));
-                }
-                return true;
-            },
-            [&](const proto::Key& k) {
-                if (active_) {
-                    ++received_.keys;
-                    key(k);
-                }
-                return true;
-            },
-            [](const auto&) { return false; },
-        },
-        msg);
+    return std::visit(overloaded{
+                          [&](const proto::FocusEnter& m) {
+                              if (m.desk) {
+                                  enter_desk();
+                              } else {
+                                  enter(m.y_norm);
+                              }
+                              return true;
+                          },
+                          [&](const proto::DeskMove& m) {
+                              if (active_ && desk_) {
+                                  ++received_.moves;
+                                  desk_move(m.x, m.y);
+                              }
+                              return true;
+                          },
+                          [&](const proto::FocusLeave&) {
+                              if (active_) {
+                                  log::info("input inject: the other PC took its input back");
+                                  log_received();
+                              }
+                              release_all();
+                              return true;
+                          },
+                          [&](const proto::MouseMove& m) {
+                              if (active_) {
+                                  ++received_.moves;
+                                  move(m.dx, m.dy);
+                              }
+                              return true;
+                          },
+                          [&](const proto::MouseButtonEvent& m) {
+                              if (active_) {
+                                  ++received_.buttons;
+                                  button(m.button, m.down);
+                              }
+                              return true;
+                          },
+                          [&](const proto::MouseWheel& m) {
+                              if (active_) {
+                                  ++received_.wheels;
+                                  check(input::send_wheel(m.delta, m.horizontal));
+                              }
+                              return true;
+                          },
+                          [&](const proto::Key& k) {
+                              if (active_) {
+                                  ++received_.keys;
+                                  key(k);
+                              }
+                              return true;
+                          },
+                          [](const auto&) { return false; },
+                      },
+                      msg);
 }
 
 void InputInject::release_all() {
@@ -184,10 +185,10 @@ void InputInject::log_received() const {
 
 bool InputInject::towards_host(int dx, int dy) const {
     switch (host_side_) {
-        case display::Side::Left: return dx < 0;
-        case display::Side::Right: return dx > 0;
-        case display::Side::Top: return dy < 0;
-        default: return dy > 0;
+    case display::Side::Left: return dx < 0;
+    case display::Side::Right: return dx > 0;
+    case display::Side::Top: return dy < 0;
+    default: return dy > 0;
     }
 }
 
@@ -233,8 +234,9 @@ void InputInject::key(const proto::Key& k) {
 void InputInject::check(bool ok) {
     if (ok || warned_blocked_) return;
     warned_blocked_ = true;
-    log::warn("input inject: Windows rejected injected input (an elevated window or the secure desktop has focus); "
-              "run kvm_client as administrator to control elevated windows");
+    log::warn(
+        "input inject: Windows rejected injected input (an elevated window or the secure desktop has focus); "
+        "run kvm_client as administrator to control elevated windows");
 }
 
 }  // namespace kvm::client

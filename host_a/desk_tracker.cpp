@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 #include "desk_tracker.h"
 
 #include <dwmapi.h>
@@ -40,8 +42,8 @@ void CALLBACK on_win_event(HWINEVENTHOOK, DWORD event, HWND hwnd, LONG id_object
 // Never part of the picture: the peer has its own desktop and taskbar there, and a dragged file's
 // picture follows the cursor (the peer shows its own when the drag continues over there).
 bool is_shell(const wchar_t* cls) {
-    for (const wchar_t* shell : {L"Progman", L"WorkerW", L"Shell_TrayWnd", L"Shell_SecondaryTrayWnd", L"SysShadow",
-                                 L"SysDragImage"}) {
+    for (const wchar_t* shell :
+         {L"Progman", L"WorkerW", L"Shell_TrayWnd", L"Shell_SecondaryTrayWnd", L"SysShadow", L"SysDragImage"}) {
         if (std::wcscmp(cls, shell) == 0) return true;
     }
     return false;
@@ -218,16 +220,17 @@ void DeskTracker::place_new_windows() {
         if (vdd.contains({(wr.left + wr.right) / 2, (wr.top + wr.bottom) / 2})) continue;  // there already
 
         MONITORINFO mi{sizeof(mi)};
-        GetMonitorInfoW(MonitorFromPoint({vdd.left + vdd.width() / 2, vdd.top + vdd.height() / 2}, MONITOR_DEFAULTTONEAREST),
-                        &mi);
+        GetMonitorInfoW(
+            MonitorFromPoint({vdd.left + vdd.width() / 2, vdd.top + vdd.height() / 2}, MONITOR_DEFAULTTONEAREST), &mi);
         const RECT& work = mi.rcWork;
         const int w = std::min<int>(wr.right - wr.left, work.right - work.left);
         const int h = std::min<int>(wr.bottom - wr.top, work.bottom - work.top);
         const bool zoomed = IsZoomed(hwnd) != FALSE;
         // Asynchronous: a window that is still starting up must never stall this thread.
         if (zoomed) ShowWindowAsync(hwnd, SW_RESTORE);
-        SetWindowPos(hwnd, nullptr, work.left + (work.right - work.left - w) / 2, work.top + (work.bottom - work.top - h) / 2,
-                     w, h, SWP_NOZORDER | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS);
+        SetWindowPos(hwnd, nullptr, work.left + (work.right - work.left - w) / 2,
+                     work.top + (work.bottom - work.top - h) / 2, w, h,
+                     SWP_NOZORDER | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS);
         if (zoomed) ShowWindowAsync(hwnd, SW_MAXIMIZE);
         log::info("desk: \"{}\" opened while working on the other screen - showing it there", title_of(hwnd));
     }

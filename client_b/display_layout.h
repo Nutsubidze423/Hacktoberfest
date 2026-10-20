@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Display arrangement (owner: Sandro): where the other PC stands next to this one, as a system.
 //
 // The KVM crosses at the outer edge of this PC's monitors on the peer's side (kvm::display::OuterEdge)

@@ -11,7 +11,10 @@
 ;   - Start menu entry, optional desktop shortcut, start with Windows
 ; Per-user settings and logs live in %LOCALAPPDATA%\Sarke (kept on uninstall).
 
-#define Build "..\build\x64-release"
+; ISCC /DBuild=<folder> packs the programs of another build folder (e.g. a fresh clone using an existing build).
+#ifndef Build
+  #define Build "..\build\x64-release"
+#endif
 #define AppVersion GetVersionNumbersString(Build + "\tools\sarke.exe")
 
 [Setup]
@@ -56,6 +59,10 @@ Source: "vdd\mttvdd.inf"; DestDir: "{app}\driver"; Flags: ignoreversion
 Source: "vdd\MttVDD.dll"; DestDir: "{app}\driver"; Flags: ignoreversion
 Source: "vdd\MttVDD.cat"; DestDir: "{app}\driver"; Flags: ignoreversion
 Source: "vdd\LICENSE.txt"; DestDir: "{app}\licenses"; DestName: "VirtualDisplayDriver-LICENSE.txt"; Flags: ignoreversion
+; Sarke's license and the licenses of everything compiled into it.
+Source: "..\LICENSE"; DestDir: "{app}\licenses"; DestName: "LICENSE.txt"; Flags: ignoreversion
+Source: "..\NOTICE"; DestDir: "{app}\licenses"; DestName: "NOTICE.txt"; Flags: ignoreversion
+Source: "..\THIRD_PARTY_NOTICES.md"; DestDir: "{app}\licenses"; Flags: ignoreversion
 ; The driver reads its resolutions from here; Sarke adds the other PC's size, so users may write it.
 ; An existing file (the user's own list) is kept.
 Source: "vdd\vdd_settings.xml"; DestDir: "C:\VirtualDisplayDriver"; Permissions: authusers-modify; Flags: onlyifdoesntexist uninsneveruninstall

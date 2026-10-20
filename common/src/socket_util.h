@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Socket helpers shared by net.cpp (control channel) and video.cpp (video channel).
 // Private to kvm_common: not under include/, do not include from other modules.
 #pragma once

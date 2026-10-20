@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The A-side video thread: newest captured frame -> JPEG -> video channel (port 50501).
 //
 //   kvm::LatestSlot<kvm::CapturedFrame> frames;              // capture->start(frames)

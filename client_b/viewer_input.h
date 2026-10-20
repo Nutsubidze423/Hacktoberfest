@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Viewer input -> messages for A (B -> A): remote_mouse_move, mouse_button (with x_norm/y_norm),
 // mouse_wheel, key. Positions are normalized over the drawn image (docs/DESIGN.md 4.3), never the
 // letterbox. Tracks what is held so focus loss can release it on A (no stuck keys or buttons).

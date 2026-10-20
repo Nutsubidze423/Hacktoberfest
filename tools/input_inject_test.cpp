@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Checks client_b/input_inject: feeds it the messages A would send and verifies
 // what it injects (via a low-level hook) and what it sends back to A.
 // The hook swallows every injected click/key, so nothing reaches the desktop;
@@ -47,7 +49,10 @@ std::vector<Seen> g_seen;
 LRESULT CALLBACK observe_mouse(int code, WPARAM wp, LPARAM lp) {
     const auto& m = *reinterpret_cast<const MSLLHOOKSTRUCT*>(lp);
     if (code == HC_ACTION && kvm::input::is_own_injection(m.dwExtraInfo) && wp != WM_MOUSEMOVE) {
-        { std::lock_guard l(g_mu); g_seen.push_back({false, wp, 0}); }
+        {
+            std::lock_guard l(g_mu);
+            g_seen.push_back({false, wp, 0});
+        }
         return 1;
     }
     return CallNextHookEx(nullptr, code, wp, lp);
@@ -56,7 +61,10 @@ LRESULT CALLBACK observe_mouse(int code, WPARAM wp, LPARAM lp) {
 LRESULT CALLBACK observe_key(int code, WPARAM wp, LPARAM lp) {
     const auto& k = *reinterpret_cast<const KBDLLHOOKSTRUCT*>(lp);
     if (code == HC_ACTION && kvm::input::is_own_injection(k.dwExtraInfo)) {
-        { std::lock_guard l(g_mu); g_seen.push_back({true, wp, k.vkCode}); }
+        {
+            std::lock_guard l(g_mu);
+            g_seen.push_back({true, wp, k.vkCode});
+        }
         return 1;
     }
     return CallNextHookEx(nullptr, code, wp, lp);
@@ -96,7 +104,11 @@ int count(const std::vector<Seen>& seen, bool key, WPARAM msg, DWORD code = 0) {
 }  // namespace
 
 int main() {
-    std::thread([] { Sleep(30000); std::printf("\nwatchdog: test hung, exiting\n"); TerminateProcess(GetCurrentProcess(), 3); }).detach();
+    std::thread([] {
+        Sleep(30000);
+        std::printf("\nwatchdog: test hung, exiting\n");
+        TerminateProcess(GetCurrentProcess(), 3);
+    }).detach();
     check(display::enable_dpi_awareness(), "dpi awareness");
     const display::Point orig = cursor();
 
@@ -152,7 +164,8 @@ int main() {
     {
         const auto seen = take_seen();
         check(count(seen, false, WM_LBUTTONDOWN) == 1, "button down injected");
-        check(count(seen, false, WM_MOUSEWHEEL) == 1 && count(seen, false, WM_MOUSEHWHEEL) == 1, "wheel injected (both axes)");
+        check(count(seen, false, WM_MOUSEWHEEL) == 1 && count(seen, false, WM_MOUSEHWHEEL) == 1,
+              "wheel injected (both axes)");
         check(count(seen, true, WM_KEYDOWN, VK_LSHIFT) == 1 && count(seen, true, WM_KEYDOWN, VK_F13) == 1 &&
                   count(seen, true, WM_KEYUP, VK_F13) == 1 && count(seen, true, WM_KEYDOWN, VK_F14) == 1,
               "keys injected");
@@ -160,7 +173,8 @@ int main() {
 
     // -- moving along the edge or away from A does not leave
     inject.handle(proto::MouseMove{.dx = -100000, .dy = 0});
-    check(wait_cursor([&](display::Point p) { return left.position(p).has_value(); }), "big move left: cursor on the edge facing A");
+    check(wait_cursor([&](display::Point p) { return left.position(p).has_value(); }),
+          "big move left: cursor on the edge facing A");
     inject.handle(proto::MouseMove{.dx = 0, .dy = 5});
     Sleep(30);
     check(inject.active() && take_to_host().empty(), "moving along the edge stays on B");
@@ -172,7 +186,8 @@ int main() {
     {
         const auto sent = take_to_host();
         const auto* leave = sent.size() == 1 ? std::get_if<proto::FocusLeave>(&sent[0]) : nullptr;
-        check(leave && std::abs(leave->y_norm - left.position(at_edge).value()) < 1e-9, "focus_leave sent with the exit point");
+        check(leave && std::abs(leave->y_norm - left.position(at_edge).value()) < 1e-9,
+              "focus_leave sent with the exit point");
         const auto seen = take_seen();
         check(count(seen, false, WM_LBUTTONUP) == 1, "held button released");
         check(count(seen, true, WM_KEYUP, VK_LSHIFT) == 1 && count(seen, true, WM_KEYUP, VK_F14) == 1 &&
@@ -188,7 +203,8 @@ int main() {
     // -- A takes control back (emergency / A-side switch)
     inject.handle(proto::FocusEnter{.y_norm = 0.0});
     const auto top = display::inward(left.point(0.0), display::Side::Left, 2);
-    check(wait_cursor([&](display::Point p) { return p.x == top.x && p.y == top.y; }), "focus_enter y_norm 0 -> top of the edge");
+    check(wait_cursor([&](display::Point p) { return p.x == top.x && p.y == top.y; }),
+          "focus_enter y_norm 0 -> top of the edge");
     inject.handle(proto::Key{.vk = VK_RCONTROL, .scan = 0x1D, .down = true, .extended = true});
     inject.handle(proto::MouseButtonEvent{.button = proto::MouseButton::X1, .down = true});
     take_seen();

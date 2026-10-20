@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 #include "display_layout.h"
 
 #include <winsock2.h>
@@ -31,7 +33,9 @@ std::string narrow(std::wstring_view s) {
     return out;
 }
 
-bool along_x(Side side) { return side == Side::Top || side == Side::Bottom; }
+bool along_x(Side side) {
+    return side == Side::Top || side == Side::Bottom;
+}
 
 std::filesystem::path default_peer_file() {
     PWSTR dir = nullptr;
@@ -180,10 +184,10 @@ std::vector<Rect> outer_edge_pieces(const std::vector<Monitor>& mons, Side side)
         int from = along_x(side) ? r.left : r.top;
         const int to = along_x(side) ? r.right : r.bottom;
         switch (side) {
-            case Side::Left: fixed = r.left; break;
-            case Side::Right: fixed = r.right - 1; break;
-            case Side::Top: fixed = r.top; break;
-            case Side::Bottom: fixed = r.bottom - 1; break;
+        case Side::Left: fixed = r.left; break;
+        case Side::Right: fixed = r.right - 1; break;
+        case Side::Top: fixed = r.top; break;
+        case Side::Bottom: fixed = r.bottom - 1; break;
         }
         std::vector<std::pair<int, int>> covered;
         for (const Monitor& n : mons) {
@@ -191,10 +195,10 @@ std::vector<Rect> outer_edge_pieces(const std::vector<Monitor>& mons, Side side)
             const Rect& o = n.rect;
             bool touches = false;
             switch (side) {
-                case Side::Left: touches = o.right == r.left; break;
-                case Side::Right: touches = o.left == r.right; break;
-                case Side::Top: touches = o.bottom == r.top; break;
-                case Side::Bottom: touches = o.top == r.bottom; break;
+            case Side::Left: touches = o.right == r.left; break;
+            case Side::Right: touches = o.left == r.right; break;
+            case Side::Top: touches = o.bottom == r.top; break;
+            case Side::Bottom: touches = o.top == r.bottom; break;
             }
             if (!touches) continue;
             const int lo = std::max(along_x(side) ? o.left : o.top, from);
@@ -240,10 +244,10 @@ Rect peer_rect(const std::vector<Monitor>& mons, Side side, int peer_w, int peer
     }
     const int mid = lo + (hi - lo) / 2;
     switch (side) {
-        case Side::Left: return {box.left - peer_w, mid - peer_h / 2, box.left, mid - peer_h / 2 + peer_h};
-        case Side::Right: return {box.right, mid - peer_h / 2, box.right + peer_w, mid - peer_h / 2 + peer_h};
-        case Side::Top: return {mid - peer_w / 2, box.top - peer_h, mid - peer_w / 2 + peer_w, box.top};
-        default: return {mid - peer_w / 2, box.bottom, mid - peer_w / 2 + peer_w, box.bottom + peer_h};
+    case Side::Left: return {box.left - peer_w, mid - peer_h / 2, box.left, mid - peer_h / 2 + peer_h};
+    case Side::Right: return {box.right, mid - peer_h / 2, box.right + peer_w, mid - peer_h / 2 + peer_h};
+    case Side::Top: return {mid - peer_w / 2, box.top - peer_h, mid - peer_w / 2 + peer_w, box.top};
+    default: return {mid - peer_w / 2, box.bottom, mid - peer_w / 2 + peer_w, box.bottom + peer_h};
     }
 }
 
@@ -274,7 +278,8 @@ ConfigState read_config(const std::optional<std::filesystem::path>& path) {
         st.error = narrow(st.path.filename().wstring()) + " is not valid JSON - fix or delete it";
         return st;
     }
-    if (const auto it = j.find("client_side"); it != j.end() && it->is_string()) st.client_side = it->get<std::string>();
+    if (const auto it = j.find("client_side"); it != j.end() && it->is_string())
+        st.client_side = it->get<std::string>();
     if (const auto it = j.find("host_ip"); it != j.end() && it->is_string()) st.host_ip = it->get<std::string>();
     if (const auto peers = j.find("peers"); peers != j.end() && peers->is_object()) {
         for (const auto& [name, place] : peers->items()) {
@@ -294,7 +299,8 @@ std::string save_config_key(const std::filesystem::path& path, std::string_view 
         if (!in) return "can't open " + narrow(path.wstring());
         j = nlohmann::ordered_json::parse(in, nullptr, /*allow_exceptions=*/false);
         // Never overwrite a file we can't read: the user's other settings are in it.
-        if (j.is_discarded() || !j.is_object()) return narrow(path.filename().wstring()) + " is not valid JSON - fix or delete it";
+        if (j.is_discarded() || !j.is_object())
+            return narrow(path.filename().wstring()) + " is not valid JSON - fix or delete it";
     }
     std::visit([&](const auto& v) { j[std::string(key)] = v; }, value);
     return write_atomically(path, j.dump(2) + "\n");
@@ -309,9 +315,10 @@ std::string ensure_config(const std::filesystem::path& path) {
     if (std::filesystem::exists(path, ec)) return {};
     const Config d;  // the apps' defaults (common/include/kvm/config.h)
     const nlohmann::ordered_json j = {
-        {"host_ip", d.host_ip},           {"control_port", d.control_port}, {"video_port", d.video_port},
-        {"file_port", d.file_port},       {"client_side", d.client_side},   {"jpeg_quality", d.jpeg_quality},
-        {"max_fps", d.max_fps},           {"desk", d.desk},
+        {"host_ip", d.host_ip},         {"control_port", d.control_port},
+        {"video_port", d.video_port},   {"file_port", d.file_port},
+        {"client_side", d.client_side}, {"jpeg_quality", d.jpeg_quality},
+        {"max_fps", d.max_fps},         {"desk", d.desk},
     };
     return write_atomically(path, j.dump(2) + "\n");
 }

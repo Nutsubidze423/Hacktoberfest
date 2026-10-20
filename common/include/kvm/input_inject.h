@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 #pragma once
 // KVM, receiving side: replays the input the other PC ("the peer") sends while
 // it controls this PC. Runs on B and, for B -> A control, on A too. Usually

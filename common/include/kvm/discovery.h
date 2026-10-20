@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Finding the host on the local network without typing its IP (UDP port 50503).
 //
 //   A:  kvm::discovery::Responder responder(hostname, cfg.control_port);   // answers while alive

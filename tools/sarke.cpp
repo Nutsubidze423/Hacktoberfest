@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // sarke.exe — start Sarke on this PC: runs kvm_host.exe or kvm_client.exe in the background with a
 // tray icon, notifications, Display arrangement and a settings menu (client_b/launcher.h).
 //
@@ -40,7 +42,9 @@ int wmain(int argc, wchar_t** argv) {
         } else if (arg == L"--") {
             for (++i; i < argc; ++i) options.app_args.emplace_back(argv[i]);
         } else {
-            std::fputs("usage: sarke.exe [--host | --client] [--background] [--config <path>] [-- <args for the app>]\n", stderr);
+            std::fputs(
+                "usage: sarke.exe [--host | --client] [--background] [--config <path>] [-- <args for the app>]\n",
+                stderr);
             return 2;
         }
     }

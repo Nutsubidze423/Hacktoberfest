@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // file_drag_test: both halves of the cross-PC file drag with real OLE drag and drop (T10).
 // FileDragSource continues a drag with two temp files ("arrived from the other PC") from the cursor,
 // SendInput moves the mouse onto a FileDropCatcher in this process and lets go: the catcher must get
@@ -146,7 +148,8 @@ int main() {
         const auto image = catcher.take_drag_image();
         check(image && image->width > 0 && image->height > 0 &&
                   image->bgra.size() == static_cast<std::size_t>(image->width) * image->height * 4,
-              std::format("the drop carries the drag image ({}x{})", image ? image->width : 0, image ? image->height : 0));
+              std::format("the drop carries the drag image ({}x{})", image ? image->width : 0,
+                          image ? image->height : 0));
         if (image) {
             // For a look: %TEMP%\kvm_drag_image.bmp (top-down 32-bit).
             BITMAPFILEHEADER fh{};
@@ -161,7 +164,8 @@ int main() {
             std::ofstream out(fs::temp_directory_path() / L"kvm_drag_image.bmp", std::ios::binary);
             out.write(reinterpret_cast<const char*>(&fh), sizeof(fh));
             out.write(reinterpret_cast<const char*>(&ih), sizeof(ih));
-            out.write(reinterpret_cast<const char*>(image->bgra.data()), static_cast<std::streamsize>(image->bgra.size()));
+            out.write(reinterpret_cast<const char*>(image->bgra.data()),
+                      static_cast<std::streamsize>(image->bgra.size()));
         }
     }
 
@@ -213,7 +217,8 @@ int main() {
         std::unique_ptr<kvm::files::FileTransfer> a;
         std::thread acceptor([&] {
             const SOCKET s = accept(listener, nullptr, nullptr);
-            if (s != INVALID_SOCKET) a = std::make_unique<kvm::files::FileTransfer>(s, "A", kvm::files::Callbacks{}, dir / L"a_in");
+            if (s != INVALID_SOCKET)
+                a = std::make_unique<kvm::files::FileTransfer>(s, "A", kvm::files::Callbacks{}, dir / L"a_in");
         });
         kvm::files::FileDragSource drag_on_b;
         std::promise<DWORD> b_done;
@@ -222,7 +227,8 @@ int main() {
         std::optional<kvm::files::DragImage> b_image;  // the drag image that came with the files
         b_callbacks.on_drag_begin = [&](std::optional<kvm::files::DragImage> image) { b_image = std::move(image); };
         b_callbacks.on_drag_received = [&](const std::vector<fs::path>& saved) {
-            drag_on_b.start(saved, [&](DWORD effect) { b_done.set_value(effect); }, b_image);  // B: the drag goes on here
+            drag_on_b.start(
+                saved, [&](DWORD effect) { b_done.set_value(effect); }, b_image);  // B: the drag goes on here
         };
         auto b = kvm::files::connect_files("127.0.0.1", port, b_callbacks, dir / L"b_in");
         acceptor.join();
@@ -263,8 +269,9 @@ int main() {
 
             for (int i = 0; i < 30 && !drag_on_b.dragging(); ++i) std::this_thread::sleep_for(100ms);
             check(drag_on_b.dragging(), "B: the files arrived and the drag goes on at the cursor");
-            check(b_image && b_image->width > 0, std::format("B: A's drag image came along ({}x{})", b_image ? b_image->width : 0,
-                                                             b_image ? b_image->height : 0));
+            check(b_image && b_image->width > 0,
+                  std::format("B: A's drag image came along ({}x{})", b_image ? b_image->width : 0,
+                              b_image ? b_image->height : 0));
             folder_on_b.show_at(folder, 10s);
             std::this_thread::sleep_for(200ms);
             move_in_steps(edge, folder);  // the user keeps moving on B...
@@ -280,7 +287,8 @@ int main() {
             std::lock_guard lock(landed_mutex);
             const bool same = landed.size() == 2 && read_file(landed[0]) == read_file(files[0]) &&
                               read_file(landed[1]) == read_file(files[1]);
-            check(same, std::format("the folder on B got both files with the same content ({} item(s))", landed.size()));
+            check(same,
+                  std::format("the folder on B got both files with the same content ({} item(s))", landed.size()));
             if (!landed.empty()) kvm::log::info("   B's temp copy: {}", landed[0].parent_path().string());
         }
         kvm::input::move_cursor_abs(cursor_before.x, cursor_before.y);
@@ -333,10 +341,12 @@ int main() {
                 press_escape();
                 kvm::input::send_mouse_button(kvm::input::MouseButton::Left, false);
             }
-            const DWORD a_effect = a_result.wait_for(1s) == std::future_status::ready ? a_result.get() : DROPEFFECT_NONE;
+            const DWORD a_effect =
+                a_result.wait_for(1s) == std::future_status::ready ? a_result.get() : DROPEFFECT_NONE;
             std::this_thread::sleep_for(300ms);
             std::lock_guard lock(catch_mutex);
-            check(a_effect != DROPEFFECT_NONE, std::format("3a: the moving drag dropped onto catch_over() (effect {})", a_effect));
+            check(a_effect != DROPEFFECT_NONE,
+                  std::format("3a: the moving drag dropped onto catch_over() (effect {})", a_effect));
             check(caught.size() == files.size(), std::format("3a: the catcher got the files ({})", caught.size()));
         }
         check(!catcher_over.visible(), "3a: the catcher is gone after the drop");
@@ -368,8 +378,9 @@ int main() {
             }
             std::this_thread::sleep_for(300ms);
             std::lock_guard lock(catch_mutex);
-            check(own.size() == files.size() && caught.empty(),
-                  std::format("3b: the own window got the drop, not the catcher ({} vs {})", own.size(), caught.size()));
+            check(
+                own.size() == files.size() && caught.empty(),
+                std::format("3b: the own window got the drop, not the catcher ({} vs {})", own.size(), caught.size()));
         }
         own_window.hide();
 
@@ -428,8 +439,9 @@ int main() {
         const DWORD effect4 = result4.wait_for(1s) == std::future_status::ready ? result4.get() : DROPEFFECT_NONE;
         std::this_thread::sleep_for(200ms);
         std::lock_guard lock(got_mutex);
-        check(effect4 != DROPEFFECT_NONE && got.size() == files.size(),
-              std::format("4: dropped by itself where the button went up (effect {}, {} item(s))", effect4, got.size()));
+        check(
+            effect4 != DROPEFFECT_NONE && got.size() == files.size(),
+            std::format("4: dropped by itself where the button went up (effect {}, {} item(s))", effect4, got.size()));
         kvm::input::move_cursor_abs(cursor_before.x, cursor_before.y);
     }
 

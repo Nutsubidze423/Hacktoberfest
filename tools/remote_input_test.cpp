@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // remote_input_test: the AnyDesk-like loop without a viewer. Paint is shared onto the VDD and the
 // test sends exactly what a viewer would: remote_mouse_move / mouse_button to draw a line, then
 // key messages for Ctrl+Z. The streamed JPEGs must show the line appear and disappear again.
@@ -140,16 +142,20 @@ int wmain(int argc, wchar_t** argv) {
         // Draw: button down at the start, 40 moves, button up at the end. The window isn't the
         // foreground window yet; RemoteInput must make the first click count anyway.
         input.handle(proto::Message{proto::RemoteMouseMove{.x_norm = kLineX0, .y_norm = kLineY}});
-        input.handle(proto::Message{proto::MouseButtonEvent{.button = proto::MouseButton::Left, .down = true, .x_norm = kLineX0, .y_norm = kLineY}});
+        input.handle(proto::Message{proto::MouseButtonEvent{
+            .button = proto::MouseButton::Left, .down = true, .x_norm = kLineX0, .y_norm = kLineY}});
         for (int i = 1; i <= 40; ++i) {
-            input.handle(proto::Message{proto::RemoteMouseMove{.x_norm = kLineX0 + (kLineX1 - kLineX0) * i / 40.0, .y_norm = kLineY}});
+            input.handle(proto::Message{
+                proto::RemoteMouseMove{.x_norm = kLineX0 + (kLineX1 - kLineX0) * i / 40.0, .y_norm = kLineY}});
             std::this_thread::sleep_for(10ms);
         }
-        input.handle(proto::Message{proto::MouseButtonEvent{.button = proto::MouseButton::Left, .down = false, .x_norm = kLineX1, .y_norm = kLineY}});
+        input.handle(proto::Message{proto::MouseButtonEvent{
+            .button = proto::MouseButton::Left, .down = false, .x_norm = kLineX1, .y_norm = kLineY}});
         settle();
         save(latest, "2_drawn");
         const int dark_drawn = dark_columns(latest, kLineY, kLineX0, kLineX1);
-        check(dark_drawn > dark_before + 200, std::format("mouse: the line shows up in the stream ({} dark columns)", dark_drawn));
+        check(dark_drawn > dark_before + 200,
+              std::format("mouse: the line shows up in the stream ({} dark columns)", dark_drawn));
 
         // Ctrl+Z through key messages.
         input.handle(proto::Message{proto::Key{.vk = VK_CONTROL, .down = true}});
@@ -159,12 +165,15 @@ int wmain(int argc, wchar_t** argv) {
         settle();
         save(latest, "3_undone");
         const int dark_undone = dark_columns(latest, kLineY, kLineX0, kLineX1);
-        check(dark_undone <= dark_before + 20, std::format("keyboard: Ctrl+Z removed it ({} dark columns)", dark_undone));
+        check(dark_undone <= dark_before + 20,
+              std::format("keyboard: Ctrl+Z removed it ({} dark columns)", dark_undone));
 
         // A click on the title bar must not leave the window un-maximized: the viewer shows the
         // whole VDD, so the window has to keep filling it.
-        input.handle(proto::Message{proto::MouseButtonEvent{.button = proto::MouseButton::Left, .down = true, .x_norm = 0.5, .y_norm = 0.01}});
-        input.handle(proto::Message{proto::MouseButtonEvent{.button = proto::MouseButton::Left, .down = false, .x_norm = 0.5, .y_norm = 0.01}});
+        input.handle(proto::Message{
+            proto::MouseButtonEvent{.button = proto::MouseButton::Left, .down = true, .x_norm = 0.5, .y_norm = 0.01}});
+        input.handle(proto::Message{
+            proto::MouseButtonEvent{.button = proto::MouseButton::Left, .down = false, .x_norm = 0.5, .y_norm = 0.01}});
         std::this_thread::sleep_for(300ms);
         MONITORINFO mi{};
         mi.cbSize = sizeof(mi);

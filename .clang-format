@@ -1,0 +1,25 @@
+# Sarke's C++ style: Google's, with a 4-space indent and 120 columns, tuned to change as little of
+# the existing code as possible. CI checks it with clang-format 19.1.5 (the version Visual Studio
+# 2022 ships): `clang-format -i <files>` before committing, or let your editor format on save.
+BasedOnStyle: Google
+Standard: c++20
+IndentWidth: 4
+ContinuationIndentWidth: 4
+ColumnLimit: 120
+AccessModifierOffset: -4
+DerivePointerAlignment: false
+PointerAlignment: Left
+# Include order matters on Windows (winsock2.h before windows.h, shellapi.h after it): never reorder.
+SortIncludes: Never
+IncludeBlocks: Preserve
+AllowShortFunctionsOnASingleLine: Inline
+AllowShortLambdasOnASingleLine: All
+AllowShortIfStatementsOnASingleLine: WithoutElse
+AllowShortLoopsOnASingleLine: true
+AllowShortBlocksOnASingleLine: Empty
+AllowShortCaseLabelsOnASingleLine: true
+IndentCaseLabels: false
+AlignTrailingComments:
+  Kind: Leave
+LineEnding: DeriveLF
+InsertNewlineAtEOF: true

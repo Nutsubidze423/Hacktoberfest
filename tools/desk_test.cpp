@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // desk_test: desk mode on one PC. The VDD is attached next to the primary monitor, and the windows
 // dragged onto it are drawn back on the primary monitor by a DeskView, exactly as the other PC would
 // draw them (the network is a loopback lambda). Drag a window over the edge and its "ghost" appears
@@ -200,17 +202,16 @@ int wmain(int argc, wchar_t** argv) {
         std::atomic<int> layouts{0};
         std::mutex layout_mutex;
         kvm::proto::DeskLayout last_layout;
-        kvm::DeskShare share(
-            *vdd_rect, region, loopback,
-            [&](const kvm::proto::DeskLayout& layout) {
-                ++layouts;
-                {
-                    std::lock_guard lock(layout_mutex);
-                    last_layout = layout;
-                }
-                view.set_layout(layout);
-            },
-            {.jpeg_quality = 80, .max_fps = 30});
+        kvm::DeskShare share(*vdd_rect, region, loopback,
+                             [&](const kvm::proto::DeskLayout& layout) {
+                                 ++layouts;
+                                 {
+                                     std::lock_guard lock(layout_mutex);
+                                     last_layout = layout;
+                                 }
+                                 view.set_layout(layout);
+                             },
+                             {.jpeg_quality = 80, .max_fps = 30});
 
         if (automatic) {
             const auto window = window_with_title(title);
@@ -229,7 +230,8 @@ int wmain(int argc, wchar_t** argv) {
                 const bool tracked = wait_until(
                     [&] {
                         for (const auto& r : region.rects()) {
-                            const bool at_edge = side == kvm::display::Side::Right ? r.left == vr.left : r.right == vr.right;
+                            const bool at_edge =
+                                side == kvm::display::Side::Right ? r.left == vr.left : r.right == vr.right;
                             if (at_edge && r.width() > 100 && r.width() < vr.width() && r.height() > 300) return true;
                         }
                         return false;
@@ -244,12 +246,14 @@ int wmain(int argc, wchar_t** argv) {
                 // Dragging it further over: the layout follows every step, no new pictures needed.
                 const int before_layouts = layouts;
                 for (int i = 1; i <= 10; ++i) {
-                    SetWindowPos(hwnd, nullptr, x + 20 * i, vr.top + 100, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+                    SetWindowPos(hwnd, nullptr, x + 20 * i, vr.top + 100, 0, 0,
+                                 SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
                     std::this_thread::sleep_for(30ms);
                 }
                 check(wait_until([&] { return layouts - before_layouts >= 5; }, 1s),
                       std::format("moving it sends the new place ({} layouts for 10 steps)", layouts - before_layouts));
-                kvm::display::Point inside{side == kvm::display::Side::Right ? vr.left + 50 : vr.right - 50, vr.top + 300};
+                kvm::display::Point inside{side == kvm::display::Side::Right ? vr.left + 50 : vr.right - 50,
+                                           vr.top + 300};
                 check(region.hit(inside), "a point on the window hits");
                 check(!region.hit({inside.x, vr.top + 1000}), "a point below it doesn't");
                 std::this_thread::sleep_for(500ms);  // look at it: the ghost is on the other side of the screen
@@ -276,8 +280,9 @@ int wmain(int argc, wchar_t** argv) {
 
                 // The overlay isn't topmost, and a window this PC raises comes in front of it.
                 check((GetWindowLongPtrW(view.hwnd(), GWL_EXSTYLE) & WS_EX_TOPMOST) == 0, "the overlay is not topmost");
-                const HWND probe = CreateWindowExW(0, L"STATIC", L"local window", WS_POPUP | WS_VISIBLE, inside.x - 80,
-                                                   vr.top + 150, 320, 320, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
+                const HWND probe =
+                    CreateWindowExW(0, L"STATIC", L"local window", WS_POPUP | WS_VISIBLE, inside.x - 80, vr.top + 150,
+                                    320, 320, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
                 SetForegroundWindow(probe);
                 SetWindowPos(probe, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
                 check(wait_until([&] { return z_index(probe) >= 0 && z_index(probe) < z_index(view.hwnd()); }, 1s),

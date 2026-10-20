@@ -15,3 +15,11 @@ vcpkg_installed/
 CMakeUserPresets.json
 *.user
 dist/
+
+# The Virtual Display Driver binaries come from tools\fetch_vdd.ps1 (pinned and hash-checked).
+installer/vdd/MttVDD.dll
+installer/vdd/MttVDD.cat
+installer/vdd/mttvdd.inf
+
+# ctest's output when it runs from the repo root
+Testing/
