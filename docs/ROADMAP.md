@@ -289,7 +289,7 @@ Task-level links that matter:
     - **A configure guard** fails the build when a `*_test.cpp` is in no group.
     - **Three test fixes**, test code only:
       - `vdd_test` expected 1920×1200 to fall back to 1080p, but 1920×1200 has been a shipped VDD mode since `f1e2d8f`;
-      - `video_sender_test`'s fixed 20 fps floor was beyond a Celeron's reach (18.6–21 fps), so the floor now follows the encode time measured on the machine;
+      - `video_sender_test`'s fixed 20 fps floor was beyond a Celeron's reach (18.6–21 fps), so the floor now follows the encode time measured on the machine. It also failed whenever other work was using the CPU (6–11 fps while a type-check ran in another project), so the floor is now a hard check only with `SARKE_STRICT_TIMING=1`, which CI sets; on a dev PC a low number is logged as `[slow]`;
       - `desk_test` now gets `--settle 3`.
     - **Known issue:** `window_mover_test` and `capture_test` fail now and then in the full sequence, but pass on their own. This is P0.9.
 

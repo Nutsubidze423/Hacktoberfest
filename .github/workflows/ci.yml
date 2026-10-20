@@ -65,6 +65,8 @@ jobs:
 
       - name: Configure, build, unit tests
         shell: cmd
+        env:
+          SARKE_STRICT_TIMING: 1  # timing floors fail here: a CI runner isn't busy with other work
         run: |
           call "%VS_PATH%\VC\Auxiliary\Build\vcvars64.bat" || exit /b 1
           cmake --preset x64-release || exit /b 1

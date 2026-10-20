@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cstdlib>
 #include <format>
 #include <mutex>
 #include <string>
@@ -57,6 +58,15 @@ std::vector<kvm::CapturedFrame> moving_block_frames() {
         }
     }
     return frames;
+}
+
+// SARKE_STRICT_TIMING=1 (set by CI): timing floors are checks, not just warnings.
+bool strict_timing() {
+    char* value = nullptr;
+    std::size_t length = 0;
+    const bool set = _dupenv_s(&value, &length, "SARKE_STRICT_TIMING") == 0 && value && *value && *value != '0';
+    std::free(value);
+    return set;
 }
 
 // The most frames/s this CPU can send through a channel that takes `send_ms` per frame: the sender
@@ -229,9 +239,17 @@ int main() {
         const double fps = static_cast<double>(r.headers.size()) / r.seconds;
         check(!r.headers.empty() && seq_without_gaps(r), std::format("{} frames, seq 0..n-1, codec jpeg", r.headers.size()));
         check(r.all_valid_jpeg, "every payload is a 1920x1080 JPEG");
-        // The floor leaves room for the producer thread and the rest of the machine sharing the CPU.
-        check(fps <= 31.0 && fps >= 0.6 * reachable,
-              std::format("{:.1f} frames/s (cap 30; this CPU reaches about {:.0f})", fps, reachable));
+        check(fps <= 31.0, std::format("{:.1f} frames/s (cap 30; this CPU reaches about {:.0f})", fps, reachable));
+        // Too few frames means a stalled sender, or a CPU busy with other work: on a shared dev PC that
+        // says more about the machine than the code, so only CI (SARKE_STRICT_TIMING) fails on it.
+        // The floor leaves room for the producer thread sharing the CPU.
+        const bool enough = fps >= 0.6 * reachable;
+        if (strict_timing()) {
+            check(enough, std::format("at least {:.0f} frames/s", 0.6 * reachable));
+        } else if (!enough) {
+            kvm::log::warn("[slow] {:.1f} frames/s, below {:.0f}: is the CPU busy? (fails only in CI)", fps,
+                           0.6 * reachable);
+        }
         check(r.skipped > 0, std::format("{} older frames skipped instead of queued", r.skipped));
         check(r.stop_ms < 300, std::format("stop() took {:.0f} ms", r.stop_ms));
         kvm::log::info("   capture -> sent: {:.1f} ms on average", average_ms(r.latency_us, 0, r.latency_us.size()));
