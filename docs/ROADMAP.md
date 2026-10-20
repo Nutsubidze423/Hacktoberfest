@@ -334,6 +334,9 @@ Task-level links that matter:
     - **`/WX` on, plus `/external:anglebrackets /external:W0`:** the full rebuild has 0 warnings and 9/9 unit tests pass. The resource compiler accepts the flags.
     - **CI** runs a clang-format 19.1.5 check (the same version VS 2022 ships, pinned from PyPI) before the build.
     - **Not re-run:** the `local` suite. This change can't alter behaviour (formatting and compiler flags only).
+    - **Negative test** on a throwaway branch (since deleted):
+      - a correctly formatted unused variable failed CI's build step (`/WX`);
+      - a badly formatted line failed CI's format step after 30 s, before the build.
 
 - [ ] **P0.5 Binaries out of git; VDD fetch script; GitHub Releases** (M), branch `phase0/releases`. Depends on D4 and D5.
   - **Files:**
