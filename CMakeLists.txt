@@ -35,6 +35,8 @@ endfunction()
 
 # Source files are globbed per directory, so adding a new .cpp needs no CMakeLists edit
 # (fewer merge conflicts between tracks). Re-run configure is automatic via CONFIGURE_DEPENDS.
+# Tests are registered in tools/CMakeLists.txt (labels unit / desktop / vdd / bench).
+enable_testing()
 add_subdirectory(common)
 add_subdirectory(host_a)
 add_subdirectory(client_b)

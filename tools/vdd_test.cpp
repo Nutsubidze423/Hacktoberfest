@@ -141,8 +141,10 @@ int main(int argc, char** argv) {
 
     // What happens on connection when Windows had put the VDD back at the driver's small default.
     check(vdd->set_mode(800, 600, 60), "VDD at 800x600 (like Windows' default)");
-    check(vdd->match_peer(1920, 1200, side) && has_size(*vdd, 1920, 1080) && is_on_side(*vdd, side),
-          "match_peer(1920x1200): closest mode 1920x1080, on the side");
+    // Modes come from installer/vdd/vdd_settings.xml: 1920x1200 is one, 1920x1150 is not.
+    check(vdd->match_peer(1920, 1150, side) && has_size(*vdd, 1920, 1080) && is_on_side(*vdd, side),
+          "match_peer(1920x1150): closest mode 1920x1080, on the side");
+    check(vdd->match_peer(1920, 1200, side) && has_size(*vdd, 1920, 1200), "match_peer(1920x1200): exact");
     check(vdd->match_peer(1920, 1080, side) && has_size(*vdd, 1920, 1080), "match_peer(1920x1080): exact");
     const SIZE best = vdd->best_mode(2560, 1600);
     check(best.cx == 2560 && best.cy == 1440, std::format("best_mode(2560x1600) = {}x{}", best.cx, best.cy));

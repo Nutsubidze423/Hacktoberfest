@@ -265,7 +265,7 @@ Task-level links that matter:
     - `git shortlog -sne` shows no `unknown`;
     - the `ui_preview_*` tools still run (manual, one PC).
 
-- [ ] **P0.2 Turn the tests into ctest, with labels** (M), branch `phase0/ctest`.
+- [x] **P0.2 Turn the tests into ctest, with labels** (M), branch `phase0/ctest`.
   - **Files:**
     - root `CMakeLists.txt`: `enable_testing()`;
     - `tools/CMakeLists.txt`: `add_test` for every `*_test`, with `TIMEOUT` and `LABELS`;
@@ -283,6 +283,15 @@ Task-level links that matter:
   - **Done when:**
     - `ctest --preset unit` passes on this PC;
     - `ctest --preset local` passes at an unlocked desktop, or each failure is written up here as a known issue.
+  - **Result (2026-10-20, this PC):**
+    - **`unit`:** 9/9 pass in about 13 s.
+    - **`local`:** 25 tests including the Paint fixture, about 2.5 min.
+    - **A configure guard** fails the build when a `*_test.cpp` is in no group.
+    - **Three test fixes**, test code only:
+      - `vdd_test` expected 1920×1200 to fall back to 1080p, but 1920×1200 has been a shipped VDD mode since `f1e2d8f`;
+      - `video_sender_test`'s fixed 20 fps floor was beyond a Celeron's reach (18.6–21 fps), so the floor now follows the encode time measured on the machine;
+      - `desk_test` now gets `--settle 3`.
+    - **Known issue:** `window_mover_test` and `capture_test` fail now and then in the full sequence, but pass on their own. This is P0.9.
 
 - [ ] **P0.3 GitHub Actions CI** (M), branch `phase0/ci`. Depends on P0.2.
   - **Files:** `.github/workflows/ci.yml`.
@@ -362,6 +371,15 @@ Task-level links that matter:
   - **Done when:**
     - GitHub detects the license;
     - the notices list every vcpkg dependency.
+
+- [ ] **P0.9 Window moves right after the VDD attaches** (S/M), branch `phase0/window-mover-race`. Found by P0.2.
+  - **Symptom:** `WindowMover::send` sometimes logs "the window did not end up maximized on the target monitor" ([host_a/window_mover.cpp:116](../host_a/window_mover.cpp#L116)) when the VDD was attached a moment earlier. It shows up as intermittent `window_mover_test`/`capture_test` failures in `ctest --preset local`; both pass when run alone.
+  - **Suspect:** Windows re-places windows after a display-topology change, after `wait_until_settled` has already returned. That would also hit the window viewer's Ctrl+Alt+Shift+W in real use.
+  - **Plan:**
+    1. Reproduce it in a loop (`ctest -R "window_mover|capture" --repeat until-fail:20`).
+    2. Log the window rect over time after the attach.
+    3. Then fix `send` (wait for the topology change to settle, or verify and retry once), plus a regression check in `window_mover_test`.
+  - **Done when:** 20 runs of `ctest --preset local` in a row have no window-move failures.
 
 ### Phase 0 acceptance
 - **Automated:**

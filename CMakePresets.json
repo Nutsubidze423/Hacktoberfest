@@ -29,5 +29,23 @@
   "buildPresets": [
     { "name": "x64-debug", "configurePreset": "x64-debug" },
     { "name": "x64-release", "configurePreset": "x64-release" }
+  ],
+  "testPresets": [
+    {
+      "name": "unit",
+      "displayName": "Unit tests (headless, CI)",
+      "configurePreset": "x64-release",
+      "output": { "outputOnFailure": true },
+      "filter": { "include": { "label": "^unit$" } },
+      "execution": { "noTestsAction": "error" }
+    },
+    {
+      "name": "local",
+      "displayName": "Everything that runs on one PC (unit + desktop + vdd); hands off the mouse",
+      "configurePreset": "x64-release",
+      "output": { "outputOnFailure": true },
+      "filter": { "include": { "label": "^(unit|desktop|vdd)$" } },
+      "execution": { "noTestsAction": "error" }
+    }
   ]
 }

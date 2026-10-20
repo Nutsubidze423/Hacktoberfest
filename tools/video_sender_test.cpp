@@ -22,6 +22,7 @@
 
 #include "kvm/log.h"
 #include "kvm/net.h"
+#include "jpeg_encoder.h"
 #include "kvm/video.h"
 #include "video_sender.h"
 
@@ -54,6 +55,22 @@ std::vector<kvm::CapturedFrame> moving_block_frames() {
         }
     }
     return frames;
+}
+
+// The most frames/s this CPU can send through a channel that takes `send_ms` per frame: the sender
+// encodes and sends one frame after the other, so a slow CPU (a Celeron N4020 encodes 1080p in about
+// 20 ms) can't reach max_fps however good the pacing is.
+double reachable_fps(double send_ms, int max_fps) {
+    const auto pattern = moving_block_frames();
+    kvm::JpegEncoder jpeg(75);
+    std::vector<std::uint8_t> out;
+    constexpr int kRuns = 10;
+    double total_ms = 0;
+    for (int i = 0; i < kRuns; ++i) {
+        jpeg.encode(pattern[i % pattern.size()], out);
+        total_ms += jpeg.last_encode_ms();
+    }
+    return std::min(static_cast<double>(max_fps), 1000.0 / (total_ms / kRuns + send_ms));
 }
 
 struct Result {
@@ -205,11 +222,14 @@ int main() {
 
     kvm::log::info("1) channel takes 20 ms per frame, max_fps 30, producer 60 fps");
     {
+        const double reachable = reachable_fps(20.0, 30);
         const auto r = run(20ms, 30, 3s);
         const double fps = static_cast<double>(r.headers.size()) / r.seconds;
         check(!r.headers.empty() && seq_without_gaps(r), std::format("{} frames, seq 0..n-1, codec jpeg", r.headers.size()));
         check(r.all_valid_jpeg, "every payload is a 1920x1080 JPEG");
-        check(fps <= 31.0 && fps >= 20.0, std::format("{:.1f} frames/s (cap 30)", fps));
+        // The floor leaves room for the producer thread and the rest of the machine sharing the CPU.
+        check(fps <= 31.0 && fps >= 0.6 * reachable,
+              std::format("{:.1f} frames/s (cap 30; this CPU reaches about {:.0f})", fps, reachable));
         check(r.skipped > 0, std::format("{} older frames skipped instead of queued", r.skipped));
         check(r.stop_ms < 300, std::format("stop() took {:.0f} ms", r.stop_ms));
         kvm::log::info("   capture -> sent: {:.1f} ms on average", average_ms(r.latency_us, 0, r.latency_us.size()));

@@ -98,8 +98,17 @@ To build the installer (needs [Inno Setup 6](https://jrsoftware.org/isinfo.php))
 powershell -ExecutionPolicy Bypass -File tools\make_installer.ps1
 ```
 
-Each `tools\*_test.cpp` builds into its own test executable. To try both sides on one PC, start
-`kvm_host.exe`, then `kvm_client.exe --host 127.0.0.1 --desk-no-vdd`.
+Each `tools\*_test.cpp` builds into its own test executable, registered with ctest under a label
+that says what it needs:
+
+```powershell
+ctest --preset unit    # headless tests, also run by CI
+ctest --preset local   # + desktop (hooks, SendInput, clipboard) and vdd (Virtual Display Driver) tests
+```
+
+`local` moves the mouse, attaches the virtual display and opens a Paint window for about three
+minutes, so keep your hands off the mouse and keyboard while it runs. To try both sides on one PC,
+start `kvm_host.exe`, then `kvm_client.exe --host 127.0.0.1 --desk-no-vdd`.
 
 ## How it works
 
