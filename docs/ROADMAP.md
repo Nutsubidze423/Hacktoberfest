@@ -291,7 +291,7 @@ Task-level links that matter:
       - `vdd_test` expected 1920×1200 to fall back to 1080p, but 1920×1200 has been a shipped VDD mode since `f1e2d8f`;
       - `video_sender_test`'s fixed 20 fps floor was beyond a Celeron's reach (18.6–21 fps), so the floor now follows the encode time measured on the machine. It also failed whenever other work was using the CPU (6–11 fps while a type-check ran in another project), so the floor is now a hard check only with `SARKE_STRICT_TIMING=1`, which CI sets; on a dev PC a low number is logged as `[slow]`;
       - `desk_test` now gets `--settle 3`.
-    - **Known issue:** `window_mover_test` and `capture_test` fail now and then in the full sequence, but pass on their own. This is P0.9.
+    - **Known issue, since fixed by P0.9:** `window_mover_test` and `capture_test` failed now and then in the full sequence but passed on their own.
 
 - [x] **P0.3 GitHub Actions CI** (M), branch `phase0/ci`. Depends on P0.2.
   - **Files:** `.github/workflows/ci.yml`.
@@ -428,7 +428,7 @@ Task-level links that matter:
     - **Notices:** `THIRD_PARTY_NOTICES.md` holds the full license texts. The check found that **libspng 0.7.4 and zlib 1.3.2** are compiled into the exes through libjpeg-turbo (their strings are in `kvm_host.exe`), so they are listed too.
     - **Moved to P0.5:** shipping `LICENSE`, `NOTICE` and `THIRD_PARTY_NOTICES.md` in the installer's `licenses` folder. Inno Setup isn't on this PC, so the installer change can't be verified here.
 
-- [ ] **P0.9 Window moves right after the VDD attaches** (S/M), branch `phase0/window-mover-race`. Found by P0.2.
+- [x] **P0.9 Window moves right after the VDD attaches** (S/M), branch `phase0/window-mover-race`. Found by P0.2.
   - **Symptom:** `WindowMover::send` sometimes logs "the window did not end up maximized on the target monitor" ([host_a/window_mover.cpp:116](../host_a/window_mover.cpp#L116)) when the VDD was attached a moment earlier. It shows up as intermittent `window_mover_test`/`capture_test` failures in `ctest --preset local`; both pass when run alone.
   - **Suspect:** Windows re-places windows after a display-topology change, after `wait_until_settled` has already returned. That would also hit the window viewer's Ctrl+Alt+Shift+W in real use.
   - **Plan:**
@@ -436,6 +436,15 @@ Task-level links that matter:
     2. Log the window rect over time after the attach.
     3. Then fix `send` (wait for the topology change to settle, or verify and retry once), plus a regression check in `window_mover_test`.
   - **Done when:** 20 runs of `ctest --preset local` in a row have no window-move failures.
+  - **Result (2026-10-20):**
+    - **Reproduced** with a log of where the window ended up: 1 failure in 20 moves (10 rounds of `vdd_test` → `window_mover_test` → `capture_test`). The window was maximized **on the primary monitor**, not the VDD, and it stayed there 1 s later. So it had been put back on its old monitor before `SW_MAXIMIZE`: Windows re-places windows for the new display layout right after the VDD attaches.
+    - **Fix** ([host_a/window_mover.cpp](../host_a/window_mover.cpp)): check the monitor before and after maximizing, and on a miss un-maximize, wait 300 ms and move again (3 attempts). Each miss is logged with the window's position.
+    - **Verified:**
+      - 20 rounds of `vdd_test`, `window_mover_test`, `capture_test` and `window_share_test`: 120/120 pass;
+      - the log shows 4 "moved back before maximizing", each fixed by the second attempt;
+      - `ctest --preset local` 27/27.
+
+      Not run: 20 *full* `local` runs, which take about an hour. The rounds cover every test that moves a window onto the VDD.
 
 - [x] **P0.10 Sarke's ports reserved by Windows** (S), branch `phase0/reserved-ports`. Found by P0.7.
   - **Problem:** Hyper-V, WSL and Docker reserve TCP port ranges (`netsh interface ipv4 show excludedportrange protocol=tcp`), and the ranges can change on reboot. If one covers 50500–50502, `kvm_host` can't listen (WSAEACCES, 10013). On this PC 50503–50602 is reserved, one port above Sarke's.
