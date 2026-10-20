@@ -6,6 +6,7 @@
 //   --no-clipboard  don't share copied text/images with the host
 //   --no-desk       no desk mode (the host's screen as one more monitor); Ctrl+Alt+Shift+W uses the viewer
 //   --desk-no-vdd   desk mode, but only show the host's windows (one-PC tests: the host owns the VDD)
+//   --data-dir <dir> --print-id --pair-with <device id> --recreate-identity: see kvm/trust.h
 
 #include <atomic>
 #include <chrono>
@@ -26,6 +27,7 @@
 #include "kvm/clipboard.h"
 #include "kvm/config.h"
 #include "kvm/desk_region.h"
+#include "kvm/trust.h"
 #include "kvm/discovery.h"
 #include "kvm/dpi.h"
 #include "kvm/file_link.h"
@@ -56,6 +58,7 @@ constexpr auto kReconnectDelay = 1s;
 constexpr auto kStatsInterval = 5s;
 
 std::atomic<bool> g_running{true};
+std::string g_device_id;  // this PC's device ID (hex), sent in hello
 std::atomic<bool> g_desk{false};        // desk mode may have the VDD attached
 std::atomic<bool> g_cleaned_up{false};  // wmain's objects are gone (windows home, VDD detached)
 
@@ -93,6 +96,7 @@ proto::Hello make_hello(bool desk) {
         .dpi_scale = primary.scale,
         .hostname = narrow(std::wstring_view(name, name_len)),
         .desk = desk,
+        .device_id = g_device_id,
     };
 }
 
@@ -233,7 +237,12 @@ int wmain(int argc, wchar_t** argv) {
     bool clipboard_enabled = true;
     bool desk_enabled = true;
     bool desk_own_vdd = true;
+    kvm::trust::Options trust_options;
     for (int i = 1; i < argc; ++i) {
+        if (const int used = kvm::trust::parse_arg(trust_options, argc, argv, i)) {
+            i += used - 1;
+            continue;
+        }
         const std::wstring_view arg = argv[i];
         if (arg == L"--config" && i + 1 < argc) {
             config_path = argv[++i];
@@ -256,6 +265,12 @@ int wmain(int argc, wchar_t** argv) {
         struct CleanedUp {  // first in this scope, so it is destroyed last
             ~CleanedUp() { g_cleaned_up = true; }
         } cleaned_up;
+        // Who this PC is and whom it trusts (docs/SECURITY.md 6.4), before connecting anywhere.
+        auto trust = kvm::trust::setup(trust_options, make_hello(false).hostname);
+        if (!trust) return 1;
+        if (trust_options.print_id) return 0;
+        g_device_id = kvm::tls::to_hex(trust->me.id());
+
         kvm::Config cfg = kvm::load_config(config_path);
         if (host_override) {
             cfg.host_ip = *host_override;
@@ -380,9 +395,13 @@ int wmain(int argc, wchar_t** argv) {
                 cfg.host_ip = found->ip;
                 cfg.control_port = found->control_port;
             }
-            if (auto conn = kvm::net::connect(cfg.host_ip, cfg.control_port)) {
-                run_session(*conn, cfg, kvm_link ? &*kvm_link : nullptr, clip_on ? &clip : nullptr, files, windows,
-                            places, current_peer);
+            if (auto pending = kvm::net::connect(cfg.host_ip, cfg.control_port, trust->me)) {
+                // Pinning: the host's key must be paired before a single message of it is read.
+                if (kvm::trust::admit(*trust->paired, *pending->stream, pending->peer)) {
+                    kvm::net::Connection conn(std::move(*pending));
+                    run_session(conn, cfg, kvm_link ? &*kvm_link : nullptr, clip_on ? &clip : nullptr, files, windows,
+                                places, current_peer);
+                }
             }
             if (g_running) {
                 kvm::log::info("reconnecting in {} s...", kReconnectDelay.count());

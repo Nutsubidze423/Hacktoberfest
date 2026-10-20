@@ -35,13 +35,6 @@ namespace {
 
 constexpr std::size_t kHeaderBytes = 4;
 
-// recv() fails with WSAETIMEDOUT when nothing arrives for this long. Pings every kPingInterval
-// guarantee traffic on a healthy link.
-void set_receive_timeout(SOCKET s) {
-    const DWORD ms = static_cast<DWORD>(std::chrono::duration_cast<std::chrono::milliseconds>(kDeadAfter).count());
-    setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&ms), sizeof(ms));
-}
-
 std::string peer_name(const sockaddr* addr, int len) {
     std::array<char, NI_MAXHOST> host{};
     std::array<char, NI_MAXSERV> port{};
@@ -303,9 +296,8 @@ void ensure_winsock() {
 // ---------------------------------------------------------------------------------------------
 // Connection
 
-Connection::Connection(SOCKET sock, std::string peer) : sock_(sock), peer_(std::move(peer)) {
-    set_nodelay(sock_);
-    set_receive_timeout(sock_);
+Connection::Connection(Handshaken connection) : tls_(std::move(connection.stream)), peer_(std::move(connection.peer)) {
+    tls_->set_receive_timeout(kDeadAfter);
     ping_thread_ = std::jthread([this] { ping_loop(stop_.get_token()); });
     receive_thread_ = std::jthread([this] { receive_loop(); });
 }
@@ -318,7 +310,7 @@ Connection::~Connection() {
     if (receive_thread_.joinable()) {
         receive_thread_.join();
     }
-    closesocket(sock_);
+    // tls_ closes the socket when it goes.
 }
 
 bool Connection::send_json(const nlohmann::json& j) {
@@ -336,9 +328,9 @@ bool Connection::send_json(const nlohmann::json& j) {
     std::memcpy(frame.data() + kHeaderBytes, body.data(), body.size());
 
     std::lock_guard lock(send_mutex_);
-    if (!send_all(sock_, frame.data(), frame.size())) {
+    if (!tls_->send_all(frame.data(), frame.size())) {
         if (open_) {
-            log::warn("net: send to {} failed: {}", peer_, last_error_text());
+            log::warn("net: send to {} failed", peer_);
         }
         close();
         return false;
@@ -352,9 +344,9 @@ LinkStats Connection::stats() const {
 
 void Connection::close() {
     if (open_.exchange(false)) {
-        // abort (not closesocket) wakes a blocked recv()/send() without invalidating the handle
-        // that other threads may still be using; the destructor closes it after joining.
-        abort_socket(sock_);
+        // abort (not close) wakes a blocked receive/send without invalidating the socket that other
+        // threads may still be using; tls_ closes it after the threads are joined.
+        tls_->abort();
         stop_.request_stop();
     }
 }
@@ -363,7 +355,7 @@ void Connection::receive_loop() {
     std::vector<char> body;
     while (open_) {
         u_long net_len = 0;
-        int err = recv_exact(sock_, reinterpret_cast<char*>(&net_len), kHeaderBytes);
+        int err = tls_->recv_exact(reinterpret_cast<char*>(&net_len), kHeaderBytes);
         if (err == 0) {
             const std::uint32_t len = ntohl(net_len);
             if (len == 0 || len > proto::kMaxControlMessageBytes) {
@@ -371,7 +363,7 @@ void Connection::receive_loop() {
                 break;
             }
             body.resize(len);
-            err = recv_exact(sock_, body.data(), len);
+            err = tls_->recv_exact(body.data(), len);
         }
         if (err != 0) {
             if (!open_) {
@@ -444,19 +436,36 @@ Server::~Server() {
     stop();
 }
 
-std::unique_ptr<Connection> Server::accept() {
-    std::string peer;
-    const SOCKET s = accept_on(listen_sock_, peer);
-    return s == INVALID_SOCKET ? nullptr : std::make_unique<Connection>(s, std::move(peer));
+std::optional<Handshaken> Server::accept(const tls::Credentials& me, std::chrono::milliseconds handshake_timeout) {
+    for (;;) {
+        std::string peer;
+        const SOCKET s = accept_on(listen_sock_, peer);
+        if (s == INVALID_SOCKET) return std::nullopt;  // stop()
+        set_nodelay(s);
+        std::string why;
+        if (auto stream = tls::Stream::handshake(s, tls::Role::Server, me, handshake_timeout, why)) {
+            return Handshaken{std::move(stream), std::move(peer)};
+        }
+        log::warn("net: {}: {}", peer, why);  // the socket is closed; wait for the next client
+    }
 }
 
 void Server::stop() {
     close_listener(listen_sock_);
 }
 
-std::unique_ptr<Connection> connect(const std::string& host, std::uint16_t port, std::chrono::milliseconds timeout) {
+std::optional<Handshaken> connect(const std::string& host, std::uint16_t port, const tls::Credentials& me,
+                                  std::chrono::milliseconds timeout) {
     const SOCKET s = connect_to(host, port, timeout);
-    return s == INVALID_SOCKET ? nullptr : std::make_unique<Connection>(s, host + ":" + std::to_string(port));
+    if (s == INVALID_SOCKET) return std::nullopt;
+    const std::string peer = host + ":" + std::to_string(port);
+    std::string why;
+    auto stream = tls::Stream::handshake(s, tls::Role::Client, me, kHandshakeTimeout, why);
+    if (!stream) {
+        log::warn("net: {}: {}", peer, why);
+        return std::nullopt;
+    }
+    return Handshaken{std::move(stream), peer};
 }
 
 }  // namespace kvm::net

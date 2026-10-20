@@ -1,12 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// TCP transport for the control channel (port 50500): length-prefixed JSON messages.
+// The control channel (port 50500): length-prefixed JSON messages over TLS 1.3 (kvm/tls.h).
 //
-//   Host A:  kvm::net::Server server(port);  auto conn = server.accept();
-//   Client B: auto conn = kvm::net::connect(ip, port, 2s);   // nullptr on failure, retry yourself
+//   Host:   kvm::net::Server server(port);  auto pending = server.accept(me);
+//   Client: auto pending = kvm::net::connect(ip, port, me);  // nullopt on failure, retry yourself
+//   // Nothing has been read yet: check pending->stream->peer_id() against the paired PCs
+//   // (kvm/trust.h, docs/SECURITY.md 6.4) and only then start reading:
+//   kvm::net::Connection conn(std::move(*pending));
 //
-//   conn->send(proto::MouseMove{.dx = 3, .dy = -1});        // thread-safe, never throws
-//   while (auto msg = conn->incoming().pop()) { ... }        // ends when the connection drops
+//   conn.send(proto::MouseMove{.dx = 3, .dy = -1});         // thread-safe, never throws
+//   while (auto msg = conn.incoming().pop()) { ... }         // ends when the connection drops
 //
 // Each Connection runs a receive thread and a ping thread. Ping/pong are handled internally:
 // the receive side answers pings, measures round-trip time and the peer clock offset (stats()),
@@ -21,6 +24,7 @@
 #include <cstdint>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <stop_token>
 #include <thread>
@@ -29,6 +33,7 @@
 
 #include "kvm/protocol.h"
 #include "kvm/queue.h"
+#include "kvm/tls.h"
 
 namespace kvm {
 
@@ -52,10 +57,19 @@ struct LinkStats {
     std::int64_t clock_offset_us = 0;  // peer_clock - local_clock, estimated from ping/pong
 };
 
+// A TLS connection right after the handshake: the peer's key is known (stream->peer_id()), and
+// nothing has been read from it yet. Decide whether to trust it before making a Connection.
+struct Handshaken {
+    std::unique_ptr<tls::Stream> stream;
+    std::string peer;  // "ip:port"
+};
+
+inline constexpr auto kHandshakeTimeout = std::chrono::seconds(10);
+
 class Connection {
 public:
-    // Takes ownership of a connected socket and starts the receive and ping threads.
-    Connection(SOCKET sock, std::string peer);
+    // Starts the receive and ping threads: only for a peer that has been checked.
+    explicit Connection(Handshaken connection);
     ~Connection();
 
     Connection(const Connection&) = delete;
@@ -92,7 +106,7 @@ private:
     };
     static constexpr std::size_t kOffsetSamples = 8;
 
-    SOCKET sock_;
+    std::unique_ptr<tls::Stream> tls_;
     std::string peer_;
     std::atomic<bool> open_{true};
     std::mutex send_mutex_;
@@ -115,8 +129,10 @@ public:
     Server(const Server&) = delete;
     Server& operator=(const Server&) = delete;
 
-    // Blocks until a client connects. nullptr after stop().
-    std::unique_ptr<Connection> accept();
+    // Blocks until a client connects and completes the TLS handshake. A client whose handshake fails
+    // (not TLS, no certificate, too slow) is logged and skipped. nullopt after stop().
+    std::optional<Handshaken> accept(const tls::Credentials& me,
+                                     std::chrono::milliseconds handshake_timeout = kHandshakeTimeout);
 
     // Unblocks accept() from any thread (e.g. a Ctrl+C handler). Idempotent.
     void stop();
@@ -125,8 +141,9 @@ private:
     std::atomic<SOCKET> listen_sock_{INVALID_SOCKET};
 };
 
-// Connects to host:port within `timeout`. nullptr on failure (logged); caller decides when to retry.
-std::unique_ptr<Connection> connect(const std::string& host, std::uint16_t port,
-                                    std::chrono::milliseconds timeout = std::chrono::seconds(2));
+// Connects to host:port within `timeout` and runs the TLS handshake. nullopt on failure (logged);
+// the caller decides when to retry.
+std::optional<Handshaken> connect(const std::string& host, std::uint16_t port, const tls::Credentials& me,
+                                  std::chrono::milliseconds timeout = std::chrono::seconds(2));
 
 }  // namespace kvm::net

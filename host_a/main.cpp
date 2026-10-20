@@ -3,10 +3,12 @@
 // kvm_host.exe — runs on A (owns the physical mouse/keyboard, streams a window).
 // Usage: kvm_host.exe [--config <path>] [--log <file>] [--no-kvm] [--no-clipboard] [--no-desk]
 //                     [--no-discovery] [--test-video [--test-video-kb N] [--test-video-fps N]]
+//                     [--data-dir <dir>] [--print-id] [--pair-with <device id>] [--recreate-identity]
 //   --no-kvm      don't install the input hooks (e.g. when only testing the video stream)
 //   --no-clipboard  don't share copied text/images with the client
 //   --no-desk     no desk mode (the client's screen as one more monitor); Ctrl+Alt+Shift+W uses the viewer
 //   --no-discovery  don't answer other PCs looking for hosts (tests: no other PC can find this one)
+//   --data-dir ... --recreate-identity: this PC's identity and paired PCs, see kvm/trust.h
 //   --test-video  send synthetic frames (codec "test", random bytes, default 250 KB at 30 fps) so
 //                 network throughput and video latency can be measured before capture/viewer exist
 
@@ -30,6 +32,7 @@
 #include "kvm/config.h"
 #include "kvm/desk_region.h"
 #include "kvm/discovery.h"
+#include "kvm/trust.h"
 #include "kvm/dpi.h"
 #include "kvm/file_link.h"
 #include "kvm/file_transfer.h"
@@ -58,12 +61,14 @@ struct Options {
     bool clipboard = true;
     bool desk = true;  // --no-desk, config "desk"
     bool discovery = true;  // --no-discovery
+    kvm::trust::Options trust;
     bool test_video = false;
     int test_video_kb = 250;
     int test_video_fps = 30;
 };
 
 std::atomic<bool> g_running{true};
+std::string g_device_id;  // this PC's device ID (hex), sent in hello
 std::atomic<kvm::net::Server*> g_server{nullptr};
 std::atomic<kvm::net::VideoServer*> g_video_server{nullptr};
 std::atomic<kvm::files::FileServer*> g_file_server{nullptr};
@@ -172,6 +177,7 @@ proto::Hello make_hello(bool desk) {
         .dpi_scale = primary.scale,
         .hostname = narrow(std::wstring_view(name, name_len)),
         .desk = desk,
+        .device_id = g_device_id,
     };
 }
 
@@ -290,6 +296,10 @@ void run_session(kvm::net::Connection& conn, kvm::KvmLink* kvm, kvm::clip::Clipb
 Options parse_args(int argc, wchar_t** argv) {
     Options opt;
     for (int i = 1; i < argc; ++i) {
+        if (const int used = kvm::trust::parse_arg(opt.trust, argc, argv, i)) {
+            i += used - 1;
+            continue;
+        }
         const std::wstring_view arg = argv[i];
         const bool has_value = i + 1 < argc;
         if (arg == L"--config" && has_value) {
@@ -326,6 +336,12 @@ int wmain(int argc, wchar_t** argv) {
         struct CleanedUp {  // first in this scope, so it is destroyed last
             ~CleanedUp() { g_cleaned_up = true; }
         } cleaned_up;
+        // Who this PC is and whom it trusts (docs/SECURITY.md 6.4), before anything listens.
+        auto trust = kvm::trust::setup(opt.trust, make_hello(false).hostname);
+        if (!trust) return 1;
+        if (opt.trust.print_id) return 0;
+        g_device_id = kvm::tls::to_hex(trust->me.id());
+
         const kvm::Config cfg = kvm::load_config(opt.config_path);
         opt.desk = opt.desk && cfg.desk;
         g_desk = opt.desk;
@@ -454,10 +470,15 @@ int wmain(int argc, wchar_t** argv) {
         }
 
         while (g_running) {
-            auto conn = server.accept();
-            if (!conn) {
-                continue;  // stop() or a transient accept error
+            auto pending = server.accept(trust->me);
+            if (!pending) {
+                continue;  // stop()
             }
+            // Pinning: an unpaired key is closed before a single message of it is read.
+            if (!kvm::trust::admit(*trust->paired, *pending->stream, pending->peer)) {
+                continue;
+            }
+            auto conn = std::make_unique<kvm::net::Connection>(std::move(*pending));
             if (discovery) discovery->set_busy(true);  // other PCs list this one as taken meanwhile
             run_session(*conn, kvm_link ? &*kvm_link : nullptr, clip_on ? &clip : nullptr, video, opt,
                         side.value_or(kvm::display::Side::Right), windows, places, current_peer);

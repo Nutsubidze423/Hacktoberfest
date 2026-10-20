@@ -649,7 +649,7 @@ Attempts are rate-limited.
     - **`paired_test` (unit):** 17 checks pass.
     - **The migration message** ("pair your PCs again") belongs to the UI tasks (P1.8, P1.9): `settings.json` names are simply never read as trust.
 
-- [ ] **P1.5 TLS + pinning on the control channel (50500)** (M), branch `phase1/control-tls`. Depends on P1.2–P1.4 and P0.7.
+- [x] **P1.5 TLS + pinning on the control channel (50500)** (M), branch `phase1/control-tls`. Depends on P1.2–P1.4 and P0.7.
   - **Files:**
     - [common/src/net.cpp](../common/src/net.cpp): `Connection` is built from an *authenticated* `TlsStream`; threads start only after the key check (finding C);
     - [host_a/main.cpp](../host_a/main.cpp): `handshake()`;
@@ -661,6 +661,20 @@ Attempts are rate-limited.
     - plaintext v2 bytes are rejected;
     - a paired peer connects and gets `link: rtt`.
   - **Measure:** `link: rtt` with and without TLS, recorded in `docs/PERF.md`.
+  - **Result (2026-10-20):**
+    - **`kvm::net`** runs on `tls::Stream`. `Server::accept()` and `connect()` return a `Handshaken` connection (TLS done, nothing read). The new **[kvm/trust.h](../common/include/kvm/trust.h)** checks its key against `paired.json`, and only then does a `Connection` (which starts reading) exist. The TLS stream got a receive timeout (the old 10 s dead-peer rule).
+    - **Both programs:**
+      - `--data-dir`, `--print-id`, `--pair-with` (until P1.6), `--recreate-identity`;
+      - they log their device ID;
+      - `hello` carries `device_id`, and `kProtocolVersion` is 3.
+    - **`kvm_fake_peer`:** speaks TLS with its own identity in `%TEMP%` and gained `--port`. It was run against a paired host: the session ran and ended normally.
+    - **`loopback_test`: 26 checks pass.** They include:
+      - each program creates and keeps its identity;
+      - an unpaired key is closed right after the handshake, and its `hello` never appears in the host log (S3);
+      - a plaintext v2 peer is closed;
+      - version mismatch, `hello` v3 with the device ID, then the client on all three channels with rtt, and a clean stop.
+    - **Measured** ([PERF.md](PERF.md)): TLS adds about 37 µs to a 64-byte round trip on the Celeron (loopback, median of 2000).
+    - **Merge order:** merged together with P1.6. On its own, PCs could only pair with `--pair-with`.
 
 - [ ] **P1.6 Pairing flow and code UI** (M), branch `phase1/pairing`. Depends on P1.5 and D7.
   - **Protocol:** `pair_request{name}`, `pair_confirm{ok}`, `pair_result{ok, reason}`.

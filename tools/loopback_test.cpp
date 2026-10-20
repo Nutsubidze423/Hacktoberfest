@@ -1,13 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // loopback_test: the two-PC paths on one PC, with the real programs. Starts kvm_host and kvm_client
-// on free ports, each with its own config.json in a temp folder, without hooks, clipboard, desk mode
-// or discovery (nothing on this desktop or network changes), and checks:
-//   1. a peer speaking another protocol version is dropped, and the host logs why;
-//   2. a peer speaking this version gets the host's hello back;
-//   3. kvm_client connects (control, video and file channels) and both sides log the link (rtt);
-//   4. Ctrl+Break, the way the launcher stops them, ends both normally.
-// Phase 1 (pairing + TLS) extends it: an unpaired peer must be refused before anything is parsed.
+// on free ports, each with its own config.json, identity and paired PCs in a temp folder, without
+// hooks, clipboard, desk mode or discovery (nothing on this desktop or network changes), and checks:
+//   0. each program creates its identity (--print-id) and keeps it;
+//   1. a PC whose key isn't paired is closed right after the TLS handshake: its hello is never read;
+//   2. an older Sarke (plain TCP, protocol v2) is closed;
+//   3. a paired peer speaking another protocol version is dropped, and the host logs why;
+//   4. a paired peer speaking this version gets the host's hello back, with its device ID;
+//   5. kvm_client, paired with the host, connects (control, video, files) and both sides log rtt;
+//   6. Ctrl+Break, the way the launcher stops them, ends both normally.
 //
 //   loopback_test.exe            (exit code 0 = all passed; ctest label "loopback")
 //   loopback_test.exe --keep     keep the temp folder with both logs
@@ -20,6 +22,7 @@
 #include <format>
 #include <fstream>
 #include <functional>
+#include <memory>
 #include <optional>
 #include <sstream>
 #include <string>
@@ -132,6 +135,16 @@ public:
     std::string log() const { return read_file(log_); }
     bool log_has(std::string_view what) const { return log().find(what) != std::string::npos; }
 
+    // For a program that ends by itself (--print-id): its exit code, or nullopt after `timeout`.
+    std::optional<DWORD> wait_exit(std::chrono::milliseconds timeout) {
+        if (!process_ || WaitForSingleObject(process_, static_cast<DWORD>(timeout.count())) != WAIT_OBJECT_0) {
+            return std::nullopt;
+        }
+        DWORD code = 0;
+        GetExitCodeProcess(process_, &code);
+        return code;
+    }
+
     // Ctrl+Break, like the launcher's stop: the program's console handler shuts it down normally.
     // Returns its exit code, or nullopt if it is still running after `timeout`.
     std::optional<DWORD> stop(std::chrono::milliseconds timeout) {
@@ -147,6 +160,45 @@ private:
     HANDLE process_ = nullptr;
     DWORD pid_ = 0;
 };
+
+// The device ID a program logged as "identity: this PC is XXXX-XXXX-XXXX-XXXX (<64 hex>)".
+std::optional<kvm::tls::DeviceId> device_id_in(const std::string& log) {
+    const auto at = log.find("identity: this PC is ");
+    const auto open = at == std::string::npos ? std::string::npos : log.find('(', at);
+    if (open == std::string::npos || open + 65 > log.size()) return std::nullopt;
+    return kvm::tls::from_hex(std::string_view(log).substr(open + 1, 64));
+}
+
+std::wstring hex(const kvm::tls::DeviceId& id) {
+    const std::string text = kvm::tls::to_hex(id);
+    return std::wstring(text.begin(), text.end());
+}
+
+// Sends `bytes` on a plain TCP connection to 127.0.0.1:port and reports whether the other side closed
+// it within `timeout` (what a TLS server does with a peer that doesn't speak TLS).
+bool closed_after_plain_bytes(std::uint16_t port, std::string_view bytes, std::chrono::milliseconds timeout) {
+    kvm::net::ensure_winsock();
+    const SOCKET s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    addr.sin_port = htons(port);
+    bool closed = false;
+    if (::connect(s, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) == 0) {
+        send(s, bytes.data(), static_cast<int>(bytes.size()), 0);
+        const DWORD ms = static_cast<DWORD>(timeout.count());
+        setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&ms), sizeof(ms));
+        char buf[512];
+        for (;;) {
+            const int n = recv(s, buf, sizeof(buf), 0);  // a TLS alert may come first, then the close
+            if (n > 0) continue;
+            closed = n == 0 || WSAGetLastError() != WSAETIMEDOUT;
+            break;
+        }
+    }
+    closesocket(s);
+    return closed;
+}
 
 // The first hello in `conn`'s messages within `timeout` (other messages are skipped).
 std::optional<proto::Hello> wait_for_hello(kvm::net::Connection& conn, std::chrono::milliseconds timeout) {
@@ -194,44 +246,99 @@ int wmain(int argc, wchar_t** argv) {
     limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
     SetInformationJobObject(job, JobObjectExtendedLimitInformation, &limits, sizeof(limits));
 
+    const std::wstring quiet = L" --no-kvm --no-clipboard --no-desk";
+    // Each program keeps its identity and paired PCs in its own folder here, never in this user's.
+    const auto data = [&](std::wstring_view who) { return L" --data-dir \"" + (dir / who).wstring() + L"\""; };
+
+    kvm::log::info("0) identities");
+    const auto id_of = [&](const fs::path& exe, std::wstring_view who) -> std::optional<kvm::tls::DeviceId> {
+        Program p(job, exe, data(who) + L" --print-id", dir / (std::wstring(who) + L"-id.log"));
+        if (!p.started() || p.wait_exit(30s) != 0u) return std::nullopt;
+        return device_id_in(p.log());
+    };
+    const auto host_id = id_of(host_exe, L"host-data");
+    const auto client_id = id_of(client_exe, L"client-data");
+    check(host_id && client_id && *host_id != *client_id, "kvm_host and kvm_client each create an identity");
+    const auto again = id_of(host_exe, L"host-data");
+    check(again && host_id && *again == *host_id, "and keep it (the same device ID on the next start)");
+    if (!host_id || !client_id) {
+        CloseHandle(job);
+        kvm::log::error("no identities; logs: {}", dir.string());
+        return 1;
+    }
+    const auto peer = kvm::tls::Credentials::generate("loopback-peer");          // paired with the host
+    const auto stranger = kvm::tls::Credentials::generate("loopback-stranger");  // not paired
+
     {
-        const std::wstring quiet = L" --no-kvm --no-clipboard --no-desk";
-        Program host(job, host_exe, L"--config \"" + (dir / "host.json").wstring() + L"\" --no-discovery" + quiet,
+        Program host(job, host_exe,
+                     L"--config \"" + (dir / "host.json").wstring() + L"\" --no-discovery" + quiet +
+                         data(L"host-data") + L" --pair-with " + hex(*client_id) + L" --pair-with " + hex(peer.id()),
                      dir / "host.log");
         check(host.started() && wait_until([&] { return host.log_has("listening on ports"); }, 15s),
               "kvm_host starts and listens");
 
-        kvm::log::info("1) a peer speaking protocol v{}", proto::kProtocolVersion + 1);
+        // A TLS connection to the host as `me`, pinning the host's key the way kvm_client does.
+        const auto connect_as = [&](const kvm::tls::Credentials& me) -> std::unique_ptr<kvm::net::Connection> {
+            auto pending = kvm::net::connect("127.0.0.1", control, me, 3s);
+            if (!pending || pending->stream->peer_id() != *host_id) return nullptr;
+            return std::make_unique<kvm::net::Connection>(std::move(*pending));
+        };
+
+        kvm::log::info("1) a PC that isn't paired");
         {
-            auto peer = kvm::net::connect("127.0.0.1", control, 3s);
-            check(peer != nullptr, "it connects");
-            if (peer) {
-                peer->send(proto::Hello{.protocol_version = proto::kProtocolVersion + 1, .hostname = "loopback-old"});
-                check(wait_until([&] { return !peer->is_open(); }, 6s), "the host drops it");
+            auto conn = connect_as(stranger);
+            check(conn != nullptr, "the TLS handshake completes, and the host's key is the one it printed");
+            if (conn) {
+                conn->send(proto::Hello{.hostname = "hello-from-stranger"});
+                check(wait_until([&] { return !conn->is_open(); }, 5s), "the host closes it");
+            }
+            check(wait_until([&] { return host.log_has("isn't paired with this PC"); }, 3s),
+                  "the host logs the unknown key");
+            check(!host.log_has("hello-from-stranger"), "and never read its hello: nothing from it is parsed (S3)");
+        }
+
+        kvm::log::info("2) an older Sarke (protocol v2, no TLS)");
+        {
+            const char v2_hello[] = "\x00\x00\x00\x12{\"type\":\"hello\"}  ";
+            check(closed_after_plain_bytes(control, std::string_view(v2_hello, sizeof(v2_hello) - 1), 5s),
+                  "the host closes a connection that doesn't speak TLS");
+            check(wait_until([&] { return host.log_has("handshake failed"); }, 3s), "and logs why");
+        }
+
+        kvm::log::info("3) a paired peer speaking protocol v{}", proto::kProtocolVersion + 1);
+        {
+            auto conn = connect_as(peer);
+            check(conn != nullptr, "it connects");
+            if (conn) {
+                conn->send(proto::Hello{.protocol_version = proto::kProtocolVersion + 1, .hostname = "loopback-old"});
+                check(wait_until([&] { return !conn->is_open(); }, 6s), "the host drops it");
                 check(wait_until([&] { return host.log_has("but this host speaks v"); }, 3s),
                       "the host logs the version mismatch");
             }
         }
 
-        kvm::log::info("2) a peer speaking protocol v{}", proto::kProtocolVersion);
+        kvm::log::info("4) a paired peer speaking protocol v{}", proto::kProtocolVersion);
         {
-            auto peer = kvm::net::connect("127.0.0.1", control, 3s);
-            check(peer != nullptr, "it connects");
-            if (peer) {
-                peer->send(proto::Hello{.screen_w = 1920, .screen_h = 1080, .hostname = "loopback-peer"});
-                const auto hello = wait_for_hello(*peer, 5s);
-                check(hello && hello->protocol_version == proto::kProtocolVersion,
-                      std::format("the host answers hello v{}", hello ? hello->protocol_version : 0));
-                peer->close();
+            auto conn = connect_as(peer);
+            check(conn != nullptr, "it connects");
+            if (conn) {
+                conn->send(proto::Hello{.screen_w = 1920, .screen_h = 1080, .hostname = "loopback-peer"});
+                const auto hello = wait_for_hello(*conn, 5s);
+                check(
+                    hello && hello->protocol_version == proto::kProtocolVersion &&
+                        hello->device_id == kvm::tls::to_hex(*host_id),
+                    std::format("the host answers hello v{} with its device ID", hello ? hello->protocol_version : 0));
+                conn->close();
                 check(wait_until([&] { return host.log_has("'loopback-peer' session ended"); }, 5s),
                       "the host ends that session when the peer leaves");
             }
         }
 
-        kvm::log::info("3) kvm_client");
+        kvm::log::info("5) kvm_client, paired with the host");
         {
             Program client(job, client_exe,
-                           L"--config \"" + (dir / "client.json").wstring() + L"\" --host 127.0.0.1" + quiet,
+                           L"--config \"" + (dir / "client.json").wstring() + L"\" --host 127.0.0.1" + quiet +
+                               data(L"client-data") + L" --pair-with " + hex(*host_id),
                            dir / "client.log");
             check(client.started() && wait_until([&] { return client.log_has("connected to host"); }, 15s),
                   "the client connects");
@@ -243,7 +350,7 @@ int wmain(int argc, wchar_t** argv) {
             check(wait_until([&] { return client.log_has("link: rtt") && host.log_has("link: rtt"); }, 15s),
                   "both sides log the link (rtt)");
 
-            kvm::log::info("4) Ctrl+Break, the way the launcher stops them");
+            kvm::log::info("6) Ctrl+Break, the way the launcher stops them");
             const auto client_code = client.stop(10s);
             check(client_code == 0u, std::format("the client stops with exit code 0 (got {})",
                                                  client_code ? static_cast<long>(*client_code) : -1L));

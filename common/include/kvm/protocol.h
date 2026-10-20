@@ -28,7 +28,8 @@ inline constexpr std::uint16_t kControlPort = 50500;
 inline constexpr std::uint16_t kVideoPort = 50501;
 // Bump when a message changes incompatibly; A rejects a hello with a different version.
 // v2: everything is symmetric — KVM, window streams and remote input work A -> B and B -> A.
-inline constexpr int kProtocolVersion = 2;
+// 3: the control channel is TLS 1.3 between paired PCs (docs/SECURITY.md); hello carries device_id.
+inline constexpr int kProtocolVersion = 3;
 // Upper bound for one framed message, guards against garbage lengths.
 inline constexpr std::uint32_t kMaxControlMessageBytes = 64 * 1024;
 inline constexpr std::uint32_t kMaxFramePayloadBytes = 32 * 1024 * 1024;
@@ -56,6 +57,7 @@ struct Hello {
     double dpi_scale = 1.0;
     std::string hostname;
     bool desk = false;
+    std::string device_id;  // the sender's device ID (64 hex), the same as its TLS key's; for logs
 };
 
 // Both directions (KVM), controller -> controlled. Either PC can be the controller: the side whose
@@ -242,7 +244,8 @@ struct FrameHeader {
     std::uint32_t alpha_bytes = 0;
 };
 
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(Hello, protocol_version, screen_w, screen_h, dpi_scale, hostname, desk)
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(Hello, protocol_version, screen_w, screen_h, dpi_scale, hostname, desk,
+                                                device_id)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(FocusEnter, y_norm, desk)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(FocusLeave, y_norm)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(MouseMove, dx, dy)
