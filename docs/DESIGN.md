@@ -6,7 +6,7 @@ Design direction (v2, 2026-10-18, Sandro: "matching design with sarke-nine.verce
 (v1 was a hardware-instrument look: JetBrains Mono, uppercase labels, one orange accent, sharp corners. Surfaces not yet converted — the window picker (3) and the edge glow (5) — map their v1 tokens with the table in 2.2.)
 
 0. Rules before anything else
-Obey CLAUDE.md: file ownership, branch naming, one task at a time, no direct commits to main. Never edit another developer's files. Never edit common/include/kvm/protocol.h unless you are in Luka's session. This design requires zero protocol changes.
+Follow CONTRIBUTING.md: one task per branch, no direct commits to main. This design requires zero protocol changes.
 First action in the first session that runs this prompt: save this document as docs/DESIGN.md (verbatim) in the same branch as your first design commit. Every later session reads docs/DESIGN.md, not this file.
 No new vcpkg dependencies. Use Direct2D, DirectWrite, DWM, WIC from the Windows SDK. Link libraries with #pragma comment(lib, "d2d1.lib"), "dwrite.lib", "dwmapi.lib", "windowscodecs.lib" inside the .cpp that needs them, so CMakeLists (Luka's) does not need changes.
 Hook callbacks (WH_MOUSE_LL, WH_KEYBOARD_LL) never draw, never create windows, never animate. They only push an event to a queue / PostMessage(WM_APP + n) to the UI thread.
@@ -29,7 +29,7 @@ The tokens and draw helpers live in client_b/ui_tokens.h and client_b/ui_draw.*;
 Every size here is in dp (1 dp = 1/96 inch).
 Convert with int px(float dp, UINT dpi) { return (int)lround(dp * dpi / 96.0); }.
 Hairline = max(1, px(1, dpi)).
-Processes are Per-Monitor-V2 DPI aware (per CLAUDE.md). Create every Direct2D render target with dpiX = dpiY = 96 so 1 D2D unit = 1 physical pixel; scale manually with px(). Re-layout on WM_DPICHANGED and use the suggested rect from lParam.
+Processes are Per-Monitor-V2 DPI aware (see CONTRIBUTING.md). Create every Direct2D render target with dpiX = dpiY = 96 so 1 D2D unit = 1 physical pixel; scale manually with px(). Re-layout on WM_DPICHANGED and use the suggested rect from lParam.
 
 2.2 Color — the website's palette (globals.css), two themes
 Token	Dark	Light	Use (website variable)
@@ -200,7 +200,7 @@ HUD width does not change when values change.
 Test a window titled in Georgian and one with an emoji in the picker.
 Test reduced motion (Settings → Accessibility → Visual effects → Animation effects off).
 Test WM_DPICHANGED: drag the viewer between monitors with different scale.
-After the change: explain to the user (in Georgian, per CLAUDE.md) what was done and how to run the preview tool.
+After the change: explain what was done and how to run the preview tool.
 8. Do not
 Do not add borders around tiles, glows (except the edge glow), glass/acrylic, gradients other than the halos, or a second accent color.
 Do not use uppercase labels or the v1 orange.

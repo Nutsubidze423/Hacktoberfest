@@ -1,69 +1,78 @@
 # Sarke
 
-[![CI](https://github.com/Nutsubidze423/Hacktoberfest/actions/workflows/ci.yml/badge.svg)](https://github.com/Nutsubidze423/Hacktoberfest/actions/workflows/ci.yml)
+**One desk, many Windows PCs.** Move your mouse off the edge of the screen and it's on the other
+PC. Drag a window across and it shows up there while it keeps running where it started. Copy on
+one PC, paste on the other; drag files across.
 
-One desk, two Windows PCs.
+[![CI](https://github.com/Nutsubidze423/Sarke/actions/workflows/ci.yml/badge.svg)](https://github.com/Nutsubidze423/Sarke/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/Nutsubidze423/Sarke?label=release)](https://github.com/Nutsubidze423/Sarke/releases/latest)
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
+![Windows 10 | 11](https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-informational)
 
-Sarke joins two Windows PCs on the same network into one workspace. Move the mouse past the edge
-of the screen and it controls the other PC. Drag a window across and it appears on the other screen
-while it keeps running where it started. Drag files across, copy on one PC and paste on the other.
+[Download](https://github.com/Nutsubidze423/Sarke/releases/latest) ·
+[Website](https://sarke-nine.vercel.app) · [Roadmap](docs/ROADMAP.md) ·
+[Contributing](CONTRIBUTING.md) · [Security](docs/SECURITY.md)
 
-Tools like Mouse Without Borders share a mouse and keyboard; tools like spacedesk turn a second
-device into a monitor. Sarke does both at once: the other PC's screen works as an extra monitor,
-and that PC stays fully usable with its own apps, mouse and keyboard.
+Tools like Mouse Without Borders share a mouse and keyboard. Tools like spacedesk turn a second
+device into a monitor. Sarke does both at once: the other PC's screen works as one more monitor, and
+that PC stays fully usable with its own apps, mouse and keyboard.
+
+Where it's going: *all your devices become one computer you can sit at from anywhere*. A weak
+laptop runs a heavy app or game on your desktop's GPU, with sound. The [roadmap](docs/ROADMAP.md)
+has the plan.
+
+> [!WARNING]
+> **Use Sarke only on networks you trust.** Version 1.1 has no pairing or encryption yet: any
+> device on the same local network can connect and control the PC, and what crosses the network
+> (keystrokes included) is readable. Pairing and TLS 1.3 encryption are the next milestone
+> ([Phase 1](docs/ROADMAP.md#phase-1--security), designed in [docs/SECURITY.md](docs/SECURITY.md)).
 
 ## Features
 
-- **Shared mouse and keyboard.** Cross the screen edge to control the other PC. Works in both
-  directions; the other PC can sit left, right, above or below.
-- **Desk mode.** The other PC's screen becomes one more monitor. Windows dragged onto it keep
-  running on their own PC and are drawn on the other screen, pixel for pixel, on top of its desktop.
-  Both PCs' mice and keyboards can use them.
-- **Files.** Drag files across the edge and they land where you let go: a folder, the desktop or
-  an app. Files copied with Ctrl+C can be pasted on the other PC.
-- **Clipboard.** Text and images copied on one PC paste on the other.
-- **Finds the other PC.** No IP addresses to type. Sarke lists the PCs running it on the network;
-  pick one, and optionally let Sarke connect to it automatically next time.
-- **Arranged once.** Set where the other PC stands on either of the two; both follow at once, and
-  each PC remembers the place of every PC it has been connected to.
-- **Window viewer.** Without a virtual display, any window can still be streamed into a viewer on
-  the other PC and controlled from there.
+| | |
+|---|---|
+| **Shared mouse and keyboard** | Cross the screen edge to control the other PC, in both directions. It can stand left, right, above or below. |
+| **Desk mode** | The other PC's screen becomes one more monitor. A window dragged onto it keeps running on its own PC and is drawn over there pixel for pixel, on top of that PC's desktop. Both PCs' mice and keyboards can use it. |
+| **Files** | Drag files across the edge and they land where you let go: a folder, the desktop or an app. Files copied with Ctrl+C paste on the other PC. |
+| **Clipboard** | Text and images copied on one PC paste on the other. |
+| **Finds the other PC** | No IP addresses to type: Sarke lists the PCs running it on the network, and can connect to one automatically next time. |
+| **Arranged once** | Set where the other PC stands on either PC; both follow. Each PC remembers where every PC it has met stands. |
+| **Window viewer** | Without a virtual display, any window can still be streamed into a viewer on the other PC and controlled from there. |
 
-## Requirements
+## Get started
 
-- Two PCs with Windows 10 (version 2004 or later) or Windows 11, 64-bit.
-- The same local network. Sarke uses TCP ports 50500–50502 and UDP port 50503.
-- For desk mode, the [Virtual Display Driver](https://github.com/VirtualDrivers/Virtual-Display-Driver)
-  on the PC whose windows go to the other screen. The installer sets it up.
+**You need:**
+- Two PCs with Windows 10 (version 2004 or later) or Windows 11, 64-bit;
+- both on the same local network. Sarke uses TCP ports 50500–50502 and UDP port 50503.
 
-## Install
-
+**Steps:**
 1. Download `SarkeSetup-<version>.exe` from the
-   [latest release](https://github.com/Nutsubidze423/Hacktoberfest/releases/latest) (or the
-   [website](https://sarke-nine.vercel.app)) and run it on both PCs. It installs Sarke, the virtual display driver and the firewall rules for
-   the local network.
-2. Start Sarke on both PCs. It runs in the system tray and shows the PCs running Sarke on the
-   network.
-3. On one PC, click the other PC in that list to connect. Turn on **Auto** to connect to it by
-   itself whenever it is on the network. The list is also under **Connect to another PC** in the
-   tray menu.
-4. Choose **Display arrangement** in the tray menu to set which side of this screen the other PC is
-   on. The change applies on both PCs at once.
+   [latest release](https://github.com/Nutsubidze423/Sarke/releases/latest) (or the
+   [website](https://sarke-nine.vercel.app)), and run it on **both** PCs. It installs:
+   - Sarke;
+   - the [Virtual Display Driver](https://github.com/VirtualDrivers/Virtual-Display-Driver) for desk mode;
+   - firewall rules for the local network.
+2. Start Sarke on both PCs. It lives in the system tray and lists the other PCs running Sarke.
+3. On one PC, click the other PC in that list. Turn on **Auto** to connect to it by itself whenever
+   it's on the network.
+4. In the tray menu, choose **Display arrangement** and set which side of this screen the other PC
+   is on. Both PCs follow.
 
-Then move the mouse across that edge.
+Now move the mouse across that edge.
 
 ## Shortcuts
 
 | Keys | Action |
 |---|---|
-| Ctrl+Alt+Shift+Q | Emergency stop: control returns to this PC and input capture stops |
+| **Ctrl+Alt+Shift+Q** | Emergency stop: control comes back to this PC and input capture stops |
 | Ctrl+Alt+Shift+W | Send the window in front to the other PC, or bring it back |
 | Ctrl+Alt+Shift+F | Show a drop box: files dropped on it go to the other PC |
 
 ## Configuration
 
-Settings live in `config.json`. An installed Sarke keeps it in `%LOCALAPPDATA%\Sarke\`; a build
-from source uses the one in the repository. Most of them can be changed from the tray menu.
+Settings live in `config.json`: in `%LOCALAPPDATA%\Sarke\` when installed, or in the repository
+for a build from source. Most can be changed from the tray menu. Logs are in
+`%LOCALAPPDATA%\Sarke\logs\`.
 
 | Key | Default | Meaning |
 |---|---|---|
@@ -77,116 +86,99 @@ from source uses the one in the repository. Most of them can be changed from the
 | `max_fps` | `30` | Frame rate limit, `0` for none |
 | `desk` | `true` | Desk mode; `false` uses the window viewer |
 
-If Sarke says it can't listen on a port, the message names the program holding it, or says that
-Windows reserved it: Hyper-V, WSL and Docker reserve TCP port ranges
-(`netsh interface ipv4 show excludedportrange protocol=tcp`). Then set free ports in
-`control_port`, `video_port` and `file_port`, the same on both PCs.
+## Troubleshooting
 
-Logs are in `%LOCALAPPDATA%\Sarke\logs\`.
+- **"Can't listen on port …".** The message names the program holding the port, or says Windows
+  reserved it. Hyper-V, WSL and Docker reserve TCP port ranges; see them with
+  `netsh interface ipv4 show excludedportrange protocol=tcp`. Set free ports in `control_port`,
+  `video_port` and `file_port`, the same on both PCs.
+- **The other PC isn't listed.** Both PCs must be on the same network. Guest and campus Wi-Fi
+  often block devices from reaching each other: try a phone hotspot, or
+  `kvm_client.exe --host <IP>`.
+- **Clicks don't reach a window.** Windows running as administrator only take input from Sarke
+  when Sarke runs as administrator too.
+- **Microsoft Defender flags Sarke.** Builds aren't code-signed yet, and the input hooks look
+  suspicious to heuristics. The installer can add an exclusion; signing is planned.
+
+## How it works
+
+Each PC runs the tray app, `sarke.exe`. It starts either the host (`kvm_host.exe`, which waits for
+a connection) or the client (`kvm_client.exe`, which connects). Once connected, both sides can do
+everything; the roles only decide who listens.
+
+- **Input:** low-level keyboard and mouse hooks with Raw Input on the PC that has the input; the
+  other PC replays it with `SendInput`.
+- **Desk mode:**
+  - a virtual monitor the size of the other PC's screen is attached on its side;
+  - each window on it is captured with Windows.Graphics.Capture and sent as JPEG with an alpha mask
+    (for rounded corners);
+  - the other PC draws it in a transparent overlay at the same coordinates.
+- **Files:** a drag that reaches the other screen is caught, the files are sent, and the drag goes
+  on from the cursor over there.
+
+| Port | Protocol | Carries |
+|---|---|---|
+| 50500 | TCP, length-prefixed JSON | handshake, arrangement, input, clipboard, window layout |
+| 50501 | TCP, JSON header + payload | window pictures (JPEG) |
+| 50502 | TCP, JSON header + payload | files |
+| 50503 | UDP broadcast | finding the other PCs |
+
+Every message is described in [docs/PROTOCOL.md](docs/PROTOCOL.md).
+
+## Limitations
+
+- Windows only, local network only, one connection at a time.
+- Not encrypted yet (see the warning above).
+- Window pictures are JPEG, so fast video is less smooth than locally; sound stays on the PC that
+  plays it. Hardware video and audio are Phases 2 and 3 of the roadmap.
 
 ## Building from source
 
-You need Visual Studio 2022 with *Desktop development with C++*, CMake 3.25 or later, Ninja and
-[vcpkg](https://vcpkg.io) (`VCPKG_ROOT` set). `tools\setup_env.ps1` installs all of them.
-
-From a *Developer PowerShell for VS 2022*:
+You need Visual Studio 2022 (*Desktop development with C++*), CMake 3.25+, Ninja and
+[vcpkg](https://vcpkg.io) with `VCPKG_ROOT` set; `tools\setup_env.ps1` installs them. From a
+*Developer PowerShell for VS 2022*:
 
 ```powershell
 cmake --preset x64-release
 cmake --build --preset x64-release
+ctest --preset ci
 build\x64-release\tools\sarke.exe
 ```
 
-The executables are statically linked: copying `sarke.exe`, `kvm_host.exe`, `kvm_client.exe`,
-`config.json` and `assets\fonts` to another PC is enough to run them there.
+The executables are statically linked, so `sarke.exe`, `kvm_host.exe`, `kvm_client.exe`,
+`config.json` and `assets\fonts` are all another PC needs.
 
-To build the installer (needs [Inno Setup 6](https://jrsoftware.org/isinfo.php); the script fetches
-the Virtual Display Driver with `tools\fetch_vdd.ps1`, pinned and hash-checked, since its binaries
-aren't kept in git). Releasing it is described in [docs/RELEASING.md](docs/RELEASING.md):
-
-```powershell
-powershell -ExecutionPolicy Bypass -File tools\make_installer.ps1
-```
-
-The build treats warnings as errors. C++ is formatted with clang-format 19.1.5 (the version Visual
-Studio 2022 ships) using [.clang-format](.clang-format); CI fails on unformatted code, so run
-`clang-format -i` on the files you changed, or let your editor format on save.
-
-Each `tools\*_test.cpp` builds into its own test executable, registered with ctest under a label
-that says what it needs:
-
-```powershell
-ctest --preset ci      # headless tests + kvm_host and kvm_client talking on 127.0.0.1, also run by CI
-ctest --preset local   # + desktop (hooks, SendInput, clipboard) and vdd (Virtual Display Driver) tests
-```
-
-`local` moves the mouse, attaches the virtual display and opens a Paint window for about three
-minutes, so keep your hands off the mouse and keyboard while it runs. To try both sides on one PC,
-start `kvm_host.exe`, then `kvm_client.exe --host 127.0.0.1 --desk-no-vdd`.
-
-## How it works
-
-Each PC runs Sarke's tray app, `sarke.exe`, which starts one of two background processes: the
-host (`kvm_host.exe`), which waits for a connection, or the client (`kvm_client.exe`), which
-connects to a host. Once connected, both sides can do everything; the roles only decide who
-listens.
-
-| Port | Protocol | Carries |
-|---|---|---|
-| 50500 | TCP, length-prefixed JSON | Handshake, arrangement, input, clipboard, window layout |
-| 50501 | TCP, JSON header + payload | Window pictures (JPEG) |
-| 50502 | TCP, JSON header + payload | Files |
-| 50503 | UDP broadcast | Finding the other PCs |
-
-- **Input.** Low-level keyboard and mouse hooks with Raw Input capture input on the PC that has it.
-  The other PC replays it with `SendInput`.
-- **Desk mode.** A virtual monitor the size of the other PC's screen is attached on its side. Each
-  window on that monitor is captured with Windows.Graphics.Capture and encoded as JPEG with an alpha
-  mask for rounded corners. The other PC draws it in a transparent, click-through overlay at the
-  same coordinates. A click lands on a shared window if one is under the cursor, otherwise on the
-  other PC's own desktop.
-- **Files.** A drag that reaches the other screen is caught, the files are sent, and the drag goes
-  on from the cursor over there until the button is released.
-
-Every message type is listed in [docs/PROTOCOL.md](docs/PROTOCOL.md). The hackathon's catalogue of
-features is kept in [docs/archive/hackathon/BLUEPRINT.md](docs/archive/hackathon/BLUEPRINT.md).
-
-## Project layout
+- **Installer:** `powershell -ExecutionPolicy Bypass -File tools\make_installer.ps1`. It needs
+  [Inno Setup 6](https://jrsoftware.org/isinfo.php) and fetches the driver with
+  `tools\fetch_vdd.ps1` (pinned and hash-checked).
+- **Tests, code style and how we work:** [CONTRIBUTING.md](CONTRIBUTING.md).
+- **Releases:** [docs/RELEASING.md](docs/RELEASING.md).
 
 ```
 common/      shared library: protocol, networking, input capture and replay, clipboard, files
 host_a/      kvm_host.exe: window capture, virtual display, desk mode on the sending side
 client_b/    kvm_client.exe and the tray app: viewer, desk overlay, launcher, UI
 tools/       sarke.exe entry point, tests, previews and scripts
-installer/   Inno Setup script; the virtual display driver is fetched by tools\fetch_vdd.ps1
-docs/        roadmap, protocol, design system, releasing; archive/hackathon is history
+installer/   Inno Setup script
+docs/        roadmap, protocol, security, design system, releasing; archive/hackathon is history
 ```
 
-## Limitations
+## Contributing and security
 
-- Windows only.
-- Local network only, and traffic is not encrypted yet: use Sarke on networks you trust.
-- One connection at a time.
-- Window pictures are JPEG, so fast video is less smooth than locally; sound stays on the PC
-  that plays it.
-- Windows running as administrator can only be controlled when Sarke runs as administrator too.
-- Builds are not code-signed, so Microsoft Defender may flag the input hooks. The installer can add
-  an exclusion.
+Contributions are welcome: start with [CONTRIBUTING.md](CONTRIBUTING.md) and the
+[roadmap](docs/ROADMAP.md). Please report security problems privately through GitHub's **Report a
+vulnerability** (Security tab), not as an issue. The design is in
+[docs/SECURITY.md](docs/SECURITY.md).
 
-## License
+## License and credits
 
-Sarke is open source under the [Apache License 2.0](LICENSE). The third-party components it
-includes keep their own licenses; their full texts are in
-[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+Sarke is open source under the [Apache License 2.0](LICENSE). The third-party components it includes
+keep their own licenses; their full texts are in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
-## Credits
-
-Built by Luka, Demetre, Temo and Sandro (see [AUTHORS](AUTHORS)).
-
+Built at a hackathon in October 2026 by Luka, Demetre, Temo and Sandro (see [AUTHORS](AUTHORS)).
 Sarke includes or uses:
-
-- [Virtual Display Driver](https://github.com/VirtualDrivers/Virtual-Display-Driver) (MIT)
+- the [Virtual Display Driver](https://github.com/VirtualDrivers/Virtual-Display-Driver) (MIT);
 - [libjpeg-turbo](https://libjpeg-turbo.org) (BSD-3-Clause, IJG, zlib), with
-  [libspng](https://libspng.org) (BSD-2-Clause) and [zlib](https://zlib.net) (Zlib)
-- [nlohmann/json](https://github.com/nlohmann/json) (MIT)
-- Google Sans and Geist Mono fonts (SIL Open Font License 1.1)
+  [libspng](https://libspng.org) (BSD-2-Clause) and [zlib](https://zlib.net) (Zlib);
+- [nlohmann/json](https://github.com/nlohmann/json) (MIT);
+- the Google Sans and Geist Mono fonts (SIL Open Font License 1.1).

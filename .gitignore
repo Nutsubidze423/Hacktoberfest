@@ -23,3 +23,7 @@ installer/vdd/mttvdd.inf
 
 # ctest's output when it runs from the repo root
 Testing/
+
+# Instructions for AI coding sessions: local only, not published. The rules are in CONTRIBUTING.md.
+CLAUDE.md
+.claude/

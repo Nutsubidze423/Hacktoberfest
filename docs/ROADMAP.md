@@ -388,6 +388,7 @@ Task-level links that matter:
     - **Archived** to `docs/archive/hackathon/` with a README, all unchanged: `PLAN.md`, `BLUEPRINT.md`, `ARTEFACT/` and the old `CLAUDE.md`.
     - **References fixed:** README, DESIGN, two code comments and `vdd_test`'s error message now point at the new places. `protocol.h` no longer says "frozen team contract".
     - **Links:** every relative link in the edited docs resolves; a link checker was run over them.
+    - **Later (2026-10-20, Demetre's request):** `CLAUDE.md` is no longer published. It stays local and ignored, and the working rules moved to a public [CONTRIBUTING.md](../CONTRIBUTING.md).
 
 - [x] **P0.7 Loopback harness for the two-PC paths** (M), branch `phase0/loopback-harness`.
   - **Files:**
@@ -1084,7 +1085,7 @@ Run it at the end of every task. The task's PR says which rows were run and whic
 
 ## Working rules
 
-These go into the new CLAUDE.md in P0.6.
+They are public in [CONTRIBUTING.md](../CONTRIBUTING.md).
 
 **One task at a time**
 - Work on one roadmap task at a time, on a `phaseN/<task>` branch.
