@@ -22,7 +22,7 @@ jobs:
       VCPKG_DISABLE_METRICS: 1
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       # The runner context isn't available in a job's env, hence the paths are set here.
       # vcpkg's x-gha cache provider is gone (vcpkg 2025.06.13): built packages go to a folder that
@@ -45,7 +45,7 @@ jobs:
       # Packages are cached by everything that changes their ABI: the manifest (baseline, ports)
       # and the runner image (compiler). A changed key rebuilds only what changed.
       - name: Restore vcpkg packages
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ${{ env.VCPKG_BINARY_CACHE_DIR }}
           key: vcpkg-x64-windows-static-${{ steps.image.outputs.version }}-${{ hashFiles('vcpkg.json') }}
@@ -82,7 +82,7 @@ jobs:
           ctest --test-dir build\x64-release -L desktop --output-on-failure
 
       - name: Upload programs
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: sarke-x64-release
           path: |
