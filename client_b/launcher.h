@@ -50,8 +50,17 @@ struct PlaceSet {  // where the connected PC stands was applied ("layout: 'name'
     std::string side;
 };
 struct IdentifyAsked {};  // the other PC pressed Identify: show this PC's screen numbers
-using Event =
-    std::variant<std::monostate, Connected, LinkUp, SessionEnded, Searching, Rtt, Problem, PlaceSet, IdentifyAsked>;
+struct PairingCode {      // "pairing: code 042 917 with 'name' (1A2B-...) - confirm on both PCs": ask the user
+    std::string code;
+    std::string name;
+    std::string id;  // the short device ID
+};
+struct PairingDone {  // any other "pairing: ..." line: the exchange is over
+    bool paired = false;
+    std::string text;
+};
+using Event = std::variant<std::monostate, Connected, LinkUp, SessionEnded, Searching, Rtt, Problem, PlaceSet,
+                           IdentifyAsked, PairingCode, PairingDone>;
 
 Event parse_line(std::string_view line);
 

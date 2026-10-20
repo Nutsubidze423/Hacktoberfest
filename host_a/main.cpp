@@ -3,10 +3,12 @@
 // kvm_host.exe — runs on A (owns the physical mouse/keyboard, streams a window).
 // Usage: kvm_host.exe [--config <path>] [--log <file>] [--no-kvm] [--no-clipboard] [--no-desk]
 //                     [--no-discovery] [--test-video [--test-video-kb N] [--test-video-fps N]]
+//                     [--data-dir <dir>] [--print-id] [--pair-with <device id>] [--recreate-identity]
 //   --no-kvm      don't install the input hooks (e.g. when only testing the video stream)
 //   --no-clipboard  don't share copied text/images with the client
 //   --no-desk     no desk mode (the client's screen as one more monitor); Ctrl+Alt+Shift+W uses the viewer
 //   --no-discovery  don't answer other PCs looking for hosts (tests: no other PC can find this one)
+//   --data-dir ... --recreate-identity: this PC's identity and paired PCs, see kvm/trust.h
 //   --test-video  send synthetic frames (codec "test", random bytes, default 250 KB at 30 fps) so
 //                 network throughput and video latency can be measured before capture/viewer exist
 
@@ -30,6 +32,8 @@
 #include "kvm/config.h"
 #include "kvm/desk_region.h"
 #include "kvm/discovery.h"
+#include "kvm/pairing.h"
+#include "kvm/trust.h"
 #include "kvm/dpi.h"
 #include "kvm/file_link.h"
 #include "kvm/file_transfer.h"
@@ -58,15 +62,18 @@ struct Options {
     bool clipboard = true;
     bool desk = true;  // --no-desk, config "desk"
     bool discovery = true;  // --no-discovery
+    kvm::trust::Options trust;
     bool test_video = false;
     int test_video_kb = 250;
     int test_video_fps = 30;
 };
 
 std::atomic<bool> g_running{true};
+std::string g_device_id;  // this PC's device ID (hex), sent in hello
 std::atomic<kvm::net::Server*> g_server{nullptr};
 std::atomic<kvm::net::VideoServer*> g_video_server{nullptr};
 std::atomic<kvm::files::FileServer*> g_file_server{nullptr};
+std::atomic<kvm::pairing::Prompt*> g_pairing_prompt{nullptr};  // a pairing question must not hold up quitting
 std::atomic<bool> g_desk{false};          // desk mode may have the VDD attached
 std::atomic<bool> g_cleaned_up{false};    // wmain's objects are gone (windows home, VDD detached)
 
@@ -80,6 +87,9 @@ BOOL WINAPI on_console_ctrl(DWORD type) {
     }
     if (auto* files = g_file_server.load()) {
         files->stop();
+    }
+    if (auto* prompt = g_pairing_prompt.load()) {
+        prompt->cancel();
     }
     if (type == CTRL_CLOSE_EVENT || type == CTRL_LOGOFF_EVENT || type == CTRL_SHUTDOWN_EVENT) {
         // Windows ends the process as soon as this returns: give the main thread time to bring the
@@ -172,6 +182,7 @@ proto::Hello make_hello(bool desk) {
         .dpi_scale = primary.scale,
         .hostname = narrow(std::wstring_view(name, name_len)),
         .desk = desk,
+        .device_id = g_device_id,
     };
 }
 
@@ -290,6 +301,10 @@ void run_session(kvm::net::Connection& conn, kvm::KvmLink* kvm, kvm::clip::Clipb
 Options parse_args(int argc, wchar_t** argv) {
     Options opt;
     for (int i = 1; i < argc; ++i) {
+        if (const int used = kvm::trust::parse_arg(opt.trust, argc, argv, i)) {
+            i += used - 1;
+            continue;
+        }
         const std::wstring_view arg = argv[i];
         const bool has_value = i + 1 < argc;
         if (arg == L"--config" && has_value) {
@@ -326,6 +341,12 @@ int wmain(int argc, wchar_t** argv) {
         struct CleanedUp {  // first in this scope, so it is destroyed last
             ~CleanedUp() { g_cleaned_up = true; }
         } cleaned_up;
+        // Who this PC is and whom it trusts (docs/SECURITY.md 6.4), before anything listens.
+        auto trust = kvm::trust::setup(opt.trust, make_hello(false).hostname);
+        if (!trust) return 1;
+        if (opt.trust.print_id) return 0;
+        g_device_id = kvm::tls::to_hex(trust->me.id());
+
         const kvm::Config cfg = kvm::load_config(opt.config_path);
         opt.desk = opt.desk && cfg.desk;
         g_desk = opt.desk;
@@ -397,8 +418,14 @@ int wmain(int argc, wchar_t** argv) {
                                              windows.set_peer_side(s);
                                          });
         kvm::CurrentPeer current_peer;
+        kvm::pairing::Prompt pairing_prompt;  // the launcher answers "pair yes" / "pair no"
+        kvm::pairing::AttemptLimit pairing_limit;
+        g_pairing_prompt = &pairing_prompt;
+        struct PromptReset {
+            ~PromptReset() { g_pairing_prompt = nullptr; }
+        } prompt_reset;
         kvm::LauncherCommands commands(
-            [&](const std::string& line) { kvm::handle_launcher_command(line, places, current_peer); });
+            [&](const std::string& line) { kvm::handle_launcher_command(line, places, current_peer, pairing_prompt); });
         VideoSlot video;
         std::jthread video_acceptor([&] { accept_video_loop(video_server, video, windows); });
 
@@ -454,10 +481,24 @@ int wmain(int argc, wchar_t** argv) {
         }
 
         while (g_running) {
-            auto conn = server.accept();
-            if (!conn) {
-                continue;  // stop() or a transient accept error
+            auto pending = server.accept(trust->me);
+            if (!pending) {
+                continue;  // stop()
             }
+            // Pinning: a key that isn't paired gets nothing but the pairing exchange (it must start with
+            // pair_request, or it is closed); a paired client then connects again.
+            if (!kvm::trust::is_paired(*trust->paired, *pending->stream)) {
+                if (!pairing_limit.allow(pending->peer)) {
+                    kvm::log::warn("trust: {} - too many pairing attempts, closed", pending->peer);
+                    continue;
+                }
+                if (discovery) discovery->set_busy(true);
+                kvm::pairing::run(std::move(*pending), /*initiator=*/false, trust->me, make_hello(false).hostname,
+                                  *trust->paired, pairing_prompt);
+                if (discovery) discovery->set_busy(false);
+                continue;
+            }
+            auto conn = std::make_unique<kvm::net::Connection>(std::move(*pending));
             if (discovery) discovery->set_busy(true);  // other PCs list this one as taken meanwhile
             run_session(*conn, kvm_link ? &*kvm_link : nullptr, clip_on ? &clip : nullptr, video, opt,
                         side.value_or(kvm::display::Side::Right), windows, places, current_peer);

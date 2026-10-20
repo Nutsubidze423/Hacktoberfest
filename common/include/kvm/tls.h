@@ -85,8 +85,11 @@ public:
     // Blocking send of the whole buffer. False on error or after abort().
     bool send_all(const char* data, std::size_t size);
     // Blocking receive of exactly `size` bytes. 0 on success, otherwise a WSA error code
-    // (WSAECONNRESET also for an orderly close by the peer, WSAECONNABORTED after abort()).
+    // (WSAECONNRESET also for an orderly close by the peer, WSAECONNABORTED after abort(),
+    // WSAETIMEDOUT when nothing arrived for the receive timeout).
     int recv_exact(char* data, std::size_t size);
+    // Like SO_RCVTIMEO: recv_exact() gives up after this long without any data. 0 = never (default).
+    void set_receive_timeout(std::chrono::milliseconds timeout);
     // Makes blocked and later send_all() / recv_exact() calls return at once. Any thread.
     void abort();
 

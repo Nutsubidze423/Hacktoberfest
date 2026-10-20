@@ -56,14 +56,20 @@ exactly one group, or configure fails.
 `SARKE_STRICT_TIMING=1` (CI sets it) turns timing floors into hard checks. On a busy dev PC they
 only warn.
 
-**Two PCs on one machine:**
+**Two PCs on one machine:** the two programs only talk to a paired PC. Give the client its own
+identity folder, so it is a different "PC", and pair them once:
 
 ```powershell
-build\x64-release\host_a\kvm_host.exe
-build\x64-release\client_b\kvm_client.exe --host 127.0.0.1 --desk-no-vdd
+cd build\x64-release
+host_a\kvm_host.exe --print-id                                   # the host's device ID
+client_b\kvm_client.exe --data-dir $env:TEMP\sarke-b --print-id  # the client's
+host_a\kvm_host.exe --pair-with <client id>
+client_b\kvm_client.exe --data-dir $env:TEMP\sarke-b --pair-with <host id> --host 127.0.0.1 --desk-no-vdd
 ```
 
-Both logs show `connected`, then `link: rtt …` every 5 s. Two fakes stand in for the other side,
+`--pair-with` is remembered (`paired.json`), so later starts don't need it. Both logs show
+`connected`, then `link: rtt …` every 5 s. If an installed Sarke is running, it holds ports
+50500–50502: give the host other ports in a `--config` file. Two fakes stand in for the other side,
 and should be extended rather than a test skipped:
 - [tools/kvm_fake_peer.cpp](tools/kvm_fake_peer.cpp): the control channel;
 - [tools/fake_streamer.cpp](tools/fake_streamer.cpp): JPEG frames on the video port.

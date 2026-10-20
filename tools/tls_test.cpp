@@ -324,6 +324,63 @@ int main() {
         }
     }
 
+    // What TLS costs a small message's round trip on this machine (docs/PERF.md): the same echo of
+    // a 64-byte message over a plain TCP socket and over TLS, median of 2000.
+    kvm::log::info("round trip, plain TCP vs TLS (measured, not checked)");
+    {
+        constexpr int kRounds = 2000;
+        const auto median_us = [](std::vector<long long>& v) {
+            std::sort(v.begin(), v.end());
+            return v[v.size() / 2];
+        };
+        std::vector<long long> plain, secure;
+        {
+            const auto [c, s] = socket_pair();
+            BOOL on = TRUE;
+            setsockopt(c, IPPROTO_TCP, TCP_NODELAY, reinterpret_cast<const char*>(&on), sizeof(on));
+            setsockopt(s, IPPROTO_TCP, TCP_NODELAY, reinterpret_cast<const char*>(&on), sizeof(on));
+            std::thread echo([s] {
+                char buf[64];
+                for (int i = 0; i < kRounds; ++i) {
+                    int got = 0;
+                    while (got < 64) got += recv(s, buf + got, 64 - got, 0);
+                    send(s, buf, 64, 0);
+                }
+            });
+            char msg[64]{};
+            for (int i = 0; i < kRounds; ++i) {
+                const auto t0 = Clock::now();
+                send(c, msg, 64, 0);
+                int got = 0;
+                while (got < 64) got += recv(c, msg + got, 64 - got, 0);
+                plain.push_back(std::chrono::duration_cast<std::chrono::microseconds>(Clock::now() - t0).count());
+            }
+            echo.join();
+            closesocket(c);
+            closesocket(s);
+        }
+        auto p = handshake_pair(alice, bob);
+        if (p.client && p.server) {
+            std::thread echo([&] {
+                char buf[64];
+                for (int i = 0; i < kRounds; ++i) {
+                    if (p.server->recv_exact(buf, 64) != 0 || !p.server->send_all(buf, 64)) return;
+                }
+            });
+            char msg[64]{};
+            for (int i = 0; i < kRounds; ++i) {
+                const auto t0 = Clock::now();
+                if (!p.client->send_all(msg, 64) || p.client->recv_exact(msg, 64) != 0) break;
+                secure.push_back(std::chrono::duration_cast<std::chrono::microseconds>(Clock::now() - t0).count());
+            }
+            echo.join();
+        }
+        if (plain.size() == kRounds && secure.size() == kRounds) {
+            kvm::log::info("   64-byte round trip on 127.0.0.1, median of {}: plain TCP {} us, TLS 1.3 {} us", kRounds,
+                           median_us(plain), median_us(secure));
+        }
+    }
+
     kvm::log::info("refused");
     {
         // Sarke protocol v2 speaks plain [u32 len][JSON] where TLS expects a ClientHello.

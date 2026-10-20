@@ -23,6 +23,7 @@
 #include <nlohmann/json.hpp>
 
 #include "device_picker.h"
+#include "pairing_dialog.h"
 #include "display_settings.h"
 #include "kvm/config.h"
 #include "kvm/discovery.h"
@@ -174,6 +175,7 @@ Event parse_line(std::string_view line) {
     static const std::regex kClientHello(R"(^host '(.*)': screen (\d+)x(\d+), dpi scale ([0-9.]+)$)");
     static const std::regex kRtt(R"(^link: rtt ([0-9.]+) ms)");
     static const std::regex kPlace(R"(^layout: '(.*)' is on the (left|right|top|bottom) of this PC)");
+    static const std::regex kPairingCode(R"(^pairing: code (\d{3} \d{3}) with '(.*)' \(([0-9A-F-]{19})\))");
 
     std::string s(line);
     while (!s.empty() && (s.back() == '\r' || s.back() == '\n')) s.pop_back();
@@ -195,6 +197,10 @@ Event parse_line(std::string_view line) {
     if (std::regex_search(msg, g, kRtt)) return Rtt{std::stod(g[1])};
     if (std::regex_search(msg, g, kPlace)) return PlaceSet{g[1], g[2]};
     if (msg.starts_with("identify: the other PC shows")) return IdentifyAsked{};
+    if (std::regex_search(msg, g, kPairingCode)) return PairingCode{g[1], g[2], g[3]};
+    if (msg.starts_with("pairing: ") && msg != "pairing: nothing to answer") {
+        return PairingDone{msg.starts_with("pairing: paired with"), msg.substr(9)};
+    }
     if (level == "error") return Problem{msg};
     return std::monostate{};
 }
@@ -367,6 +373,7 @@ private:
     std::optional<Target> target_;
     std::vector<Device> devices_;            // UI thread's copy of the scan
     DevicePicker picker_;
+    PairingDialog pairing_dialog_;
     std::vector<discovery::Host> picker_hosts_;  // what the picker's rows stand for
     std::vector<std::string> picker_names_;
     std::set<std::string>
@@ -728,6 +735,8 @@ bool App::start_app() {
     std::wstring cmd = std::format(L"\"{}\" --config \"{}\"", exe->wstring(), config_path_.wstring());
     // The PC picked in the list: connect to exactly that one (not the first host that answers).
     if (role_ == Role::Client && target_) cmd += L" --host \"" + widen(target_->ip) + L"\"";
+    // Picked by the user (not auto-connect): a PC that isn't paired yet is paired by comparing a code.
+    if (role_ == Role::Client && target_ && !target_->automatic) cmd += L" --pair-unknown";
     for (const auto& arg : options_.app_args) cmd += L" \"" + arg + L"\"";
     STARTUPINFOW si{};
     si.cb = sizeof(si);
@@ -861,6 +870,16 @@ void App::handle(const Event& e) {
                 displays_.config_changed();  // the app saved where the connected PC stands: show it
             } else if constexpr (std::is_same_v<T, IdentifyAsked>) {
                 displays_.identify_screens();
+            } else if constexpr (std::is_same_v<T, PairingCode>) {
+                // Modal: a "pairing: ..." line that ends the exchange meanwhile closes it (PairingDone).
+                // A little under the app's 60 s, so an expired question is answered "no" by the user's side.
+                const auto answer =
+                    pairing_dialog_.ask(nullptr, widen(ev.name), widen(ev.code), std::chrono::seconds(55));
+                if (answer) send_command(*answer ? "pair yes" : "pair no");
+            } else if constexpr (std::is_same_v<T, PairingDone>) {
+                pairing_dialog_.close();
+                notify(ev.paired ? L"Paired" : L"Not paired", widen(ev.text),
+                       ev.paired ? Toast::Kind::Connected : Toast::Kind::Info);
             } else if constexpr (std::is_same_v<T, Problem>) {
                 last_problem_ = widen(ev.text);
                 const auto now = std::chrono::steady_clock::now();

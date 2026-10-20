@@ -55,6 +55,9 @@ int main() {
                                              {.id = 0x20C3D, .x = 100, .y = 40, .w = 300, .h = 200}}});
     round_trip(proto::Ping{.t = 123456789});
     round_trip(proto::Pong{.t = 123456789, .t_peer = 987654321});
+    round_trip(proto::PairRequest{.name = "laptop-b"});
+    round_trip(proto::PairConfirm{.ok = true});
+    round_trip(proto::PairResult{.ok = false, .reason = "cancelled"});
 
     check(!proto::decode(nlohmann::json::parse(R"({"type":"no_such_type"})")), "unknown type -> nullopt");
     check(!proto::decode(nlohmann::json::parse(R"({"dx":1})")), "missing type -> nullopt");

@@ -195,6 +195,7 @@ PC before any connection.
 | A Windows reinstall or profile reset loses the key | You pair again. This is documented. |
 | DPAPI protects against other users, not against malware as this user | Out of scope (section 3). |
 | One code comparison by people who might not look closely | 6 digits plus the "both must confirm" step. The UI makes the codes large and asks "do they match?" rather than "OK?". |
+| Anyone on the LAN can make this PC show a pairing question, hoping its user clicks Pair | The question says to pair only if *you* started pairing on the other PC and it shows the same code. Cancel is the default button. It cancels itself after 55 s. Each IP gets 3 attempts per 10 minutes. |
 
 ## 8. How it is tested
 

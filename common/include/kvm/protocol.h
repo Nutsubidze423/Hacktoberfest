@@ -28,7 +28,8 @@ inline constexpr std::uint16_t kControlPort = 50500;
 inline constexpr std::uint16_t kVideoPort = 50501;
 // Bump when a message changes incompatibly; A rejects a hello with a different version.
 // v2: everything is symmetric — KVM, window streams and remote input work A -> B and B -> A.
-inline constexpr int kProtocolVersion = 2;
+// 3: the control channel is TLS 1.3 between paired PCs (docs/SECURITY.md); hello carries device_id.
+inline constexpr int kProtocolVersion = 3;
 // Upper bound for one framed message, guards against garbage lengths.
 inline constexpr std::uint32_t kMaxControlMessageBytes = 64 * 1024;
 inline constexpr std::uint32_t kMaxFramePayloadBytes = 32 * 1024 * 1024;
@@ -56,6 +57,7 @@ struct Hello {
     double dpi_scale = 1.0;
     std::string hostname;
     bool desk = false;
+    std::string device_id;  // the sender's device ID (64 hex), the same as its TLS key's; for logs
 };
 
 // Both directions (KVM), controller -> controlled. Either PC can be the controller: the side whose
@@ -219,6 +221,26 @@ struct Identify {
     static constexpr std::string_view kType = "identify";
 };
 
+// Pairing (docs/SECURITY.md 6.3): the only messages accepted from a PC whose key isn't paired yet.
+// The PC whose user picked the other one sends pair_request. Each side shows the code derived from
+// its own TLS session and sends pair_confirm with its user's answer. Each stores the other only when
+// both said yes, then sends pair_result.
+struct PairRequest {
+    static constexpr std::string_view kType = "pair_request";
+    std::string name;  // the sender's computer name, for the other user's prompt
+};
+
+struct PairConfirm {
+    static constexpr std::string_view kType = "pair_confirm";
+    bool ok = false;  // the user saw the same code and confirmed
+};
+
+struct PairResult {
+    static constexpr std::string_view kType = "pair_result";
+    bool ok = false;
+    std::string reason;  // when !ok, e.g. "cancelled", "timeout"
+};
+
 // Video channel header (port 50501), followed by `payload_len` bytes of encoded image.
 // layer "" = a window stream for the viewer window. layer "desk" = desk mode: the picture of one
 // window of the owner's virtual display (`window` = DeskWindow::id), drawn at that window's place
@@ -242,7 +264,8 @@ struct FrameHeader {
     std::uint32_t alpha_bytes = 0;
 };
 
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(Hello, protocol_version, screen_w, screen_h, dpi_scale, hostname, desk)
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(Hello, protocol_version, screen_w, screen_h, dpi_scale, hostname, desk,
+                                                device_id)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(FocusEnter, y_norm, desk)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(FocusLeave, y_norm)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(MouseMove, dx, dy)
@@ -265,13 +288,16 @@ inline void to_json(nlohmann::json& j, const Identify&) {
     j = nlohmann::json::object();
 }
 inline void from_json(const nlohmann::json&, Identify&) {}
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(PairRequest, name)
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(PairConfirm, ok)
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(PairResult, ok, reason)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(FrameHeader, seq, t_capture_us, width, height, codec, layer, x, y,
                                                 desk_w, desk_h, rects, window, alpha_bytes)
 
 // Any message that travels on the control channel (port 50500).
-using Message =
-    std::variant<Hello, FocusEnter, FocusLeave, MouseMove, MouseButtonEvent, MouseWheel, Key, StreamStart, StreamStop,
-                 RemoteMouseMove, Clipboard, Ping, Pong, DeskMove, DeskCursor, DeskLayout, Layout, Identify>;
+using Message = std::variant<Hello, FocusEnter, FocusLeave, MouseMove, MouseButtonEvent, MouseWheel, Key, StreamStart,
+                             StreamStop, RemoteMouseMove, Clipboard, Ping, Pong, DeskMove, DeskCursor, DeskLayout,
+                             Layout, Identify, PairRequest, PairConfirm, PairResult>;
 
 // Serializes a message struct (including FrameHeader) to JSON with its "type" field set.
 template <class M>

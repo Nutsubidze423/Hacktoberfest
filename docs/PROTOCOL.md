@@ -1,9 +1,13 @@
 # Sarke wire protocol
 
-Protocol version **2** (`kProtocolVersion` in [protocol.h](../common/include/kvm/protocol.h)). The
+Protocol version **3** (`kProtocolVersion` in [protocol.h](../common/include/kvm/protocol.h)). The
 code is the authority: `protocol.h` defines every message, and this page explains them. Change the
-two together, and bump the version when an older peer can't understand the change. Phase 1 of the
-[roadmap](ROADMAP.md) moves everything below to TLS and bumps the version to 3.
+two together, and bump the version when an older peer can't understand the change.
+
+**Version history:**
+- **3:** the control channel is TLS 1.3 between paired PCs, and `hello` carries `device_id`.
+  Version 2 peers can't connect (they don't speak TLS).
+- **2:** the hackathon release, Sarke 1.1.0.
 
 ## Connections
 
@@ -13,12 +17,31 @@ can take control, share windows, copy and send files. Every PC starts as a host;
 
 | Port | Transport | Framing | Carries |
 |---|---|---|---|
-| 50500 | TCP | `[u32 len][JSON]`, big-endian length, at most 64 KB | control and input messages (table below) |
+| 50500 | TCP, **TLS 1.3** | `[u32 len][JSON]` inside TLS, big-endian length, at most 64 KB | control and input messages (table below) |
 | 50501 | TCP | `[u32 header_len][u32 payload_len][header JSON][payload]`, big-endian, payload at most 32 MB | video frames, both directions on one connection |
 | 50502 | TCP | same as 50501 | files: `transfer_begin` (`drag`, drag image), `file_begin`, `file_chunk`, `file_end`, `transfer_end` |
 | 50503 | UDP | one JSON object per datagram | discovery: `kvm_discover` (broadcast), answered by `kvm_here` |
 
 `TCP_NODELAY` is set on every TCP socket.
+
+**Who may connect** (50500; [SECURITY.md](SECURITY.md) §6.4):
+- Both sides present a certificate. The TLS handshake runs first.
+- Then the peer's device ID (SHA-256 of its key) must be in this PC's `paired.json`. Otherwise the
+  connection is closed **before anything is read from it**.
+- A peer that doesn't speak TLS (protocol v2) is closed at the handshake.
+
+**Pairing** ([SECURITY.md](SECURITY.md) §6.3) is the one exchange allowed with a key that isn't
+paired:
+1. The client starts it when its user picked the host in the launcher (`--pair-unknown`). It sends
+   `pair_request`.
+2. Each side derives a 6-digit code from its own TLS session and logs
+   `pairing: code 042 917 with 'name' (id) - confirm on both PCs`.
+3. The launcher asks its user and answers `pair yes` / `pair no` on the app's stdin.
+4. Each side sends `pair_confirm`, and stores the other only if both said yes (`pair_result`).
+5. The client then connects again as a paired PC.
+
+The host allows 3 pairing attempts per IP per 10 minutes. For development, `--pair-with <device id>`
+pairs by hand (`--print-id` shows the ID). Ports 50501 and 50502 are still plain TCP until P1.7.
 
 **Discovery.** A PC looking for others broadcasts `kvm_discover`. Every running host answers
 `kvm_here` with `name`, `control_port`, `protocol_version` and `busy` (a client is already
@@ -39,7 +62,7 @@ never hand-built JSON.
 
 | `type` | Direction | Fields |
 |---|---|---|
-| `hello` | client → host, then host → client (the answer) | `protocol_version`, `screen_w`, `screen_h`, `dpi_scale`, `hostname`, `desk` (desk mode on) |
+| `hello` | client → host, then host → client (the answer) | `protocol_version`, `screen_w`, `screen_h`, `dpi_scale`, `hostname`, `desk` (desk mode on), `device_id` (64 hex, the sender's TLS key; for logs) |
 | `focus_enter` | controller → controlled | `y_norm` (where the cursor enters), `desk` (the cursor follows `desk_move`) |
 | `focus_leave` | both | `y_norm`. Controller → controlled: "I took input back". Controlled → controller: "your cursor came back over my edge" |
 | `mouse_move` | controller → controlled | `dx`, `dy` (relative) |
@@ -56,6 +79,9 @@ never hand-built JSON.
 | `layout` | both (after `hello`, and on Displays → Apply) | `you_are` (`left`/`right`/`top`/`bottom`: where the **receiver** stands relative to the sender), `set_at` (ms when the user set it; 0 = never). The newer setting wins; on a tie, the host's. Each PC keeps every peer's side in `config.json` `"peers": {name: {side, set_at}}` ([layout_sync](../common/include/kvm/layout_sync.h)) |
 | `identify` | both | none. The other PC shows its screen numbers too |
 | `ping` / `pong` | both | `t` (`pong` adds `t_peer`, for the clock offset) |
+| `pair_request` | pairing initiator → the other PC (key not paired yet) | `name` (shown to the other user only) |
+| `pair_confirm` | both, while pairing | `ok`: this user saw the same code and confirmed |
+| `pair_result` | both, while pairing | `ok`, `reason` (when not ok) |
 
 ## Video frames (port 50501)
 

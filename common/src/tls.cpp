@@ -234,6 +234,7 @@ struct Stream::Impl {
     std::mutex ssl_mutex;  // every SSL_* call on `ssl` (OpenSSL objects aren't shared between threads)
     std::mutex write_mutex;  // one send_all() at a time, so messages never interleave
     std::atomic<bool> aborted{false};
+    std::atomic<long long> receive_timeout_ms{0};  // 0 = wait forever
 
     ~Impl() {
         if (ssl && !aborted) {
@@ -366,17 +367,25 @@ int Stream::recv_exact(char* data, std::size_t size) {
         }
         switch (e) {
         case SSL_ERROR_WANT_READ:
-        case SSL_ERROR_WANT_WRITE:
-            switch (wait_socket(impl_->sock, e == SSL_ERROR_WANT_WRITE, kForever, impl_->aborted)) {
+        case SSL_ERROR_WANT_WRITE: {
+            const auto timeout = std::chrono::milliseconds(impl_->receive_timeout_ms.load());
+            const auto deadline = timeout.count() > 0 ? Clock::now() + timeout : kForever;
+            switch (wait_socket(impl_->sock, e == SSL_ERROR_WANT_WRITE, deadline, impl_->aborted)) {
             case Wait::Ready: continue;
             case Wait::Aborted: return WSAECONNABORTED;
+            case Wait::Timeout: return WSAETIMEDOUT;
             default: return impl_->aborted ? WSAECONNABORTED : WSAECONNRESET;
             }
+        }
         case SSL_ERROR_SYSCALL: return impl_->aborted ? WSAECONNABORTED : (sys != 0 ? sys : WSAECONNRESET);
         default: return impl_->aborted ? WSAECONNABORTED : WSAECONNRESET;  // close_notify or a TLS error
         }
     }
     return 0;
+}
+
+void Stream::set_receive_timeout(std::chrono::milliseconds timeout) {
+    impl_->receive_timeout_ms = timeout.count();
 }
 
 void Stream::abort() {
