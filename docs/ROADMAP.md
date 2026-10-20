@@ -31,7 +31,24 @@ This plan was written on 2026-10-20 from commit `aa32eb1` (Sarke 1.1.0). Nothing
 
 ## Decisions needed from you
 
-They are ordered by when they block work. Phase 0 tasks P0.1–P0.7 can start before any of them is made.
+They are ordered by when they block work.
+
+**Status (2026-10-20, answered by Demetre):**
+
+| # | Decision | Answer |
+|---|---|---|
+| D1 | License | **Apache-2.0.** All four authors agree; the project is open source. |
+| D2 | Old team | **(a)** Demetre maintains Sarke; Luka, Temo and Sandro consented to the license. |
+| D3 | Code signing | **SignPath Foundation.** The repo is public, and Apache-2.0 is an OSI license. Applying is a step for Demetre (P1.13). |
+| D4 | Committed binaries | **(a)** Delete them from the tree only; the history is not rewritten. |
+| D5 | Releases | **GitHub Releases** is the source of truth, **and** every release is also uploaded to the website ([tools/publish_release.ps1](../tools/publish_release.ps1) stays). |
+| D6 | TLS library | **OpenSSL 3.** |
+| D7 | Pairing | **(a)** The same 6-digit code on both screens; confirm on both. |
+| D8 | Audio on Windows 10 | Open: decided after the P3.1 prototype. |
+| D9 | Controllers | Open: decided before Phase 5. |
+| D10 | Internet server cost | Open: decided before Phase 6. |
+
+The options below are kept as a record of what was weighed.
 
 ### D1. License (needed before P0.8)
 Sarke has no LICENSE file today, so it is legally "all rights reserved". Each of the four authors owns the copyright in their own commits: Luka 40, Temo 40, Sandro 21, Demetre 16 (117 in total). Any license needs their agreement (see D2).
@@ -305,6 +322,7 @@ Task-level links that matter:
     - `tools/make_installer.ps1` calls it;
     - `README.md` links to GitHub Releases.
   - **Release:** publish `v1.1.0` as a GitHub Release with the existing installer attached. Optionally, a `release.yml` workflow builds the installer on a tag; it needs Inno Setup on the runner.
+  - **Website (D5):** the same installer is also uploaded to the website with [tools/publish_release.ps1](../tools/publish_release.ps1). Document the two-step release (GitHub Release, then website) in `docs/RELEASING.md`.
   - **Done when:**
     - a fresh clone + `fetch_vdd.ps1` + `make_installer.ps1` produces an installer that works in Windows Sandbox (the existing method, commit `6b58d1f`);
     - a wrong hash makes the script fail.
@@ -335,9 +353,9 @@ Task-level links that matter:
     - `ctest -L loopback` passes on this PC;
     - if `--no-kvm` is enough for the hosted runner, it is added to CI.
 
-- [ ] **P0.8 License** (S), branch `phase0/license`. Depends on D1 and the consent from D2.
+- [ ] **P0.8 License** (S), branch `phase0/license`. D1 = Apache-2.0, and all four authors agree.
   - **Files:**
-    - `LICENSE`;
+    - `LICENSE` (Apache-2.0 text) and `NOTICE`;
     - an `SPDX-License-Identifier` line at the top of each source file (scripted);
     - `README.md` credits and license section;
     - `THIRD_PARTY_NOTICES.md` (nlohmann-json MIT, libjpeg-turbo BSD-3/IJG/zlib, VDD MIT, and later additions).
@@ -564,7 +582,8 @@ Attempts are rate-limited.
   - **Done when:** the fuzzer runs N minutes without crashing (record N); a flood test can't exhaust handshake slots.
 
 - [ ] **P1.13 Code signing in the build** (S, after D3), branch `phase1/signing`.
-  - `signtool` (or the SignPath CI step) signs every exe, `sarke_driver.exe` and the setup exe.
+  - D3 = SignPath Foundation. Demetre applies at signpath.org; the project qualifies once P0.8 adds the Apache-2.0 LICENSE.
+  - The SignPath step in the release workflow signs every exe, `sarke_driver.exe` and the setup exe.
   - This does **not** block Phase 2 if D3 is "later".
 
 - [ ] **P1.14 Security release** (S), branch `phase1/release`.
