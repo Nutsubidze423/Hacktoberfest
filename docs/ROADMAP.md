@@ -637,11 +637,17 @@ Attempts are rate-limited.
       - recreate moves the old file to `identity.bin.broken-<time>`, and the new identity loads after.
     - **Still manual:** that another Windows user can't decrypt the file, which needs two accounts. Not run yet.
 
-- [ ] **P1.4 Paired-device store** (S), branch `phase1/paired-store`.
+- [x] **P1.4 Paired-device store** (S), branch `phase1/paired-store`.
   - **Files:** new `common/include/kvm/paired.h` and `common/src/paired.cpp`.
   - `paired.json` holds `[{device_id, name, paired_at, last_seen, auto_connect, permissions:{}}]`. The `permissions` object is filled in Phase 4.
   - **Migration:** `settings.json` `auto_connect` names are **not** carried over as trust. The first v3 run shows "pair your PCs again".
   - **Tests:** extend `launcher_test`, or add a new `paired_test`.
+  - **Result (2026-10-20):**
+    - **[kvm/paired.h](../common/include/kvm/paired.h):** `Store` with add (replaces an existing ID, never duplicates), remove, find, all, auto-connect, last seen, and `reload()` for changes from other processes.
+    - **Saving:** thread-safe and atomic (a temp file, then a replace).
+    - **Fails closed:** an unparseable `paired.json` means no PC is trusted, and the next save keeps it as `paired.json.broken-<time>`. Entries without a valid ID are skipped.
+    - **`paired_test` (unit):** 17 checks pass.
+    - **The migration message** ("pair your PCs again") belongs to the UI tasks (P1.8, P1.9): `settings.json` names are simply never read as trust.
 
 - [ ] **P1.5 TLS + pinning on the control channel (50500)** (M), branch `phase1/control-tls`. Depends on P1.2–P1.4 and P0.7.
   - **Files:**
