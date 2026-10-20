@@ -22,6 +22,8 @@
 #include <vector>
 
 #include "display_layout.h"
+#include "kvm/discovery.h"
+#include "kvm/paired.h"
 
 namespace kvm::launcher {
 
@@ -70,8 +72,9 @@ struct Settings {
     std::optional<layout::Role> role;  // the app this PC ran last (it starts as the host again)
     bool notify_connected = true;
     bool notify_lost = true;
-    // PCs to connect to by themselves whenever they show up on the network ("Connect automatically"),
-    // by computer name (their IP may change). Nothing connects on its own unless it is listed here.
+    // Sarke 1.1's "Connect automatically" list, by computer name. Nothing connects by name any more:
+    // Auto lives in paired.json, by device ID. A PC listed here gets Auto there when it is paired,
+    // and leaves this list.
     std::vector<std::string> auto_connect;
 };
 Settings load_settings(const std::optional<std::filesystem::path>& file = std::nullopt);
@@ -82,6 +85,17 @@ bool save_settings(const Settings& settings, const std::optional<std::filesystem
 // the other one gives it kAutoConnectYield, then connects itself (e.g. the first doesn't list it).
 inline constexpr std::chrono::seconds kAutoConnectYield{6};
 bool auto_connect_now(std::string_view self, std::string_view peer, std::chrono::steady_clock::duration seen_for);
+
+// ---- which PCs are paired: paired.json (kvm/paired.h) -------------------------------------------
+
+// The folder the apps keep identity.bin and paired.json in: `--data-dir <dir>` among `app_args`,
+// else identity::default_dir().
+std::filesystem::path data_dir(const std::vector<std::wstring>& app_args);
+
+// The paired PC that `host` claims to be, by the device ID in its discovery answer (docs/SECURITY.md
+// 6.5). The name doesn't count: a PC answering with a paired PC's name but another ID is another,
+// unpaired PC. Only a claim: the TLS handshake shows who it is.
+std::optional<paired::Device> paired_as(const discovery::Host& host, const std::vector<paired::Device>& paired);
 
 // The app for `role`: sarke_host.exe / kvm_host.exe (client: sarke_client / kvm_client) next to the
 // launcher, else in the build tree (..\host_a, ..\client_b). nullopt if none is found.

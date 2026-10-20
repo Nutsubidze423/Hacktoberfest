@@ -15,6 +15,10 @@
 
 #include "display_layout.h"
 #include "kvm/config.h"
+#include "kvm/discovery.h"
+#include "kvm/identity.h"
+#include "kvm/paired.h"
+#include "kvm/tls.h"
 #include "launcher.h"
 
 namespace launcher = kvm::launcher;
@@ -133,6 +137,34 @@ void files() {
     check(!launcher::auto_connect_now("beta", "alpha", launcher::kAutoConnectYield - 1s) &&
               launcher::auto_connect_now("beta", "alpha", launcher::kAutoConnectYield),
           "auto-connect: the other one connects after kAutoConnectYield");
+
+    // Which paired PC a discovery answer claims to be: by device ID, never by name (SECURITY.md 6.5).
+    {
+        kvm::tls::DeviceId desk_id{}, other_id{};
+        desk_id.fill(0x11);
+        other_id.fill(0x22);
+        const std::vector<kvm::paired::Device> paired = {{.id = desk_id, .name = "DESK", .auto_connect = true}};
+        const auto desk_here = [&](std::string name, std::string id) {
+            return kvm::discovery::Host{.name = std::move(name),
+                                        .ip = "10.0.0.5",
+                                        .control_port = 50500,
+                                        .protocol_version = 3,
+                                        .device_id = std::move(id)};
+        };
+        const auto as_desk = launcher::paired_as(desk_here("DESK", kvm::tls::to_hex(desk_id)), paired);
+        check(as_desk && as_desk->auto_connect, "a paired PC's answer: paired, with its Auto");
+        check(!launcher::paired_as(desk_here("DESK", kvm::tls::to_hex(other_id)), paired),
+              "a paired PC's name with another device ID: not paired, so never auto-connected");
+        check(!launcher::paired_as(desk_here("DESK", ""), paired), "no device ID: not paired");
+        check(launcher::paired_as(desk_here("renamed", kvm::tls::to_hex(desk_id)), paired).has_value(),
+              "the paired ID under another name: still that PC (the name is only shown)");
+        check(kvm::discovery::parse_device_id(std::string(64, 'A')) == std::string(64, 'a') &&
+                  !kvm::discovery::parse_device_id("abc") && !kvm::discovery::parse_device_id(std::string(64, 'g')),
+              "discovery: a device ID is 64 hex digits, kept in lower case");
+    }
+    check(launcher::data_dir({L"--no-clipboard", L"--data-dir", L"D:\\sarke"}) == std::filesystem::path(L"D:\\sarke") &&
+              launcher::data_dir({}) == kvm::identity::default_dir(),
+          "paired.json is where the apps keep it: --data-dir, else the default folder");
 
     const auto cfg = dir / L"config.json";
     check(layout::ensure_config(cfg).empty() && std::filesystem::exists(cfg), "ensure_config creates the file");

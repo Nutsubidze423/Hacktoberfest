@@ -748,13 +748,34 @@ Attempts are rate-limited.
     - **Measured** ([PERF.md](PERF.md)): TLS takes the loopback video channel from about 4800 to about 890 frames/s (250 KB frames), still about 30× what 30 fps needs. Capture → received at 30 fps didn't change measurably (27–32 ms both ways).
     - **Not run yet:** two physical PCs (R3, R9–R12, R15). The README's "ports the same on both PCs" note stays until this ships (P1.14): 1.1 still needs it.
 
-- [ ] **P1.8 Discovery carries identity; auto-connect by key** (S), branch `phase1/discovery-id`. Depends on P1.4.
+- [x] **P1.8 Discovery carries identity; auto-connect by key** (S), branch `phase1/discovery-id`. Depends on P1.4.
   - **Files:**
     - [common/src/discovery.cpp](../common/src/discovery.cpp);
     - [client_b/launcher.cpp:541-552](../client_b/launcher.cpp#L541-L552);
     - the tray menu shows "Pair…" for unknown PCs and "Connect" for paired ones.
   - **Protocol:** `kvm_here` adds `device_id`.
   - **Tests:** unit: a reply with a paired *name* but another `device_id` is not auto-connected.
+  - **Result (2026-10-21):**
+    - **Discovery:**
+      - `kvm_here` carries `device_id`;
+      - `discovery::Host::device_id` is 64 lower-case hex, empty when missing or malformed (`parse_device_id`).
+    - **Launcher:**
+      - the scan keys PCs by device ID and drops answers without one;
+      - Auto comes from `paired.json` (`paired_as()`, by ID only; the name is shown);
+      - the picker shows "Pair…" and no Auto switch for unpaired PCs;
+      - `--pair-unknown` is passed only for an unpaired pick, so a fake answer claiming a paired ID can't bring up a pairing question;
+      - `--data-dir` among the app arguments moves `paired.json` too;
+      - 1.1's Auto list (by name, `settings.json`) moves to `paired.json` when that PC is paired.
+    - **Found and fixed: `paired::Store` lost updates across processes.**
+      - Each process wrote back its in-memory list. With the launcher now writing (Auto), it could have erased a pairing kvm_host had just added.
+      - Every change now re-reads the file under a per-file named mutex.
+      - A broken file is logged once, not on every reload.
+    - **Tests:**
+      - `launcher_test`: a paired name with another ID, or no ID, isn't paired; the paired ID under another name is; `data_dir`.
+      - `paired_test`: two stores changing one file lose nothing; 8 threads adding at once save all 8.
+      - New `discovery_test` (unit): a Responder answers `find()` with its device ID; a malformed one arrives as none.
+      - The picker was checked by screenshot (`ui_preview_picker`).
+    - **Not run yet:** two PCs (R3, R13): the list, Pair… on a fresh PC, Auto after pairing.
 
 - [ ] **P1.9 "Paired devices" window and unpair** (M), branch `phase1/paired-ui`. Depends on P1.6.
   - **Files:** new `client_b/paired_window.*` (`ui_draw`) and a tray entry.

@@ -206,7 +206,7 @@ DevicePicker::Hit DevicePicker::hit_test(POINT client) const {
         a.left -= P(kSwitchGap);  // a forgiving target
         a.top -= P(6);
         a.bottom += P(6);
-        if (contains(a, client)) return {Part::Auto, i};
+        if (rows_[i].paired && contains(a, client)) return {Part::Auto, i};
         if (contains(row_rect(i), client)) return {Part::Row, i};
     }
     if (has_ours() && contains(disconnect_rect(), client)) return {Part::Disconnect, 0};
@@ -269,14 +269,19 @@ void DevicePicker::render() {
         p.circle({cx, mid}, sd / 2, dot_color(row.state), dim);
         const float tx = r.left + P(kRowPad) + sd + P(kRowPad);
         const auto a = auto_rect(i);
-        // Right side, from the switch leftwards: "Auto", then the state.
-        const float auto_label_right = a.left - P(kSwitchGap);
-        const float auto_label_left = p.text_right(TextStyle::Caption, L"Auto", auto_label_right,
-                                                   std::round(mid - line(TextStyle::Caption) / 2), c.ink3);
-        float text_right = auto_label_left - P(kRowPad);
-        if (const std::wstring_view st = state_text(row.state); !st.empty()) {
+        // Right side, from the switch leftwards: "Auto", then the state. An unpaired PC has no switch.
+        float text_right = a.right;
+        if (row.paired) {
+            const float auto_label_right = a.left - P(kSwitchGap);
+            text_right = p.text_right(TextStyle::Caption, L"Auto", auto_label_right,
+                                      std::round(mid - line(TextStyle::Caption) / 2), c.ink3) -
+                         P(kRowPad);
+        }
+        const bool to_pair = !row.paired && row.state == State::Free;
+        if (const std::wstring_view st = to_pair ? L"Pair…" : state_text(row.state); !st.empty()) {
             const std::uint32_t ink = row.state == State::Connected    ? c.ok
                                       : row.state == State::Connecting ? c.warn
+                                      : to_pair                        ? c.accent_ink
                                                                        : c.ink3;
             text_right =
                 p.text_right(TextStyle::Caption, st, text_right, std::round(mid - line(TextStyle::Caption) / 2), ink) -
@@ -288,6 +293,7 @@ void DevicePicker::render() {
                name_top + line(TextStyle::BodyStrong), std::max(0.0f, text_right - tx), c.ink2, dim);
 
         // The Auto switch: a pill track and a round knob.
+        if (!row.paired) continue;
         const bool auto_hot = hover_.row == i && hover_.part == Part::Auto;
         p.pill(a, row.auto_connect ? (auto_hot ? c.accent_hover : c.accent) : (auto_hot ? c.seg_on : c.fill_hi));
         const float knob = P(kSwitchH) - P(4);
@@ -381,7 +387,7 @@ LRESULT DevicePicker::handle_message(UINT msg, WPARAM wp, LPARAM lp) {
     case WM_LBUTTONUP: {
         const Hit h = hit_test({GET_X_LPARAM(lp), GET_Y_LPARAM(lp)});
         const Actions actions = actions_;  // a copy: the callback may show the picker again
-        if (h.part == Part::Auto && h.row < rows_.size()) {
+        if (h.part == Part::Auto && h.row < rows_.size() && rows_[h.row].paired) {
             rows_[h.row].auto_connect = !rows_[h.row].auto_connect;  // feels instant; update() confirms
             render();
             present();

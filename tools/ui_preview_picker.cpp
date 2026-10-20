@@ -29,7 +29,7 @@ int wmain(int argc, wchar_t** argv) {
                  .state = connected ? State::Connected : State::Free,
                  .auto_connect = true},
                 {.name = L"luka-laptop", .ip = L"172.20.10.7", .state = State::Busy},
-                {.name = L"sandro-pc", .ip = L"172.20.10.9", .state = State::Free},
+                {.name = L"sandro-pc", .ip = L"172.20.10.9", .state = State::Free, .paired = false},
                 {.name = L"office-desktop", .state = State::Offline, .auto_connect = true}};
     }
     kvm::DevicePicker picker;

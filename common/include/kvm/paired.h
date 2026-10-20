@@ -9,9 +9,11 @@
 // Fails closed: a file that doesn't parse counts as "no paired PCs" (nobody is trusted). It is kept
 // as paired.json.broken-<time> by the next save, never silently overwritten.
 //
-// Several processes use the file (kvm_host and kvm_client pin against it, the launcher pairs and
-// unpairs): reload() before a decision that must see the others' changes. Saves are atomic (a temp
-// file, then a replace). The methods are thread-safe.
+// Several processes use the file (kvm_host and kvm_client pin against it and pair, the launcher sets
+// auto_connect and unpairs): reload() before a decision that must see the others' changes. Every
+// change re-reads the file and saves it under one named mutex per file, so no process writes back a
+// list without another's latest change. Saves are atomic (a temp file, then a replace). The methods
+// are thread-safe.
 #pragma once
 
 #include <nlohmann/json.hpp>
@@ -63,6 +65,10 @@ public:
 private:
     void load_locked();
     bool save_locked();
+    // Re-reads the file, applies `change` to the list (false = nothing to save) and saves, all
+    // while holding the file's named mutex. False if `change` said no or saving failed.
+    template <class Change>
+    bool modify(Change&& change);
 
     const std::filesystem::path file_;
     mutable std::mutex mutex_;

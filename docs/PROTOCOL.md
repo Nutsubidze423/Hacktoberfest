@@ -57,9 +57,12 @@ control session:
 5. When the session ends, the host closes its side channels and refuses the old token.
 
 **Discovery.** A PC looking for others broadcasts `kvm_discover`. Every running host answers
-`kvm_here` with `name`, `control_port`, `protocol_version` and `busy` (a client is already
-connected). The launcher scans every 2.5 s and lists the PCs in the tray ("Connect to ▸"). It
-connects by itself only to PCs marked "Connect automatically" (`settings.json` `auto_connect`).
+`kvm_here` with `name`, `control_port`, `protocol_version`, `busy` (a client is already connected)
+and `device_id` (64 hex, its TLS key). The launcher scans every 2.5 s and lists the PCs in the tray
+("Connect to ▸"), one row per device ID: a paired PC can be connected to, any other shows
+"Pair…". It connects by itself only to paired PCs set to "Connect automatically" (`auto_connect` in
+`paired.json`). Answers aren't authenticated ([SECURITY.md](SECURITY.md) §6.5): they only decide
+where to try TLS, and pinning decides the rest.
 `config.json` `"host_ip": "auto"` (the default) needs no IP; `kvm_client --host <IP>` connects
 directly.
 

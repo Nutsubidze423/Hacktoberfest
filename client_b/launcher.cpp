@@ -27,8 +27,11 @@
 #include "display_settings.h"
 #include "kvm/config.h"
 #include "kvm/discovery.h"
+#include "kvm/identity.h"
 #include "kvm/log.h"
+#include "kvm/paired.h"
 #include "kvm/protocol.h"
+#include "kvm/tls.h"
 #include "toast.h"
 #include "tray_icon.h"
 #include "ui_tokens.h"
@@ -240,6 +243,21 @@ bool auto_connect_now(std::string_view self, std::string_view peer, std::chrono:
     return lower(self) < lower(peer) || seen_for >= kAutoConnectYield;
 }
 
+fs::path data_dir(const std::vector<std::wstring>& app_args) {
+    for (std::size_t i = 0; i + 1 < app_args.size(); ++i) {
+        if (app_args[i] == L"--data-dir") return app_args[i + 1];
+    }
+    return identity::default_dir();
+}
+
+std::optional<paired::Device> paired_as(const discovery::Host& host, const std::vector<paired::Device>& paired) {
+    const auto id = tls::from_hex(host.device_id);
+    if (!id) return std::nullopt;
+    const auto it = std::find_if(paired.begin(), paired.end(), [&](const paired::Device& d) { return d.id == *id; });
+    if (it == paired.end()) return std::nullopt;
+    return *it;
+}
+
 bool save_settings(const Settings& s, const std::optional<fs::path>& file) {
     const fs::path path = settings_file(file);
     std::error_code ec;
@@ -281,7 +299,8 @@ namespace {
 
 class App {
 public:
-    explicit App(Options options) : options_(std::move(options)) {}
+    explicit App(Options options)
+        : options_(std::move(options)), paired_(data_dir(options_.app_args) / L"paired.json") {}
     ~App();
 
     int run();
@@ -302,6 +321,8 @@ private:
     struct Target {
         std::string name;
         std::string ip;
+        std::string device_id;  // what its discovery answer claimed
+        bool paired = false;    // that ID is paired: no pairing offered if the key there is another
         bool automatic = false;
     };
 
@@ -318,8 +339,9 @@ private:
     void pick_device(std::optional<POINT> at = std::nullopt);
     std::vector<DevicePicker::Row> picker_rows();
     void refresh_picker();
-    bool auto_listed(std::string_view name) const;
-    void toggle_auto(const std::string& name);
+    bool auto_on(const discovery::Host& host) const;  // paired, with Auto on
+    void toggle_auto(const discovery::Host& host);
+    void adopt_old_auto();  // 1.1's Auto by name -> paired.json, once the target is paired
     bool start_app();
     void stop_app(bool restart);
     void end_app_now();
@@ -340,6 +362,8 @@ private:
 
     Options options_;
     Settings settings_;
+    paired::Store paired_;                       // paired.json, shared with the apps
+    std::vector<paired::Device> paired_devices_;  // its PCs, read again with every scan
     Role role_ = Role::Host;
     fs::path config_path_;
     fs::path log_path_;
@@ -375,9 +399,7 @@ private:
     DevicePicker picker_;
     PairingDialog pairing_dialog_;
     std::vector<discovery::Host> picker_hosts_;  // what the picker's rows stand for
-    std::vector<std::string> picker_names_;
-    std::set<std::string>
-        suppressed_;       // lower-case names the user disconnected from: no auto-connect until they go away
+    std::set<std::string> suppressed_;  // device IDs the user disconnected from: no auto-connect until they go away
     std::chrono::steady_clock::time_point auto_block_until_{};
     std::mutex scan_mutex_;
     std::vector<Device> scanned_;            // written by the scanner thread
@@ -521,15 +543,17 @@ void App::scan_loop(std::stop_token stop, HWND notify) {
     while (!stop.stop_requested()) {
         const auto started = std::chrono::steady_clock::now();
         auto hosts = discovery::find(kScanWait);
+        // A PC is known by the device ID it claims, not its name (docs/SECURITY.md 6.5).
         std::erase_if(hosts, [&](const discovery::Host& h) {
-            return h.protocol_version != proto::kProtocolVersion || same_name(h.name, self_name_);
+            return h.protocol_version != proto::kProtocolVersion || h.device_id.empty() ||
+                   same_name(h.name, self_name_);
         });
         const auto now = std::chrono::steady_clock::now();
         {
             std::lock_guard lock(scan_mutex_);
             for (const auto& h : hosts) {
                 const auto it = std::find_if(scanned_.begin(), scanned_.end(),
-                                             [&](const Device& d) { return same_name(d.host.name, h.name); });
+                                             [&](const Device& d) { return d.host.device_id == h.device_id; });
                 if (it == scanned_.end()) {
                     scanned_.push_back({.host = h, .first_seen = now, .last_seen = now});
                 } else {
@@ -553,18 +577,19 @@ void App::on_devices() {
         std::lock_guard lock(scan_mutex_);
         devices_ = scanned_;
     }
+    paired_.reload();  // the apps pair; the user may have unpaired
+    paired_devices_ = paired_.all();
     // A PC the user disconnected from may connect automatically again once it has gone away.
-    std::erase_if(suppressed_, [&](const std::string& name) {
-        return std::none_of(devices_.begin(), devices_.end(),
-                            [&](const Device& d) { return lower(d.host.name) == name; });
+    std::erase_if(suppressed_, [&](const std::string& id) {
+        return std::none_of(devices_.begin(), devices_.end(), [&](const Device& d) { return d.host.device_id == id; });
     });
     refresh_picker();
     maybe_auto_connect();
 }
 
-bool App::auto_listed(std::string_view name) const {
-    return std::any_of(settings_.auto_connect.begin(), settings_.auto_connect.end(),
-                       [&](const std::string& n) { return same_name(n, name); });
+bool App::auto_on(const discovery::Host& host) const {
+    const auto known = paired_as(host, paired_devices_);
+    return known && known->auto_connect;
 }
 
 void App::maybe_auto_connect() {
@@ -573,7 +598,7 @@ void App::maybe_auto_connect() {
     const auto now = std::chrono::steady_clock::now();
     if (now < auto_block_until_) return;
     for (const auto& d : devices_) {
-        if (d.host.busy || !auto_listed(d.host.name) || suppressed_.contains(lower(d.host.name))) continue;
+        if (d.host.busy || !auto_on(d.host) || suppressed_.contains(d.host.device_id)) continue;
         if (!auto_connect_now(self_name_, d.host.name, now - d.first_seen)) continue;
         log::info("launcher: {} is on the network - connecting automatically", d.host.name);
         connect_to(d.host, /*automatic=*/true);
@@ -582,7 +607,11 @@ void App::maybe_auto_connect() {
 }
 
 void App::connect_to(const discovery::Host& host, bool automatic) {
-    target_ = Target{.name = host.name, .ip = host.ip, .automatic = automatic};
+    target_ = Target{.name = host.name,
+                     .ip = host.ip,
+                     .device_id = host.device_id,
+                     .paired = paired_as(host, paired_devices_).has_value(),
+                     .automatic = automatic};
     const std::wstring why = L"Connecting to " + widen(host.name);
     if (role_ == Role::Client) {
         peer_name_.clear();
@@ -593,51 +622,83 @@ void App::connect_to(const discovery::Host& host, bool automatic) {
 }
 
 void App::disconnect() {
-    if (target_) suppressed_.insert(lower(target_->name));  // don't join it again by itself right away
+    if (target_) suppressed_.insert(target_->device_id);  // don't join it again by itself right away
     switch_role(Role::Host);
 }
 
-void App::toggle_auto(const std::string& name) {
-    auto& list = settings_.auto_connect;
-    if (auto_listed(name)) {
-        std::erase_if(list, [&](const std::string& n) { return same_name(n, name); });
-        notify(L"Connect automatically: off", widen(name) + L" is joined only when you pick it.", Toast::Kind::Info);
+void App::toggle_auto(const discovery::Host& host) {
+    paired_.reload();
+    paired_devices_ = paired_.all();
+    const auto known = paired_as(host, paired_devices_);
+    if (!known) {  // the picker has no switch for it; it may have been unpaired meanwhile
+        notify(L"Pair first", L"Click " + widen(host.name) + L" to pair with it.", Toast::Kind::Info);
+        return;
+    }
+    const bool on = !known->auto_connect;
+    if (!paired_.set_auto_connect(known->id, on)) {
+        notify(L"Sarke can't save", L"Could not save the setting to paired.json.", Toast::Kind::Lost);
+        return;
+    }
+    paired_devices_ = paired_.all();
+    if (on) {
+        suppressed_.erase(host.device_id);
+        notify(L"Connect automatically: on", L"Sarke joins " + widen(known->name) + L" whenever it is on the network.",
+               Toast::Kind::Info);
     } else {
-        list.push_back(name);
-        suppressed_.erase(lower(name));
-        notify(L"Connect automatically: on", L"Sarke joins " + widen(name) + L" whenever it is on the network.",
+        notify(L"Connect automatically: off", widen(known->name) + L" is joined only when you pick it.",
                Toast::Kind::Info);
     }
-    save_settings(settings_);
     maybe_auto_connect();
 }
 
-// The picker's rows: the PCs seen now, ours (even if a scan missed it), then remembered ones that
-// are away (so "Auto" can be switched off for them too). picker_hosts_ / picker_names_ match the rows.
+void App::adopt_old_auto() {
+    if (!target_) return;
+    auto& old = settings_.auto_connect;
+    const auto listed = [&](const std::string& n) { return same_name(n, target_->name); };
+    paired_.reload();
+    paired_devices_ = paired_.all();
+    const discovery::Host host{.name = target_->name, .device_id = target_->device_id};
+    const auto known = paired_as(host, paired_devices_);
+    target_->paired = known.has_value();
+    if (!known || std::none_of(old.begin(), old.end(), listed)) return;
+    if (!paired_.set_auto_connect(known->id, true)) return;
+    std::erase_if(old, listed);
+    save_settings(settings_);
+    paired_devices_ = paired_.all();
+    log::info("launcher: {} was set to connect automatically in Sarke 1.1 - on again now that it is paired",
+              target_->name);
+}
+
+// The picker's rows: the PCs seen now, ours (even if a scan missed it), then paired ones set to Auto
+// that are away (so "Auto" can be switched off for them too). picker_hosts_ matches the rows.
 std::vector<DevicePicker::Row> App::picker_rows() {
     using State = DevicePicker::Row::State;
     std::vector<DevicePicker::Row> rows;
     picker_hosts_.clear();
-    picker_names_.clear();
-    const auto listed = [&](std::string_view name) {
-        return std::any_of(picker_names_.begin(), picker_names_.end(),
-                           [&](const std::string& n) { return same_name(n, name); });
+    const auto listed = [&](const std::string& id) {
+        return std::any_of(picker_hosts_.begin(), picker_hosts_.end(),
+                           [&](const discovery::Host& h) { return h.device_id == id; });
     };
     const auto add = [&](const discovery::Host& host, State state) {
-        rows.push_back(
-            {.name = widen(host.name), .ip = widen(host.ip), .state = state, .auto_connect = auto_listed(host.name)});
+        rows.push_back({.name = widen(host.name),
+                        .ip = widen(host.ip),
+                        .state = state,
+                        .auto_connect = auto_on(host),
+                        .paired = paired_as(host, paired_devices_).has_value()});
         picker_hosts_.push_back(host);
-        picker_names_.push_back(host.name);
     };
     const bool have_target = role_ == Role::Client && target_.has_value();
     const State ours = link_ == Link::Linked ? State::Connected : State::Connecting;
     for (const auto& d : devices_) {
-        const bool current = have_target && same_name(target_->name, d.host.name);
+        const bool current = have_target && target_->device_id == d.host.device_id;
         add(d.host, current ? ours : d.host.busy ? State::Busy : State::Free);
     }
-    if (have_target && !listed(target_->name)) add({.name = target_->name, .ip = target_->ip}, ours);
-    for (const auto& name : settings_.auto_connect) {
-        if (!listed(name)) add({.name = name}, State::Offline);
+    if (have_target && !listed(target_->device_id)) {
+        add({.name = target_->name, .ip = target_->ip, .device_id = target_->device_id}, ours);
+    }
+    for (const auto& d : paired_devices_) {
+        const std::string id = tls::to_hex(d.id);
+        if (d.auto_connect && !listed(id)) add({.name = d.name, .device_id = id}, State::Offline);
     }
     return rows;
 }
@@ -654,8 +715,8 @@ void App::pick_device(std::optional<POINT> at) {
                          },
                      .toggle_auto =
                          [this](std::size_t i) {
-                             if (i >= picker_names_.size()) return;
-                             toggle_auto(picker_names_[i]);
+                             if (i >= picker_hosts_.size()) return;
+                             toggle_auto(picker_hosts_[i]);
                              refresh_picker();
                          },
                      .disconnect = [this] { disconnect(); },
@@ -735,8 +796,9 @@ bool App::start_app() {
     std::wstring cmd = std::format(L"\"{}\" --config \"{}\"", exe->wstring(), config_path_.wstring());
     // The PC picked in the list: connect to exactly that one (not the first host that answers).
     if (role_ == Role::Client && target_) cmd += L" --host \"" + widen(target_->ip) + L"\"";
-    // Picked by the user (not auto-connect): a PC that isn't paired yet is paired by comparing a code.
-    if (role_ == Role::Client && target_ && !target_->automatic) cmd += L" --pair-unknown";
+    // Picked by the user (not auto-connect) and not paired yet: paired by comparing a code. A row that
+    // claims a paired ID never offers pairing, so a fake answer can't bring up the question.
+    if (role_ == Role::Client && target_ && !target_->automatic && !target_->paired) cmd += L" --pair-unknown";
     for (const auto& arg : options_.app_args) cmd += L" \"" + arg + L"\"";
     STARTUPINFOW si{};
     si.cb = sizeof(si);
@@ -878,6 +940,7 @@ void App::handle(const Event& e) {
                 if (answer) send_command(*answer ? "pair yes" : "pair no");
             } else if constexpr (std::is_same_v<T, PairingDone>) {
                 pairing_dialog_.close();
+                if (ev.paired) adopt_old_auto();
                 notify(ev.paired ? L"Paired" : L"Not paired", widen(ev.text),
                        ev.paired ? Toast::Kind::Connected : Toast::Kind::Info);
             } else if constexpr (std::is_same_v<T, Problem>) {
