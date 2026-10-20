@@ -70,13 +70,13 @@ fs::path free_name(const fs::path& dir, const fs::path& name, bool is_file) {
     }
 }
 
-bool send_message(SOCKET s, const nlohmann::json& header, const char* payload = nullptr, std::size_t size = 0) {
+bool send_message(tls::Stream& s, const nlohmann::json& header, const char* payload = nullptr, std::size_t size = 0) {
     const std::string h = header.dump();
     std::string head(kPrefixBytes + h.size(), '\0');
     const u_long lens[2] = {htonl(static_cast<u_long>(h.size())), htonl(static_cast<u_long>(size))};
     std::memcpy(head.data(), lens, kPrefixBytes);
     std::memcpy(head.data() + kPrefixBytes, h.data(), h.size());
-    return send_all(s, head.data(), head.size()) && (size == 0 || send_all(s, payload, size));
+    return s.send_all(head.data(), head.size()) && (size == 0 || s.send_all(payload, size));
 }
 
 struct Message {
@@ -85,19 +85,19 @@ struct Message {
 };
 
 // 0 on success, a WSA error code from the socket, or -1 for a malformed message.
-int recv_message(SOCKET s, Message& out) {
+int recv_message(tls::Stream& s, Message& out) {
     std::array<u_long, 2> lens{};
-    if (const int err = recv_exact(s, reinterpret_cast<char*>(lens.data()), kPrefixBytes); err != 0) return err;
+    if (const int err = s.recv_exact(reinterpret_cast<char*>(lens.data()), kPrefixBytes); err != 0) return err;
     const std::uint32_t header_len = ntohl(lens[0]);
     const std::uint32_t payload_len = ntohl(lens[1]);
     if (header_len == 0 || header_len > kMaxHeaderBytes || payload_len > kChunkBytes) return -1;
     std::string header(header_len, '\0');
-    if (const int err = recv_exact(s, header.data(), header_len); err != 0) return err;
+    if (const int err = s.recv_exact(header.data(), header_len); err != 0) return err;
     out.header = nlohmann::json::parse(header, nullptr, /*allow_exceptions=*/false);
     if (out.header.is_discarded() || !out.header.is_object()) return -1;
     out.payload.resize(payload_len);
     if (payload_len != 0) {
-        if (const int err = recv_exact(s, out.payload.data(), payload_len); err != 0) return err;
+        if (const int err = s.recv_exact(out.payload.data(), payload_len); err != 0) return err;
     }
     return 0;
 }
@@ -160,9 +160,11 @@ std::optional<fs::path> safe_destination(const fs::path& root, std::string_view 
     return out;
 }
 
-FileTransfer::FileTransfer(SOCKET sock, std::string peer, Callbacks callbacks, fs::path target)
-    : sock_(sock), peer_(std::move(peer)), callbacks_(std::move(callbacks)), target_(std::move(target)) {
-    set_nodelay(sock_);
+FileTransfer::FileTransfer(net::Handshaken connection, Callbacks callbacks, fs::path target)
+    : tls_(std::move(connection.stream)),
+      peer_(std::move(connection.peer)),
+      callbacks_(std::move(callbacks)),
+      target_(std::move(target)) {
     receiver_ = std::thread([this] { receive_loop(); });
     sender_ = std::thread([this] { send_loop(); });
 }
@@ -172,11 +174,11 @@ FileTransfer::~FileTransfer() {
     for (auto* t : {&receiver_, &sender_}) {
         if (t->joinable() && t->get_id() != std::this_thread::get_id()) t->join();
     }
-    closesocket(sock_);
+    // tls_ closes the socket when it goes.
 }
 
 void FileTransfer::close() {
-    if (open_.exchange(false)) net::detail::abort_socket(sock_);  // wakes the blocked recv/send at once
+    if (open_.exchange(false)) tls_->abort();  // wakes the blocked recv/send at once
     outgoing_.close();
 }
 
@@ -203,7 +205,7 @@ void FileTransfer::send_loop() {
             begin["image_y"] = image->cursor_y;
         }
         if (outgoing->drag &&
-            !send_message(sock_, begin, image ? reinterpret_cast<const char*>(image->bgra.data()) : nullptr,
+            !send_message(*tls_, begin, image ? reinterpret_cast<const char*>(image->bgra.data()) : nullptr,
                           image ? image->bgra.size() : 0)) {
             if (open_) log::warn("files: sending to {} failed: {}", peer_, last_error_text());
             close();
@@ -244,22 +246,22 @@ void FileTransfer::send_loop() {
                 continue;
             }
             const std::uint64_t id = next_id++;
-            if (!send_message(sock_, {{"type", "file_begin"}, {"id", id}, {"path", e.wire}, {"size", e.size}})) break;
+            if (!send_message(*tls_, {{"type", "file_begin"}, {"id", id}, {"path", e.wire}, {"size", e.size}})) break;
             std::uint64_t offset = 0;
             bool ok = true;
             while (ok) {
                 in.read(buffer.data(), static_cast<std::streamsize>(buffer.size()));
                 const auto n = static_cast<std::size_t>(in.gcount());
                 if (n == 0) break;  // end of file (an empty file sends no chunks)
-                ok = send_message(sock_, {{"type", "file_chunk"}, {"id", id}, {"offset", offset}}, buffer.data(), n);
+                ok = send_message(*tls_, {{"type", "file_chunk"}, {"id", id}, {"offset", offset}}, buffer.data(), n);
                 offset += n;
                 sent += n;
                 if (ok && callbacks_.on_send_progress) callbacks_.on_send_progress(sent, total);
             }
-            if (!ok || !send_message(sock_, {{"type", "file_end"}, {"id", id}})) break;
+            if (!ok || !send_message(*tls_, {{"type", "file_end"}, {"id", id}})) break;
             ++count;
         }
-        if (!open_ || !send_message(sock_, {{"type", "transfer_end"}, {"count", count}})) {
+        if (!open_ || !send_message(*tls_, {{"type", "transfer_end"}, {"count", count}})) {
             if (open_) log::warn("files: sending to {} failed: {}", peer_, last_error_text());
             close();
             return;
@@ -295,7 +297,7 @@ void FileTransfer::receive_loop() {
 
     Message m;
     while (open_) {
-        if (const int err = recv_message(sock_, m); err != 0) {
+        if (const int err = recv_message(*tls_, m); err != 0) {
             if (err == -1) {
                 log::error("files: malformed message from {}", peer_);
             } else if (open_) {
@@ -413,29 +415,26 @@ void FileTransfer::receive_loop() {
     close();
 }
 
-FileServer::FileServer(std::uint16_t port) : listen_sock_(listen_on(port)) {}
+FileServer::FileServer(std::uint16_t port) : server_(port) {}
 
 FileServer::~FileServer() {
     stop();
 }
 
-std::unique_ptr<FileTransfer> FileServer::accept(Callbacks callbacks, fs::path target) {
-    std::string peer;
-    const SOCKET s = accept_on(listen_sock_, peer);
-    if (s == INVALID_SOCKET) return nullptr;
-    return std::make_unique<FileTransfer>(s, std::move(peer), std::move(callbacks), std::move(target));
+std::optional<net::Handshaken> FileServer::accept(const tls::Credentials& me) {
+    return server_.accept(me);
 }
 
 void FileServer::stop() {
-    close_listener(listen_sock_);
+    server_.stop();
 }
 
-std::unique_ptr<FileTransfer> connect_files(const std::string& host, std::uint16_t port, Callbacks callbacks,
+std::unique_ptr<FileTransfer> connect_files(const std::string& host, std::uint16_t port, const tls::Credentials& me,
+                                            const tls::DeviceId& host_id, std::string_view token, Callbacks callbacks,
                                             fs::path target, std::chrono::milliseconds timeout) {
-    const SOCKET s = connect_to(host, port, timeout);
-    if (s == INVALID_SOCKET) return nullptr;
-    return std::make_unique<FileTransfer>(s, host + ":" + std::to_string(port), std::move(callbacks),
-                                          std::move(target));
+    auto pending = net::connect_side_channel(host, port, me, host_id, token, timeout);
+    if (!pending) return nullptr;
+    return std::make_unique<FileTransfer>(std::move(*pending), std::move(callbacks), std::move(target));
 }
 
 }  // namespace kvm::files

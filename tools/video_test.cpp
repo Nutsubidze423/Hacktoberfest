@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Loopback check for kvm/video.h: frames of many sizes arrive intact and in order, concurrent
-// senders do not interleave bytes, close() unblocks a receiver, garbage input is rejected, and a
-// rough throughput number for 1080p-sized JPEG frames.
+// senders do not interleave bytes, close() unblocks a receiver, garbage input is rejected, only the
+// live session's client gets a channel (TLS + token, docs/SECURITY.md 6.4), and a rough throughput
+// number for 1080p-sized JPEG frames.
 // Usage: video_test.exe   (exit code 0 = all passed; a free TCP port on 127.0.0.1, picked by Windows)
 
 #include <winsock2.h>
@@ -12,11 +13,13 @@
 #include <chrono>
 #include <cstdio>
 #include <cstdint>
+#include <optional>
 #include <thread>
 #include <vector>
 
 #include "kvm/net.h"
 #include "kvm/video.h"
+#include "side_channel_util.h"
 
 using namespace std::chrono_literals;
 namespace net = kvm::net;
@@ -75,9 +78,14 @@ struct Pair {
 };
 
 Pair connect_pair(net::VideoServer& server) {
+    const kvm::test::Session s;
     Pair pair;
-    std::thread acceptor([&] { pair.server_side = server.accept(); });
-    pair.client_side = net::connect_video("127.0.0.1", g_port);
+    std::thread acceptor([&] {
+        if (auto pending = kvm::test::accept_side_channel(server, s, "video")) {
+            pair.server_side = std::make_unique<net::FrameChannel>(std::move(*pending));
+        }
+    });
+    pair.client_side = net::connect_video("127.0.0.1", g_port, s.client, s.host.id(), s.token);
     acceptor.join();
     return pair;
 }
@@ -154,20 +162,82 @@ void test_close_unblocks(net::VideoServer& server) {
 }
 
 void test_garbage_rejected(net::VideoServer& server) {
+    // A paired client inside the session that then sends junk instead of a frame.
+    const kvm::test::Session s;
     std::unique_ptr<net::FrameChannel> server_side;
-    std::thread acceptor([&] { server_side = server.accept(); });
-    const SOCKET raw = ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-    sockaddr_in addr{};
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons(g_port);
-    inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr);
-    ::connect(raw, reinterpret_cast<const sockaddr*>(&addr), sizeof(addr));
+    std::thread acceptor([&] {
+        if (auto pending = kvm::test::accept_side_channel(server, s, "video")) {
+            server_side = std::make_unique<net::FrameChannel>(std::move(*pending));
+        }
+    });
+    auto client = net::connect_side_channel("127.0.0.1", g_port, s.client, s.host.id(), s.token);
     acceptor.join();
     const char junk[] = "\xFF\xFF\xFF\xFFGET / HTTP/1.1\r\n\r\n";
-    ::send(raw, junk, sizeof(junk) - 1, 0);
-    const bool rejected = server_side && !server_side->recv_frame().has_value();
-    closesocket(raw);
+    if (client) client->stream->send_all(junk, sizeof(junk) - 1);
+    const bool rejected = client && server_side && !server_side->recv_frame().has_value();
     check(rejected, "garbage length prefix -> nullopt, channel closed");
+}
+
+// A channel installed by admit() is never kept past its session: close() waits for an install
+// that is running, and after close() nothing is installed.
+void test_install_vs_close() {
+    kvm::test::Session s;
+    std::atomic<bool> installing = false, installed = false;
+    std::thread admitter([&] {
+        s.key.admit(s.client.id(), s.token, [&] {
+            installing = true;
+            std::this_thread::sleep_for(200ms);
+            installed = true;
+        });
+    });
+    while (!installing) std::this_thread::yield();
+    s.key.close();
+    const bool waited = installed;
+    admitter.join();
+    check(waited, "SessionKey::close() waits for an install that is running");
+    bool late = false;
+    check(!s.key.admit(s.client.id(), s.token, [&] { late = true; }) && !late, "after close() nothing is installed");
+}
+
+// Who gets a video channel: only the live session's client, with its token (S4).
+void test_only_the_session(net::VideoServer& server) {
+    // Accepts one channel the way kvm_host does; true = admitted. The client's view comes back in `client_closed`.
+    const auto attempt = [&](const kvm::test::Session& host_side, const kvm::tls::Credentials& client_key,
+                             std::string_view token, bool& client_closed) {
+        std::optional<net::Handshaken> admitted;
+        std::thread acceptor([&] { admitted = kvm::test::accept_side_channel(server, host_side, "video"); });
+        auto client = net::connect_video("127.0.0.1", g_port, client_key, host_side.host.id(), token);
+        acceptor.join();
+        client_closed = !client || !client->recv_frame().has_value();  // a refused channel is closed at once
+        return admitted.has_value();
+    };
+    bool closed = false;
+
+    const kvm::test::Session s;
+    check(!attempt(s, s.client, "00" + s.token.substr(2), closed) && closed, "wrong token: refused and closed");
+    check(!attempt(s, s.client, "", closed) && closed, "no token: refused and closed");
+
+    const auto other = kvm::tls::Credentials::generate("other-pc");
+    check(!attempt(s, other, s.token, closed) && closed, "another key with the right token: refused and closed");
+
+    kvm::test::Session ended;
+    const std::string old_token = ended.token;
+    ended.key.close();
+    check(!attempt(ended, ended.client, old_token, closed) && closed, "session ended: its token is refused");
+
+    kvm::test::Session renewed;
+    const std::string first_token = renewed.token;
+    renewed.token = renewed.key.open(renewed.client.id());
+    check(!attempt(renewed, renewed.client, first_token, closed) && closed,
+          "new session: the previous session's token is refused");
+
+    // The client pins the host too: a listener with another key gets no channel_hello.
+    const kvm::test::Session real;
+    std::thread acceptor([&] { (void)server.accept(real.host); });
+    const auto wrong_host = kvm::tls::Credentials::generate("not-the-host");
+    const auto client = net::connect_video("127.0.0.1", g_port, real.client, wrong_host.id(), real.token);
+    acceptor.join();
+    check(!client, "listener without the host's key: the client closes it before sending the token");
 }
 
 void test_throughput(net::VideoServer& server) {
@@ -205,6 +275,8 @@ int main() {
         test_concurrent_senders(server);
         test_close_unblocks(server);
         test_garbage_rejected(server);
+        test_install_vs_close();
+        test_only_the_session(server);
         test_throughput(server);
     } catch (const std::exception& e) {
         std::printf("[FAIL] %s\n", e.what());

@@ -27,6 +27,7 @@
 #include "kvm/net.h"
 #include "jpeg_encoder.h"
 #include "kvm/video.h"
+#include "side_channel_util.h"
 #include "video_sender.h"
 
 namespace {
@@ -159,19 +160,22 @@ SOCKET listen_loopback(std::uint16_t& port) {
     return s;
 }
 
-// A: VideoSender -> FrameChannel::send_frame. B: connect_video -> recv_frame, like kvm_client.
+// A: VideoSender -> FrameChannel::send_frame. B: connect_video -> recv_frame, like kvm_client: TLS and
+// the session token, as in the real programs.
 Result run_over_tcp(std::chrono::milliseconds duration) {
     static const auto pattern = moving_block_frames();
     Result r;
     std::uint16_t port = 0;
     const SOCKET listener = listen_loopback(port);
     if (listener == INVALID_SOCKET) return r;
+    const kvm::test::Session session;
     std::unique_ptr<kvm::net::FrameChannel> a_side;
     std::thread acceptor([&] {
-        const SOCKET s = accept(listener, nullptr, nullptr);
-        if (s != INVALID_SOCKET) a_side = std::make_unique<kvm::net::FrameChannel>(s, "test B");
+        if (auto b = kvm::test::admit_socket(accept(listener, nullptr, nullptr), session, "video", "test B")) {
+            a_side = std::make_unique<kvm::net::FrameChannel>(std::move(*b));
+        }
     });
-    auto b_side = kvm::net::connect_video("127.0.0.1", port);
+    auto b_side = kvm::net::connect_video("127.0.0.1", port, session.client, session.host.id(), session.token);
     acceptor.join();
     closesocket(listener);
     if (!a_side || !b_side) return r;

@@ -59,6 +59,7 @@ void match_vdd_to_peer(int width, int height, kvm::display::Side side) {
 
 constexpr auto kReconnectDelay = 1s;
 constexpr auto kStatsInterval = 5s;
+constexpr auto kHostHelloTimeout = 5s;  // the host's hello carries the side channels' token
 
 std::atomic<bool> g_running{true};
 std::string g_device_id;  // this PC's device ID (hex), sent in hello
@@ -115,11 +116,35 @@ kvm::clip::Chunk to_chunk(const proto::Clipboard& m) {
 
 void run_session(kvm::net::Connection& conn, const kvm::Config& cfg, kvm::KvmLink* kvm, kvm::clip::ClipboardSync* clip,
                  kvm::FileLink& files, kvm::WindowLink& windows, kvm::layout_sync::Session& places,
-                 kvm::CurrentPeer& current_peer) {
+                 kvm::CurrentPeer& current_peer, const kvm::tls::Credentials& me, const kvm::tls::DeviceId& host_id) {
     if (!conn.send(make_hello(cfg.desk))) {
         return;
     }
     kvm::log::info("connected to host {}", conn.peer());
+
+    const auto on_host_hello = [&](const proto::Hello& h) {
+        kvm::log::info("host '{}': screen {}x{}, dpi scale {:.2f}", h.hostname, h.screen_w, h.screen_h, h.dpi_scale);
+        // Where the host stands, kept per PC and the same on both: before KVM and desk mode use it.
+        conn.send(places.begin(h.hostname));
+        current_peer.set([&conn](const proto::Message& m) { return conn.send_json(proto::encode(m)); });
+        const auto client_side = kvm::display::parse_side(cfg.client_side).value_or(kvm::display::Side::Right);
+        if (!cfg.desk) match_vdd_to_peer(h.screen_w, h.screen_h, kvm::display::opposite(client_side));
+        windows.set_peer(h);  // B's windows go to A at A's size; desk mode: A's screen = one more monitor
+    };
+    // The host answers with its hello first: it carries the token and the ports of the session's side
+    // channels (video, files; docs/SECURITY.md 6.4).
+    const auto first = conn.incoming().pop_for(kHostHelloTimeout);
+    const auto* host_hello = first ? std::get_if<proto::Hello>(&*first) : nullptr;
+    if (!host_hello) {
+        kvm::log::warn("host {}: no hello within {} s, dropping", conn.peer(), kHostHelloTimeout.count());
+        return;
+    }
+    on_host_hello(*host_hello);
+    const std::uint16_t video_port =
+        host_hello->video_port > 0 ? static_cast<std::uint16_t>(host_hello->video_port) : cfg.video_port;
+    const std::uint16_t file_port =
+        host_hello->file_port > 0 ? static_cast<std::uint16_t>(host_hello->file_port) : cfg.file_port;
+    const std::string token = host_hello->session_token;
 
     // KVM + clipboard use conn while the session lasts. detach() blocks until they
     // stop using it, so it must run before conn goes away (struct dtor).
@@ -136,19 +161,20 @@ void run_session(kvm::net::Connection& conn, const kvm::Config& cfg, kvm::KvmLin
 
     // Windows A <-> B on this video connection: A's window shows in the viewer here (Sandro's
     // VideoReceiver reads it), B's window goes to A on the same connection.
-    std::shared_ptr<kvm::net::FrameChannel> video = kvm::net::connect_video(cfg.host_ip, cfg.video_port);
+    std::shared_ptr<kvm::net::FrameChannel> video =
+        kvm::net::connect_video(cfg.host_ip, video_port, me, host_id, token);
     if (video) {
-        kvm::log::info("video channel connected ({}:{})", cfg.host_ip, cfg.video_port);
+        kvm::log::info("video channel connected ({}:{})", cfg.host_ip, video_port);
         windows.set_video(video);
     } else {
-        kvm::log::warn("no video channel — is port {} open on the host?", cfg.video_port);
+        kvm::log::warn("no video channel — is port {} open on the host?", video_port);
     }
     windows.attach([&conn](const proto::Message& m) { return conn.send_json(proto::encode(m)); }, 0, 0);
-    if (auto channel = kvm::files::connect_files(cfg.host_ip, cfg.file_port, files.callbacks())) {
-        kvm::log::info("file channel connected ({}:{})", cfg.host_ip, cfg.file_port);
+    if (auto channel = kvm::files::connect_files(cfg.host_ip, file_port, me, host_id, token, files.callbacks())) {
+        kvm::log::info("file channel connected ({}:{})", cfg.host_ip, file_port);
         files.set(std::move(channel));
     } else {
-        kvm::log::warn("no file channel — is port {} open on the host?", cfg.file_port);
+        kvm::log::warn("no file channel — is port {} open on the host?", file_port);
     }
 
     auto next_stats = std::chrono::steady_clock::now() + kStatsInterval;
@@ -161,14 +187,7 @@ void run_session(kvm::net::Connection& conn, const kvm::Config& cfg, kvm::KvmLin
             } else if (const auto* c = std::get_if<proto::Clipboard>(&*msg); c && clip) {
                 clip->receive(to_chunk(*c));
             } else if (const auto* h = std::get_if<proto::Hello>(&*msg)) {
-                kvm::log::info("host '{}': screen {}x{}, dpi scale {:.2f}", h->hostname, h->screen_w, h->screen_h,
-                               h->dpi_scale);
-                // Where the host stands, kept per PC and the same on both: before KVM and desk mode use it.
-                conn.send(places.begin(h->hostname));
-                current_peer.set([&conn](const proto::Message& m) { return conn.send_json(proto::encode(m)); });
-                const auto client_side = kvm::display::parse_side(cfg.client_side).value_or(kvm::display::Side::Right);
-                if (!cfg.desk) match_vdd_to_peer(h->screen_w, h->screen_h, kvm::display::opposite(client_side));
-                windows.set_peer(*h);  // B's windows go to A at A's size; desk mode: A's screen = one more monitor
+                on_host_hello(*h);
             } else if (const auto* l = std::get_if<proto::Layout>(&*msg)) {
                 places.on_message(*l);  // the host's view of where it stands, if newer
             } else if (std::holds_alternative<proto::Identify>(*msg)) {
@@ -411,9 +430,10 @@ int wmain(int argc, wchar_t** argv) {
             if (auto pending = kvm::net::connect(cfg.host_ip, cfg.control_port, trust->me)) {
                 // Pinning: the host's key must be paired before a single message of it is read.
                 if (kvm::trust::is_paired(*trust->paired, *pending->stream)) {
+                    const auto host_id = pending->stream->peer_id();
                     kvm::net::Connection conn(std::move(*pending));
                     run_session(conn, cfg, kvm_link ? &*kvm_link : nullptr, clip_on ? &clip : nullptr, files, windows,
-                                places, current_peer);
+                                places, current_peer, trust->me, host_id);
                 } else if (pair_unknown) {
                     const auto paired = kvm::pairing::run(std::move(*pending), /*initiator=*/true, trust->me,
                                                           make_hello(false).hostname, *trust->paired, pairing_prompt);

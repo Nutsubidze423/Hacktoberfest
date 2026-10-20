@@ -26,6 +26,28 @@ doesn't check).
 hackathon measured 11–591 ms. This is a loopback figure: it shows the CPU cost of TLS, not the
 network.
 
+## Video channel over TLS 1.3 (roadmap P1.7)
+
+**What:** the same tests built twice: from `main` before P1.7 (plain TCP) and from
+`phase1/side-channels` (TLS 1.3, OpenSSL 3.6.5). Both run on 127.0.0.1, so one CPU does both
+the encrypting and the decrypting. Runs alternated, with nothing else building.
+- **Throughput:** `video_test`, 300 frames of 250 KB as fast as the channel takes them.
+- **Frame time:** `video_sender_test` step 4. A synthetic 1920×1080 picture is JPEG-encoded
+  (quality 75) and sent at most 30 fps. Measured from capture until B has the frame.
+
+| Date | Machine | | Plain TCP | TLS 1.3 |
+|---|---|---|---|---|
+| 2026-10-21 | Celeron laptop, 3 runs | throughput | 4677 / 5243 / 4543 frames/s (1136–1311 MB/s) | 914 / 851 / 912 frames/s (213–228 MB/s) |
+| 2026-10-21 | Celeron laptop, 3 runs | capture → received, 30 fps cap | 30.9 / 31.7 / 30.8 ms, 30 fps | 26.9 / 27.5 / 31.8 ms, 30 fps |
+
+**What it means:**
+- TLS costs about 1 ms of CPU per 250 KB frame here, for encrypt and decrypt together.
+- 30 fps of 250 KB frames is 7.5 MB/s, about 3% of what the TLS channel carried.
+- The frame time didn't change measurably: the run-to-run spread (27–32 ms) is bigger than the
+  TLS cost, and both builds kept 30 fps.
+- Over a real network each PC does only half of the TLS work, and Wi-Fi bandwidth is the limit
+  long before this is.
+
 ## JPEG encode (hackathon baseline, for roadmap Phase 2)
 
 | Date | Machine | Frame | Result | Source |

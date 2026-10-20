@@ -33,6 +33,7 @@
 #include "kvm/log.h"
 #include "kvm/net.h"
 #include "kvm/win32_input.h"
+#include "side_channel_util.h"
 
 namespace {
 
@@ -214,11 +215,12 @@ int main() {
     {
         std::uint16_t port = 0;
         const SOCKET listener = listen_loopback(port);
+        const kvm::test::Session session;
         std::unique_ptr<kvm::files::FileTransfer> a;
         std::thread acceptor([&] {
-            const SOCKET s = accept(listener, nullptr, nullptr);
-            if (s != INVALID_SOCKET)
-                a = std::make_unique<kvm::files::FileTransfer>(s, "A", kvm::files::Callbacks{}, dir / L"a_in");
+            if (auto b = kvm::test::admit_socket(accept(listener, nullptr, nullptr), session, "files", "B")) {
+                a = std::make_unique<kvm::files::FileTransfer>(std::move(*b), kvm::files::Callbacks{}, dir / L"a_in");
+            }
         });
         kvm::files::FileDragSource drag_on_b;
         std::promise<DWORD> b_done;
@@ -230,7 +232,8 @@ int main() {
             drag_on_b.start(
                 saved, [&](DWORD effect) { b_done.set_value(effect); }, b_image);  // B: the drag goes on here
         };
-        auto b = kvm::files::connect_files("127.0.0.1", port, b_callbacks, dir / L"b_in");
+        auto b = kvm::files::connect_files("127.0.0.1", port, session.client, session.host.id(), session.token,
+                                           b_callbacks, dir / L"b_in");
         acceptor.join();
         closesocket(listener);
 

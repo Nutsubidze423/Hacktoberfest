@@ -5,7 +5,7 @@
 // and sends JPEGs from disk in a loop.
 //
 //   fake_streamer.exe <folder | image.jpg> [--port 50501] [--fps 30]
-//   viewer_test.exe --connect 127.0.0.1          (same PC; or B's viewer pointed at this PC's IP)
+//   viewer_test.exe --connect 127.0.0.1          (same PC: they share a stand-in session, fake_session.h)
 //
 // Each frame gets t_capture_us = send time, so the viewer's latency shows network + decode time.
 
@@ -24,6 +24,7 @@
 #include "jpeg_decoder.h"
 #include "kvm/config.h"
 #include "kvm/log.h"
+#include "fake_session.h"
 #include "kvm/net.h"
 #include "kvm/video.h"
 
@@ -159,11 +160,21 @@ int wmain(int argc, wchar_t** argv) {
         kvm::log::info("loaded {} JPEG(s), first {} is {}x{}", files.size(), files[0].name, files[0].width,
                        files[0].height);
 
+        const auto me = kvm::fake::session_credentials();
+        if (!me) return 1;
+        kvm::net::SessionKey session;  // the viewer runs with the same identity (fake_session.h)
+        if (!kvm::fake::write_session_token(session.open(me->id()))) {
+            kvm::log::error("could not write the session token to {}", utf8(kvm::fake::session_dir().wstring()));
+            return 1;
+        }
+
         kvm::net::VideoServer server(port);
         kvm::log::info("listening on port {} ({} fps); waiting for a viewer to connect...", port, fps);
 
         std::uint32_t seq = 0;
-        while (auto channel = server.accept()) {
+        while (auto pending = server.accept(*me)) {
+            if (!kvm::net::admit_side_channel(*pending->stream, session, "video", pending->peer)) continue;
+            const auto channel = std::make_unique<kvm::net::FrameChannel>(std::move(*pending));
             kvm::log::info("viewer connected from {}", channel->peer());
             const auto sent = stream_to(*channel, files, fps, seq);
             kvm::log::info("viewer {} disconnected after {} frames; waiting for the next one", channel->peer(), sent);

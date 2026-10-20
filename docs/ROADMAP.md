@@ -464,7 +464,7 @@ Task-level links that matter:
       - `--reserved 50599` on this PC → "Windows reserved it".
 
       Also checked end to end: `kvm_host` configured with port 50599 logs the reserved message.
-    - **Plan change:** "the client follows the host's video/file ports" moved into **P1.7**. Today the client opens the side channels before the host's `hello` arrives, and P1.7 restructures that anyway (side channels after the authenticated handshake, with a session token). Until then, custom ports must match on both PCs; the README says so.
+    - **Plan change:** "the client follows the host's video/file ports" moved into **P1.7**. Today the client opens the side channels before the host's `hello` arrives, and P1.7 restructures that anyway (side channels after the authenticated handshake, with a session token). Until then, custom ports must match on both PCs; the README says so. *(Done in P1.7.)*
 
 ### Phase 0 acceptance
 - **Automated:**
@@ -708,7 +708,7 @@ Attempts are rate-limited.
       - `ctest --preset ci` 14/14.
     - **Not run yet:** pairing on two physical PCs (R17).
 
-- [ ] **P1.7 TLS and session binding on video (50501) and files (50502)** (M), branch `phase1/side-channels`. Depends on P1.5.
+- [x] **P1.7 TLS and session binding on video (50501) and files (50502)** (M), branch `phase1/side-channels`. Depends on P1.5.
   - **Files:**
     - [common/src/video.cpp](../common/src/video.cpp), [common/src/file_transfer.cpp](../common/src/file_transfer.cpp);
     - [host_a/main.cpp:111-119, 429-433](../host_a/main.cpp#L111-L119);
@@ -720,6 +720,33 @@ Attempts are rate-limited.
     - a second connection to 50501/50502 with another key, or with the right key and a wrong token, is rejected **and does not replace** the live channel (this is finding A);
     - no session → no side-channel accept.
   - **Measure:** `video_test` throughput with and without TLS, and the end-to-end frame time on this PC (AES-GCM on the N4020), recorded in PERF.md.
+  - **Result (2026-10-21):**
+    - **Helper ([kvm/net.h](../common/include/kvm/net.h)):**
+      - `SessionKey` holds the live session's peer and its 32-byte token (`RAND_bytes`, compared with `CRYPTO_memcmp`);
+      - `admit_side_channel()` is the host side; `connect_side_channel()` is the client side, which pins the host's key and sends `channel_hello{token}`;
+      - P3.3's audio channel can reuse both.
+    - **Video and files:** `FrameChannel`, `FileTransfer` and their servers run on `tls::Stream`. `connect_video` / `connect_files` take the keys and the token.
+    - **Host:**
+      - its `hello` answer carries `session_token`, `video_port` and `file_port`;
+      - a side channel is kept only for the session's key with that token; otherwise it is closed and the live channel stays;
+      - when the session ends, the token is forgotten and the session's video and file channels are closed;
+      - a channel is installed under the session key's lock (`SessionKey::admit(..., install)`), so one admitted just as the session ends can't outlive it.
+    - **Client:** waits for the host's `hello` (5 s), then opens video and files on the host's ports. That finishes the P0.10 item: ports changed only on the host now work.
+    - **Plan changes:**
+      - the token rides in the host's `hello` rather than in a separate `session_token` message: one message fewer, and the ports are there too;
+      - the listeners stay up between sessions (like 50500) but refuse every side channel while no session is live, because opening them per session would race with the client, which connects right after the `hello`;
+      - [SECURITY.md](SECURITY.md) §6.4 and [PROTOCOL.md](PROTOCOL.md) say so.
+    - **Tests:**
+      - `loopback_test` step 4 (S4, finding A), 42 checks in all (7 new):
+        - the session's peer opens video and files with its token;
+        - on both ports, another key with the right token, and the right key with a wrong token, are refused, and the live video channel stays;
+        - the session's end closes its video channel, and after it the token opens nothing.
+      - `video_test`: no token, an ended session, a renewed session's old token, and a listener without the host's key are all refused; `close()` waits for a running install, and nothing is installed after it.
+      - `video_sender_test`, `file_transfer_test` and `file_drag_test` now run over TLS with a token (`tools/side_channel_util.h`). The hostile-peer paths in `file_transfer_test` are now sent by a paired peer inside the session.
+      - `fake_streamer` + `viewer_test --connect` share a stand-in session on one PC (`tools/fake_session.h`).
+      - `ctest --preset ci` 14/14; `file_drag_test` (desktop) passes.
+    - **Measured** ([PERF.md](PERF.md)): TLS takes the loopback video channel from about 4800 to about 890 frames/s (250 KB frames), still about 30× what 30 fps needs. Capture → received at 30 fps didn't change measurably (27–32 ms both ways).
+    - **Not run yet:** two physical PCs (R3, R9–R12, R15). The README's "ports the same on both PCs" note stays until this ships (P1.14): 1.1 still needs it.
 
 - [ ] **P1.8 Discovery carries identity; auto-connect by key** (S), branch `phase1/discovery-id`. Depends on P1.4.
   - **Files:**

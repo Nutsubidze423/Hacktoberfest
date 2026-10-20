@@ -468,4 +468,98 @@ std::optional<Handshaken> connect(const std::string& host, std::uint16_t port, c
     return Handshaken{std::move(stream), peer};
 }
 
+// ---------------------------------------------------------------------------------------------
+// Side channels
+
+namespace {
+
+constexpr std::string_view kChannelHello = "channel_hello";
+constexpr std::uint32_t kMaxChannelHelloBytes = 1024;
+
+// [u32 header_len][u32 payload_len = 0][{"type":"channel_hello","token":"..."}]: the side channels'
+// own framing, so the first frame reads like any other.
+bool send_channel_hello(tls::Stream& stream, std::string_view token) {
+    const std::string json = nlohmann::json{{"type", kChannelHello}, {"token", token}}.dump();
+    std::string frame(8 + json.size(), '\0');
+    const u_long lens[2] = {htonl(static_cast<u_long>(json.size())), 0};
+    std::memcpy(frame.data(), lens, 8);
+    std::memcpy(frame.data() + 8, json.data(), json.size());
+    return stream.send_all(frame.data(), frame.size());
+}
+
+std::optional<std::string> recv_channel_hello(tls::Stream& stream, std::chrono::milliseconds timeout) {
+    stream.set_receive_timeout(timeout);
+    std::array<u_long, 2> lens{};
+    std::optional<std::string> token;
+    if (stream.recv_exact(reinterpret_cast<char*>(lens.data()), 8) == 0) {
+        const std::uint32_t header_len = ntohl(lens[0]);
+        if (header_len > 0 && header_len <= kMaxChannelHelloBytes && ntohl(lens[1]) == 0) {
+            std::string json(header_len, '\0');
+            if (stream.recv_exact(json.data(), header_len) == 0) {
+                const auto j = nlohmann::json::parse(json, nullptr, /*allow_exceptions=*/false);
+                if (j.is_object() && j.value("type", std::string()) == kChannelHello && j.contains("token") &&
+                    j["token"].is_string()) {
+                    token = j["token"].get<std::string>();
+                }
+            }
+        }
+    }
+    stream.set_receive_timeout(std::chrono::milliseconds(0));  // side channels may be idle for long
+    return token;
+}
+
+}  // namespace
+
+std::string SessionKey::open(const tls::DeviceId& peer) {
+    std::lock_guard lock(mutex_);
+    peer_ = peer;
+    token_ = tls::random_hex(32);
+    return token_;
+}
+
+void SessionKey::close() {
+    std::lock_guard lock(mutex_);
+    peer_.reset();
+    token_.clear();
+}
+
+bool SessionKey::admit(const tls::DeviceId& peer, std::string_view token, const std::function<void()>& install) const {
+    std::lock_guard lock(mutex_);
+    if (!peer_ || *peer_ != peer || !tls::equal_secret(token_, token)) return false;
+    if (install) install();
+    return true;
+}
+
+bool admit_side_channel(tls::Stream& stream, const SessionKey& session, std::string_view what, std::string_view peer,
+                        const std::function<void()>& install, std::chrono::milliseconds timeout) {
+    const auto token = recv_channel_hello(stream, timeout);
+    if (!token) {
+        log::warn("{}: {} sent no channel_hello - refused", what, peer);
+        return false;
+    }
+    const auto key = stream.peer_id();  // `install` may move the stream away
+    if (!session.admit(key, *token, install)) {
+        log::warn("{}: {} (key {}) isn't part of the live session - refused", what, peer, tls::short_id(key));
+        return false;
+    }
+    return true;
+}
+
+std::optional<Handshaken> connect_side_channel(const std::string& host, std::uint16_t port, const tls::Credentials& me,
+                                               const tls::DeviceId& host_id, std::string_view token,
+                                               std::chrono::milliseconds timeout) {
+    auto pending = connect(host, port, me, timeout);
+    if (!pending) return std::nullopt;
+    if (pending->stream->peer_id() != host_id) {
+        log::warn("net: {} answered with the key {}, not the host's - closed", pending->peer,
+                  tls::short_id(pending->stream->peer_id()));
+        return std::nullopt;
+    }
+    if (!send_channel_hello(*pending->stream, token)) {
+        log::warn("net: {}: sending channel_hello failed", pending->peer);
+        return std::nullopt;
+    }
+    return pending;
+}
+
 }  // namespace kvm::net

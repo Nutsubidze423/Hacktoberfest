@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// file_transfer_test: the 50502 file channel on 127.0.0.1, both directions (T9). No second PC needed.
+// file_transfer_test: the 50502 file channel on 127.0.0.1 (TLS + the session token, as in the real
+// programs), both directions (T9). No second PC needed.
 //   1. safe_destination(): what a peer may and may not write.
 //   2. B -> A: a folder tree, a 3.5 MB file, an empty file and a Georgian file name, byte for byte.
 //   3. A -> B over the same connection.
@@ -31,6 +32,8 @@
 #include "kvm/file_transfer.h"
 #include "kvm/log.h"
 #include "kvm/net.h"
+#include "kvm/tls.h"
+#include "side_channel_util.h"
 
 namespace {
 
@@ -101,28 +104,15 @@ SOCKET listen_loopback(std::uint16_t& port) {
     return s;
 }
 
-SOCKET connect_loopback(std::uint16_t port) {
-    const SOCKET s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-    sockaddr_in addr{};
-    addr.sin_family = AF_INET;
-    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-    addr.sin_port = htons(port);
-    if (connect(s, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) != 0) {
-        closesocket(s);
-        return INVALID_SOCKET;
-    }
-    return s;
-}
-
 // One framed message, written by hand like a peer that doesn't play by the rules would.
-bool raw_send(SOCKET s, const nlohmann::json& header, std::string_view payload = {}) {
+bool raw_send(kvm::tls::Stream& s, const nlohmann::json& header, std::string_view payload = {}) {
     const std::string h = header.dump();
     std::string buf(8, '\0');
     const u_long lens[2] = {htonl(static_cast<u_long>(h.size())), htonl(static_cast<u_long>(payload.size()))};
     std::memcpy(buf.data(), lens, 8);
     buf += h;
     buf.append(payload);
-    return send(s, buf.data(), static_cast<int>(buf.size()), 0) == static_cast<int>(buf.size());
+    return s.send_all(buf.data(), buf.size());
 }
 
 // Every file below `dir`.
@@ -175,10 +165,12 @@ int main() {
         std::uint16_t port = 0;
         const SOCKET listener = listen_loopback(port);
         Inbox inbox_a, inbox_b;
+        const kvm::test::Session session;
         std::unique_ptr<kvm::files::FileTransfer> a;
         std::thread acceptor([&] {
-            const SOCKET s = accept(listener, nullptr, nullptr);
-            if (s != INVALID_SOCKET) a = std::make_unique<kvm::files::FileTransfer>(s, "A", inbox_a.callbacks(), dst_a);
+            if (auto b = kvm::test::admit_socket(accept(listener, nullptr, nullptr), session, "files", "B")) {
+                a = std::make_unique<kvm::files::FileTransfer>(std::move(*b), inbox_a.callbacks(), dst_a);
+            }
         });
         std::atomic<std::uint64_t> progress_sent = 0, progress_total = 0;
         auto b_callbacks = inbox_b.callbacks();
@@ -186,7 +178,8 @@ int main() {
             progress_sent = sent;
             progress_total = total;
         };
-        auto b = kvm::files::connect_files("127.0.0.1", port, b_callbacks, dst_b);
+        auto b = kvm::files::connect_files("127.0.0.1", port, session.client, session.host.id(), session.token,
+                                           b_callbacks, dst_b);
         acceptor.join();
         closesocket(listener);
         if (!a || !b) {
@@ -228,15 +221,23 @@ int main() {
         const SOCKET listener = listen_loopback(port);
         const fs::path dst_v = root / L"dst_victim";
         Inbox inbox_v;
+        // A paired peer inside the session: the paths it sends are still checked (safe_destination).
+        const kvm::test::Session session;
         std::unique_ptr<kvm::files::FileTransfer> victim;
         std::thread acceptor([&] {
-            const SOCKET s = accept(listener, nullptr, nullptr);
-            if (s != INVALID_SOCKET)
-                victim = std::make_unique<kvm::files::FileTransfer>(s, "victim", inbox_v.callbacks(), dst_v);
+            if (auto peer = kvm::test::admit_socket(accept(listener, nullptr, nullptr), session, "files", "hostile")) {
+                victim = std::make_unique<kvm::files::FileTransfer>(std::move(*peer), inbox_v.callbacks(), dst_v);
+            }
         });
-        const SOCKET raw = connect_loopback(port);
+        auto hostile =
+            kvm::net::connect_side_channel("127.0.0.1", port, session.client, session.host.id(), session.token);
         acceptor.join();
         closesocket(listener);
+        if (!hostile || !victim) {
+            kvm::log::error("could not connect the hostile peer");
+            return 1;
+        }
+        kvm::tls::Stream& raw = *hostile->stream;
 
         int id = 0;
         for (const std::string_view path :
@@ -256,7 +257,6 @@ int main() {
         });
         check(outside == 0 && !fs::exists(L"C:\\evil2.txt"), "nothing was written outside the target folder");
         check(files_below(dst_v) == std::vector<fs::path>{dst_v / L"ok.txt"}, "only ok.txt was saved");
-        closesocket(raw);
     }
 
     fs::remove_all(root, ec);

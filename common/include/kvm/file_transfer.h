@@ -1,12 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// File transfer channel (port 50502), the same code in both directions (T9, owner: Temo).
-// A listens and B connects, like the other channels; after that either side sends files and
-// receives the other side's files into %USERPROFILE%\Downloads\KVM\ (folders keep their structure).
+// File transfer channel (port 50502), the same code in both directions, over TLS 1.3 like the other
+// channels. It belongs to the live control session (kvm/net.h side channels, docs/SECURITY.md 6.4).
+// The host listens and the client connects; after that either side sends files and receives the
+// other side's files into %USERPROFILE%\Downloads\KVM\ (folders keep their structure).
 //
-//   A:  kvm::files::FileServer server(kvm::files::kFilePort);
-//       auto files = server.accept(callbacks);                 // blocks; nullptr after stop()
-//   B:  auto files = kvm::files::connect_files(ip, kvm::files::kFilePort, callbacks);
+//   Host:   kvm::files::FileServer server(port);
+//           auto pending = server.accept(me);                  // TLS done, nothing read
+//           kvm::net::admit_side_channel(*pending->stream, session, "files", pending->peer, [&] {
+//               link.set(std::make_unique<kvm::files::FileTransfer>(std::move(*pending), callbacks));
+//           });
+//   Client: auto files = kvm::files::connect_files(ip, port, me, host_id, token, callbacks);
 //   files->send({L"C:\\photos\\cat.jpg", L"C:\\work\\project"});   // returns at once
 //
 // Wire: [u32 header_len][u32 payload_len][header JSON][payload], big-endian, like the video channel.
@@ -34,7 +38,9 @@
 #include <vector>
 
 #include "kvm/drag_image.h"
+#include "kvm/net.h"
 #include "kvm/queue.h"
+#include "kvm/tls.h"
 
 namespace kvm::files {
 
@@ -63,8 +69,8 @@ std::optional<std::filesystem::path> safe_destination(const std::filesystem::pat
 
 class FileTransfer {
 public:
-    // Takes ownership of a connected socket and starts the send and receive threads.
-    FileTransfer(SOCKET sock, std::string peer, Callbacks callbacks, std::filesystem::path target = default_target());
+    // Takes a TLS connection whose peer has been checked and starts the send and receive threads.
+    FileTransfer(net::Handshaken connection, Callbacks callbacks, std::filesystem::path target = default_target());
     ~FileTransfer();  // close(), then joins both threads
     FileTransfer(const FileTransfer&) = delete;
     FileTransfer& operator=(const FileTransfer&) = delete;
@@ -88,7 +94,7 @@ private:
     void send_loop();
     void receive_loop();
 
-    SOCKET sock_;
+    std::unique_ptr<tls::Stream> tls_;
     std::string peer_;
     Callbacks callbacks_;
     std::filesystem::path target_;
@@ -111,18 +117,21 @@ public:
     FileServer(const FileServer&) = delete;
     FileServer& operator=(const FileServer&) = delete;
 
-    // Blocks until the peer connects. nullptr after stop().
-    std::unique_ptr<FileTransfer> accept(Callbacks callbacks, std::filesystem::path target = default_target());
+    // Blocks until the peer connects and completes the TLS handshake (failures are logged and
+    // skipped). nullopt after stop(). Check it with admit_side_channel() before using it.
+    std::optional<net::Handshaken> accept(const tls::Credentials& me);
 
     // Unblocks accept() from any thread. Idempotent.
     void stop();
 
 private:
-    std::atomic<SOCKET> listen_sock_{INVALID_SOCKET};
+    net::Server server_;
 };
 
-// Connects within `timeout`. nullptr on failure (logged); the caller decides when to retry.
-std::unique_ptr<FileTransfer> connect_files(const std::string& host, std::uint16_t port, Callbacks callbacks,
+// Opens the file side channel of the live session (net::connect_side_channel). nullptr on failure
+// (logged); the caller decides when to retry.
+std::unique_ptr<FileTransfer> connect_files(const std::string& host, std::uint16_t port, const tls::Credentials& me,
+                                            const tls::DeviceId& host_id, std::string_view token, Callbacks callbacks,
                                             std::filesystem::path target = default_target(),
                                             std::chrono::milliseconds timeout = std::chrono::seconds(2));
 

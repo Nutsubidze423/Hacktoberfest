@@ -21,18 +21,16 @@ constexpr std::size_t kPrefixBytes = 8;  // u32 header_len + u32 payload_len
 
 }  // namespace
 
-FrameChannel::FrameChannel(SOCKET sock, std::string peer) : sock_(sock), peer_(std::move(peer)) {
-    set_nodelay(sock_);
-}
+FrameChannel::FrameChannel(Handshaken connection)
+    : tls_(std::move(connection.stream)), peer_(std::move(connection.peer)) {}
 
 FrameChannel::~FrameChannel() {
-    close();
-    closesocket(sock_);
+    close();  // tls_ closes the socket when it goes
 }
 
 void FrameChannel::close() {
     if (open_.exchange(false)) {
-        abort_socket(sock_);  // wakes blocked send/recv at once; the destructor closes the handle
+        tls_->abort();  // wakes blocked send/recv at once; the destructor closes the socket
     }
 }
 
@@ -53,11 +51,11 @@ bool FrameChannel::send_frame(const proto::FrameHeader& header, std::span<const 
     std::memcpy(head.data() + kPrefixBytes, header_json.data(), header_json.size());
 
     std::lock_guard lock(send_mutex_);
-    const bool ok = send_all(sock_, head.data(), head.size()) &&
-                    send_all(sock_, reinterpret_cast<const char*>(payload.data()), payload.size());
+    const bool ok = tls_->send_all(head.data(), head.size()) &&
+                    tls_->send_all(reinterpret_cast<const char*>(payload.data()), payload.size());
     if (!ok) {
         if (open_) {
-            log::warn("video: send to {} failed: {}", peer_, last_error_text());
+            log::warn("video: send to {} failed", peer_);
         }
         close();
     }
@@ -81,7 +79,7 @@ std::optional<Frame> FrameChannel::recv_frame() {
         return std::nullopt;
     }
     std::array<u_long, 2> lens{};
-    if (const int err = recv_exact(sock_, reinterpret_cast<char*>(lens.data()), kPrefixBytes); err != 0) {
+    if (const int err = tls_->recv_exact(reinterpret_cast<char*>(lens.data()), kPrefixBytes); err != 0) {
         return fail(err);
     }
     const std::uint32_t header_len = ntohl(lens[0]);
@@ -92,7 +90,7 @@ std::optional<Frame> FrameChannel::recv_frame() {
     }
 
     std::string header_json(header_len, '\0');
-    if (const int err = recv_exact(sock_, header_json.data(), header_len); err != 0) {
+    if (const int err = tls_->recv_exact(header_json.data(), header_len); err != 0) {
         return fail(err);
     }
     const auto j = nlohmann::json::parse(header_json, nullptr, /*allow_exceptions=*/false);
@@ -111,32 +109,31 @@ std::optional<Frame> FrameChannel::recv_frame() {
         return fail(0);
     }
     frame.payload.resize(payload_len);
-    if (const int err = recv_exact(sock_, reinterpret_cast<char*>(frame.payload.data()), payload_len); err != 0) {
+    if (const int err = tls_->recv_exact(reinterpret_cast<char*>(frame.payload.data()), payload_len); err != 0) {
         return fail(err);
     }
     return frame;
 }
 
-VideoServer::VideoServer(std::uint16_t port) : listen_sock_(listen_on(port)) {}
+VideoServer::VideoServer(std::uint16_t port) : server_(port) {}
 
 VideoServer::~VideoServer() {
     stop();
 }
 
-std::unique_ptr<FrameChannel> VideoServer::accept() {
-    std::string peer;
-    const SOCKET s = accept_on(listen_sock_, peer);
-    return s == INVALID_SOCKET ? nullptr : std::make_unique<FrameChannel>(s, std::move(peer));
+std::optional<Handshaken> VideoServer::accept(const tls::Credentials& me) {
+    return server_.accept(me);
 }
 
 void VideoServer::stop() {
-    close_listener(listen_sock_);
+    server_.stop();
 }
 
-std::unique_ptr<FrameChannel> connect_video(const std::string& host, std::uint16_t port,
+std::unique_ptr<FrameChannel> connect_video(const std::string& host, std::uint16_t port, const tls::Credentials& me,
+                                            const tls::DeviceId& host_id, std::string_view token,
                                             std::chrono::milliseconds timeout) {
-    const SOCKET s = connect_to(host, port, timeout);
-    return s == INVALID_SOCKET ? nullptr : std::make_unique<FrameChannel>(s, host + ":" + std::to_string(port));
+    auto pending = connect_side_channel(host, port, me, host_id, token, timeout);
+    return pending ? std::make_unique<FrameChannel>(std::move(*pending)) : nullptr;
 }
 
 }  // namespace kvm::net

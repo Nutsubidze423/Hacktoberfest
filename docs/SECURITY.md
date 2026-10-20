@@ -153,14 +153,20 @@ included ([installer/sarke.iss](../installer/sarke.iss)).
 - **The `hello` exchange** happens over TLS as today, plus `device_id` for the logs. The
   `protocol_version` becomes 3.
 - **The session token:** the host draws 32 random bytes (`RAND_bytes`) per session and sends them
-  as `session_token{token}` on the control channel.
-- **Side channels** (P1.7; from P0.10 the host's answer also carries `video_port` and `file_port`):
-  - the client connects 50501 and 50502 only after `session_token`;
-  - each runs TLS with the same certificates, and its first header carries `token`;
+  as `session_token` in its `hello` answer on the control channel, with `video_port` and
+  `file_port`.
+- **Side channels** (P1.7, `kvm::net::SessionKey`, `admit_side_channel`):
+  - the client connects 50501 and 50502 only after the host's `hello`;
+  - each runs TLS with the same certificates; the client checks the host's key is the control
+    session's;
+  - the client's first frame is `channel_hello{token}` (at most 1 KB, within 5 s);
   - the host accepts one only if the peer's device ID equals the control session's peer **and**
     the token matches (`CRYPTO_memcmp`);
   - otherwise it closes it without touching the live channel;
-  - acceptors run only while a session is live.
+  - when the session ends, the host closes its side channels and forgets the token.
+  - The acceptors keep listening between sessions (like 50500), but with no live session every
+    side channel is refused after its TLS handshake. Opening and closing the listeners per session
+    would race with the client, which connects right after the `hello`.
 
 ### 6.5 Discovery
 `kvm_here` adds `device_id`. Auto-connect matches `device_id` against `paired.json` (`auto_connect:
@@ -203,7 +209,7 @@ PC before any connection.
 |---|---|
 | S1, S3 | `loopback_test`: a peer with an unknown key is closed before any `hello` log line; a peer with a paired key connects (P1.5) |
 | S2 | `tls_test`: TLS 1.2 refused, a plaintext peer refused. A packet capture during the two-PC regression run shows no readable JSON or JPEG (P1.14) |
-| S4 | `loopback_test`: a second 50501/50502 connection with another key, or the right key and a wrong token, is refused and doesn't replace the live channel (P1.7) |
+| S4 | `loopback_test` step 4: on 50501/50502 another key with the right token, or the right key with a wrong token, is refused and doesn't replace the live channel; after the session its token opens nothing. `video_test`: the same for no token, an ended session, a renewed session's old token, and a listener without the host's key (P1.7) |
 | S5 | `tls_test`: a relaying man-in-the-middle with its own key gives different exporter values; the code mapping matches the vectors below (P1.2, P1.6) |
 | S6 | launcher unit test: a reply with a paired name but another ID isn't auto-connected (P1.8) |
 | S7 | `identity_test`: round trip; a tampered blob fails cleanly. Manual: another Windows user can't decrypt it (P1.3) |
