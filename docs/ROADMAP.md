@@ -437,12 +437,24 @@ Task-level links that matter:
     3. Then fix `send` (wait for the topology change to settle, or verify and retry once), plus a regression check in `window_mover_test`.
   - **Done when:** 20 runs of `ctest --preset local` in a row have no window-move failures.
 
-- [ ] **P0.10 Sarke's ports reserved by Windows** (S), branch `phase0/reserved-ports`. Found by P0.7.
+- [x] **P0.10 Sarke's ports reserved by Windows** (S), branch `phase0/reserved-ports`. Found by P0.7.
   - **Problem:** Hyper-V, WSL and Docker reserve TCP port ranges (`netsh interface ipv4 show excludedportrange protocol=tcp`), and the ranges can change on reboot. If one covers 50500–50502, `kvm_host` can't listen (WSAEACCES, 10013). On this PC 50503–50602 is reserved, one port above Sarke's.
   - **Plan:**
     - on WSAEACCES, log and show in the launcher which port is reserved, and how to free it or pick others (`control_port`/`video_port`/`file_port` in config.json);
     - discovery already carries `control_port`, so the client follows a moved control port. Check that the video and file ports follow too (today the client takes them from its own config).
   - **Done when:** a test that reserves a port first sees the clear message, and a host on custom ports is found and fully connected through discovery.
+  - **Result (2026-10-20):**
+    - **`listen_on` now explains a port it can't take** ([common/src/net.cpp](../common/src/net.cpp)):
+      - if a program listens there (`GetExtendedTcpTable`), the message names it, e.g. "in use by kvm_host.exe (pid 8976)";
+      - if nothing listens and Windows refuses it, the message says Windows reserved it, gives the `netsh` command, and points at the config.json ports.
+
+      The launcher already shows `[error]` lines as a "Sarke has a problem" toast.
+    - **New `net_listen_test`** (unit):
+      - a held port → the holder is named;
+      - `--reserved 50599` on this PC → "Windows reserved it".
+
+      Also checked end to end: `kvm_host` configured with port 50599 logs the reserved message.
+    - **Plan change:** "the client follows the host's video/file ports" moved into **P1.7**. Today the client opens the side channels before the host's `hello` arrives, and P1.7 restructures that anyway (side channels after the authenticated handshake, with a session token). Until then, custom ports must match on both PCs; the README says so.
 
 ### Phase 0 acceptance
 - **Automated:**
@@ -621,6 +633,7 @@ Attempts are rate-limited.
     - the client's connect paths;
     - a shared `SideChannel` helper, also reused for audio in P3.3.
   - **Protocol:** the control channel sends `session_token{token}`; each side channel's first header carries `token`.
+  - **From P0.10:** the side channels open after the host's answer, which carries its `video_port` and `file_port`, so ports changed only on the host still work.
   - **Tests** (loopback):
     - a second connection to 50501/50502 with another key, or with the right key and a wrong token, is rejected **and does not replace** the live channel (this is finding A);
     - no session → no side-channel accept.

@@ -77,6 +77,11 @@ from source uses the one in the repository. Most of them can be changed from the
 | `max_fps` | `30` | Frame rate limit, `0` for none |
 | `desk` | `true` | Desk mode; `false` uses the window viewer |
 
+If Sarke says it can't listen on a port, the message names the program holding it, or says that
+Windows reserved it: Hyper-V, WSL and Docker reserve TCP port ranges
+(`netsh interface ipv4 show excludedportrange protocol=tcp`). Then set free ports in
+`control_port`, `video_port` and `file_port`, the same on both PCs.
+
 Logs are in `%LOCALAPPDATA%\Sarke\logs\`.
 
 ## Building from source

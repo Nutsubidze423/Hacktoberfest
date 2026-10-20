@@ -20,3 +20,6 @@ dist/
 installer/vdd/MttVDD.dll
 installer/vdd/MttVDD.cat
 installer/vdd/mttvdd.inf
+
+# ctest's output when it runs from the repo root
+Testing/
