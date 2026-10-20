@@ -614,7 +614,7 @@ Attempts are rate-limited.
       - The cold CI build step went from about 430 s to 805 s, OpenSSL included.
       - `kvm_host.exe` is still 6.71 MB (it doesn't use TLS until P1.5); `tls_test.exe` is 9.44 MB.
 
-- [ ] **P1.3 Device identity** (M), branch `phase1/identity`.
+- [x] **P1.3 Device identity** (M), branch `phase1/identity`.
   - **Files:** new `common/include/kvm/identity.h` and `common/src/identity.cpp`:
     - generate the P-256 key and the self-signed certificate;
     - DPAPI protect and unprotect;
@@ -624,6 +624,18 @@ Attempts are rate-limited.
     - creates, reloads and gets the same fingerprint;
     - a tampered blob fails cleanly.
   - **Manual:** the file can't be decrypted as another Windows user.
+  - **Result (2026-10-20):**
+    - **[kvm/identity.h](../common/include/kvm/identity.h):** `load_or_create()` and `recreate()`, with `identity.bin` always in `%LOCALAPPDATA%\Sarke`, never next to a source build's `config.json`. `.gitignore` excludes `identity.bin*` as a second guard.
+    - **Storage:**
+      - DPAPI with `CryptProtectData` (current user, no UI, purpose-bound entropy) around `"SRKIDv1"` + the PKCS#8 key + the certificate;
+      - decrypted bytes are wiped after use;
+      - writes go to a temp file, which then replaces the real one (`MoveFileEx`).
+    - **`identity_test` (unit): all checks pass, 5 runs in a row.** It covers:
+      - create, then reload with the same ID;
+      - the private key isn't in the file in the clear;
+      - damaged → CannotDecrypt, decrypts to something else → Corrupt, a folder in its place → Unreadable, and none of them replaced;
+      - recreate moves the old file to `identity.bin.broken-<time>`, and the new identity loads after.
+    - **Still manual:** that another Windows user can't decrypt the file, which needs two accounts. Not run yet.
 
 - [ ] **P1.4 Paired-device store** (S), branch `phase1/paired-store`.
   - **Files:** new `common/include/kvm/paired.h` and `common/src/paired.cpp`.
