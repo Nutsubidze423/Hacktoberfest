@@ -71,7 +71,7 @@ client_b\kvm_client.exe --data-dir $env:TEMP\sarke-b --pair-with <host id> --hos
 `connected`, then `link: rtt …` every 5 s. If an installed Sarke is running, it holds ports
 50500–50502: give the host other ports in a `--config` file. Two fakes stand in for the other side,
 and should be extended rather than a test skipped:
-- [tools/kvm_fake_peer.cpp](tools/kvm_fake_peer.cpp): the control channel;
+- [tools/kvm_fake_peer.cpp](tools/kvm_fake_peer.cpp): the control channel (`--plaintext-v2` plays Sarke 1.1);
 - [tools/fake_streamer.cpp](tools/fake_streamer.cpp): JPEG frames on the video port.
 
 ## Code style

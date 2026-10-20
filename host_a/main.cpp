@@ -214,8 +214,12 @@ std::optional<proto::Hello> handshake(kvm::net::Connection& conn) {
         return std::nullopt;
     }
     if (hello->protocol_version != proto::kProtocolVersion) {
-        kvm::log::error("{}: protocol v{} but this host speaks v{} — rebuild both sides from the same commit",
-                        conn.peer(), hello->protocol_version, proto::kProtocolVersion);
+        // Answer with this PC's hello first: its protocol_version tells the other PC which one to update.
+        conn.send(make_hello(false));
+        conn.wait_peer_close(std::chrono::seconds(2));
+        kvm::log::warn(
+            "version: '{}' at {} speaks protocol v{}, this PC v{} - update both PCs to the same Sarke version",
+            hello->hostname, conn.peer(), hello->protocol_version, proto::kProtocolVersion);
         return std::nullopt;
     }
     return *hello;
@@ -255,7 +259,10 @@ void run_session(kvm::net::Connection& conn, kvm::KvmLink* kvm, kvm::clip::Clipb
     conn.send(places.begin(hello->hostname));
     // "unpair" from the launcher ends this session if it is this PC's.
     current_peer.set([&conn](const proto::Message& m) { return conn.send_json(proto::encode(m)); }, side.peer,
-                     [&conn] { conn.close(); });
+                     [&conn] {
+                         conn.wait_peer_close(std::chrono::seconds(2));  // it read `unpaired` and hung up
+                         conn.close();
+                     });
     struct PeerReset {
         kvm::layout_sync::Session& places;
         kvm::CurrentPeer& peer;

@@ -53,6 +53,8 @@ std::uint32_t dot_color(State s) {
     case State::Connected: return pal().ok;
     case State::Connecting: return pal().warn;
     case State::Busy: return pal().ink3;
+    case State::Older:
+    case State::Newer: return pal().warn;
     default: return pal().ink3;
     }
 }
@@ -63,6 +65,8 @@ const wchar_t* state_text(State s) {
     case State::Connecting: return L"Connecting…";
     case State::Connected: return L"Connected";
     case State::Offline: return L"Not on the network";
+    case State::Older: return L"Needs a Sarke update";
+    case State::Newer: return L"Update Sarke on this PC";
     default: return L"";
     }
 }
@@ -260,7 +264,10 @@ void DevicePicker::render() {
         const bool hot = hover_.row == i && hover_.part == Part::Row && clickable(row.state);
         const bool ours = row.state == State::Connected || row.state == State::Connecting;
         if (hot || ours) p.round(r, P(ui::radius::sm), hot ? c.fill_hi : c.fill);
-        const float dim = row.state == State::Busy || row.state == State::Offline ? 0.55f : 1.0f;
+        const float dim = row.state == State::Busy || row.state == State::Offline || row.state == State::Older ||
+                                  row.state == State::Newer
+                              ? 0.55f
+                              : 1.0f;
 
         // Status dot, name, IP.
         const float sd = P(kStatusDot);
@@ -279,10 +286,11 @@ void DevicePicker::render() {
         }
         const bool to_pair = !row.paired && row.state == State::Free;
         if (const std::wstring_view st = to_pair ? L"Pair…" : state_text(row.state); !st.empty()) {
-            const std::uint32_t ink = row.state == State::Connected    ? c.ok
-                                      : row.state == State::Connecting ? c.warn
-                                      : to_pair                        ? c.accent_ink
-                                                                       : c.ink3;
+            const std::uint32_t ink =
+                row.state == State::Connected                                                              ? c.ok
+                : row.state == State::Connecting || row.state == State::Older || row.state == State::Newer ? c.warn
+                : to_pair ? c.accent_ink
+                          : c.ink3;
             text_right =
                 p.text_right(TextStyle::Caption, st, text_right, std::round(mid - line(TextStyle::Caption) / 2), ink) -
                 P(kRowPad);

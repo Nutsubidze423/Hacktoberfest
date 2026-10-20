@@ -18,6 +18,8 @@ What changed for people who use Sarke, newest first. The plan ahead is in
   - **Paired PCs…** in the tray menu lists the paired PCs (name, the code-like ID both showed when
     pairing, when last seen) with Auto and **Unpair**. Unpairing ends a connection with that PC at
     once, and the other PC is told.
+  - When the other PC runs a different Sarke version (1.1, say), both PCs say so in a notification,
+    and the list of PCs marks it "Needs a Sarke update" instead of failing quietly.
 - Sarke is open source under the Apache License 2.0; the installer ships `LICENSE`, `NOTICE` and
   the licenses of everything compiled in (`licenses\` in the install folder).
 - Installers are published as GitHub Releases (and on the website), no longer kept in the repository.

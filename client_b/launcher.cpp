@@ -14,6 +14,7 @@
 #include <exception>
 #include <format>
 #include <fstream>
+#include <map>
 #include <mutex>
 #include <regex>
 #include <set>
@@ -59,6 +60,7 @@ constexpr UINT_PTR kConnectTimer = 2;        // the client didn't reach the PC i
 constexpr UINT kStopGraceMs = 9000;          // the app waits up to 4.5 s to bring windows home
 constexpr UINT kConnectTimeoutMs = 15000;
 constexpr auto kProblemToastGap = std::chrono::seconds(10);
+constexpr auto kVersionToastGap = std::chrono::minutes(10);  // per IP: "versions don't match"
 // The device list: every PC running Sarke as the host answers discovery (UDP 50503).
 constexpr auto kScanEvery = std::chrono::milliseconds(2500);
 constexpr auto kScanWait = std::chrono::milliseconds(1200);
@@ -183,6 +185,9 @@ Event parse_line(std::string_view line) {
     static const std::regex kPairingCode(R"(^pairing: code (\d{3} \d{3}) with '(.*)' \(([0-9A-F-]{19})\))");
     static const std::regex kUnpaired(R"(^unpair: '(.*)' unpaired this PC)");
     static const std::regex kUnpairDone(R"(^unpair: ([0-9A-F-]{19}) is no longer paired with this PC)");
+    static const std::regex kOlderSarke(R"(^net: ([0-9.]+):\d+: an older Sarke \(protocol v(\d+)\) tried to connect)");
+    static const std::regex kOtherVersion(
+        R"(^version: '(.*)' at ([0-9.]+):\d+ speaks protocol v(\d+), this PC v(\d+))");
 
     std::string s(line);
     while (!s.empty() && (s.back() == '\r' || s.back() == '\n')) s.pop_back();
@@ -207,6 +212,12 @@ Event parse_line(std::string_view line) {
     if (std::regex_search(msg, g, kPairingCode)) return PairingCode{g[1], g[2], g[3]};
     if (std::regex_search(msg, g, kUnpaired)) return Unpaired{g[1]};
     if (std::regex_search(msg, g, kUnpairDone)) return UnpairDone{g[1]};
+    if (std::regex_search(msg, g, kOlderSarke)) {
+        return VersionMismatch{.ip = g[1], .theirs = std::stoi(g[2]), .ours = proto::kProtocolVersion};
+    }
+    if (std::regex_search(msg, g, kOtherVersion)) {
+        return VersionMismatch{.name = g[1], .ip = g[2], .theirs = std::stoi(g[3]), .ours = std::stoi(g[4])};
+    }
     if (msg.starts_with("pairing: ") && msg != "pairing: nothing to answer") {
         return PairingDone{msg.starts_with("pairing: paired with"), msg.substr(9)};
     }
@@ -423,6 +434,7 @@ private:
     std::vector<discovery::Host> picker_hosts_;  // what the picker's rows stand for
     std::set<std::string> suppressed_;  // device IDs the user disconnected from: no auto-connect until they go away
     std::chrono::steady_clock::time_point auto_block_until_{};
+    std::map<std::string, std::chrono::steady_clock::time_point> version_toasts_;  // by IP
     std::mutex scan_mutex_;
     std::vector<Device> scanned_;            // written by the scanner thread
     std::jthread scanner_;                   // last: stops before the members it uses go away
@@ -565,17 +577,19 @@ void App::scan_loop(std::stop_token stop, HWND notify) {
     while (!stop.stop_requested()) {
         const auto started = std::chrono::steady_clock::now();
         auto hosts = discovery::find(kScanWait);
-        // A PC is known by the device ID it claims, not its name (docs/SECURITY.md 6.5).
+        // A PC is known by the device ID it claims, not its name (docs/SECURITY.md 6.5). One with
+        // another protocol version is listed too, as needing an update (an older one has no ID).
         std::erase_if(hosts, [&](const discovery::Host& h) {
-            return h.protocol_version != proto::kProtocolVersion || h.device_id.empty() ||
+            return (h.protocol_version == proto::kProtocolVersion && h.device_id.empty()) ||
                    same_name(h.name, self_name_);
         });
+        const auto key = [](const discovery::Host& h) { return h.device_id.empty() ? "ip:" + h.ip : h.device_id; };
         const auto now = std::chrono::steady_clock::now();
         {
             std::lock_guard lock(scan_mutex_);
             for (const auto& h : hosts) {
                 const auto it = std::find_if(scanned_.begin(), scanned_.end(),
-                                             [&](const Device& d) { return d.host.device_id == h.device_id; });
+                                             [&](const Device& d) { return key(d.host) == key(h); });
                 if (it == scanned_.end()) {
                     scanned_.push_back({.host = h, .first_seen = now, .last_seen = now});
                 } else {
@@ -621,7 +635,10 @@ void App::maybe_auto_connect() {
     const auto now = std::chrono::steady_clock::now();
     if (now < auto_block_until_) return;
     for (const auto& d : devices_) {
-        if (d.host.busy || !auto_on(d.host) || suppressed_.contains(d.host.device_id)) continue;
+        if (d.host.busy || d.host.protocol_version != proto::kProtocolVersion || !auto_on(d.host) ||
+            suppressed_.contains(d.host.device_id)) {
+            continue;
+        }
         if (!auto_connect_now(self_name_, d.host.name, now - d.first_seen)) continue;
         log::info("launcher: {} is on the network - connecting automatically", d.host.name);
         connect_to(d.host, /*automatic=*/true);
@@ -704,18 +721,24 @@ std::vector<DevicePicker::Row> App::picker_rows() {
                            [&](const discovery::Host& h) { return h.device_id == id; });
     };
     const auto add = [&](const discovery::Host& host, State state) {
+        const bool other_version = state == State::Older || state == State::Newer;  // no Auto, no pairing
         rows.push_back({.name = widen(host.name),
                         .ip = widen(host.ip),
                         .state = state,
                         .auto_connect = auto_on(host),
-                        .paired = paired_as(host, paired_devices_).has_value()});
+                        .paired = !other_version && paired_as(host, paired_devices_).has_value()});
         picker_hosts_.push_back(host);
     };
     const bool have_target = role_ == Role::Client && target_.has_value();
     const State ours = link_ == Link::Linked ? State::Connected : State::Connecting;
     for (const auto& d : devices_) {
         const bool current = have_target && target_->device_id == d.host.device_id;
-        add(d.host, current ? ours : d.host.busy ? State::Busy : State::Free);
+        const int version = d.host.protocol_version;
+        add(d.host, current                             ? ours
+                    : version < proto::kProtocolVersion ? State::Older
+                    : version > proto::kProtocolVersion ? State::Newer
+                    : d.host.busy                       ? State::Busy
+                                                        : State::Free);
     }
     if (have_target && !listed(target_->device_id)) {
         add({.name = target_->name, .ip = target_->ip, .device_id = target_->device_id}, ours);
@@ -1054,6 +1077,18 @@ void App::handle(const Event& e) {
                 const auto target_id = target_ ? tls::from_hex(target_->device_id) : std::nullopt;
                 if (role_ == Role::Client && target_id && tls::short_id(*target_id) == ev.id) switch_role(Role::Host);
                 refresh_paired();
+            } else if constexpr (std::is_same_v<T, VersionMismatch>) {
+                // Once per PC every few minutes: the other side may knock again and again.
+                const auto now = std::chrono::steady_clock::now();
+                auto& last = version_toasts_[ev.ip];
+                if (last != std::chrono::steady_clock::time_point{} && now - last < kVersionToastGap) return;
+                last = now;
+                const std::wstring who =
+                    ev.name.empty() ? L"The PC at " + widen(ev.ip) : widen(ev.name) + L" (" + widen(ev.ip) + L")";
+                notify(L"Sarke versions don't match",
+                       ev.theirs < ev.ours ? who + L" runs an older Sarke. Install the same version on both PCs."
+                                           : who + L" runs a newer Sarke. Update Sarke on this PC.",
+                       Toast::Kind::Lost);
             } else if constexpr (std::is_same_v<T, Problem>) {
                 last_problem_ = widen(ev.text);
                 const auto now = std::chrono::steady_clock::now();

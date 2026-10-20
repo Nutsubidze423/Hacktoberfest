@@ -28,7 +28,8 @@ namespace kvm {
 class DevicePicker {
 public:
     struct Row {
-        enum class State { Free, Busy, Connecting, Connected, Offline };
+        // Older / Newer: it runs a Sarke with another protocol version (docs/SECURITY.md 6.7).
+        enum class State { Free, Busy, Connecting, Connected, Offline, Older, Newer };
         std::wstring name;
         std::wstring ip;  // empty while offline
         State state = State::Free;

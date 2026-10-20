@@ -68,8 +68,17 @@ struct Unpaired {  // "unpair: 'name' unpaired this PC": the other PC unpaired t
 struct UnpairDone {  // "unpair: 1A2B-... is no longer paired with this PC": the app did "unpair <id>"
     std::string id;  // the short device ID
 };
+// Another PC runs a Sarke that speaks another protocol version (docs/SECURITY.md 6.7):
+//   "net: 10.0.0.5:51234: an older Sarke (protocol v2) tried to connect - ..."  (theirs = 2)
+//   "version: 'DESK' at 10.0.0.5:50500 speaks protocol v4, this PC v3 - ..."
+struct VersionMismatch {
+    std::string name;  // empty when only the address is known
+    std::string ip;
+    int theirs = 0;
+    int ours = 0;
+};
 using Event = std::variant<std::monostate, Connected, LinkUp, SessionEnded, Searching, Rtt, Problem, PlaceSet,
-                           IdentifyAsked, PairingCode, PairingDone, Unpaired, UnpairDone>;
+                           IdentifyAsked, PairingCode, PairingDone, Unpaired, UnpairDone, VersionMismatch>;
 
 Event parse_line(std::string_view line);
 

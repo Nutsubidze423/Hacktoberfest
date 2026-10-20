@@ -29,7 +29,11 @@ can take control, share windows, copy and send files. Every PC starts as a host;
 - Both sides present a certificate. The TLS handshake runs first.
 - Then the peer's device ID (SHA-256 of its key) must be in this PC's `paired.json`. Otherwise the
   connection is closed **before anything is read from it**.
-- A peer that doesn't speak TLS (protocol v2) is closed at the handshake.
+- A peer that doesn't speak TLS is closed at the handshake. The host recognises Sarke 1.1's
+  plaintext hello (protocol v2) by its first bytes and logs "an older Sarke (protocol v2) tried to
+  connect".
+- A paired peer whose `hello` has another `protocol_version` gets the host's `hello` (with the
+  host's version) before it is dropped, so both sides can say which PC to update.
 
 **Pairing** ([SECURITY.md](SECURITY.md) §6.3) is the one exchange allowed with a key that isn't
 paired:

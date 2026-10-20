@@ -351,6 +351,14 @@ void Connection::close() {
     }
 }
 
+bool Connection::wait_peer_close(std::chrono::milliseconds timeout) {
+    const auto until = std::chrono::steady_clock::now() + timeout;
+    while (open_ && std::chrono::steady_clock::now() < until) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+    return !open_;
+}
+
 void Connection::receive_loop() {
     std::vector<char> body;
     while (open_) {

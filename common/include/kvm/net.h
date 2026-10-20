@@ -97,6 +97,11 @@ public:
     // Closes the socket; receive/ping threads stop and incoming() gets closed. Idempotent.
     void close();
 
+    // After a last message (`unpaired`, the host's hello to a peer of another version): waits up to
+    // `timeout` for the peer to hang up. close() right away can reset the connection before the
+    // peer has read that message. True if the peer hung up.
+    bool wait_peer_close(std::chrono::milliseconds timeout);
+
 private:
     void receive_loop();
     void ping_loop(std::stop_token stop);

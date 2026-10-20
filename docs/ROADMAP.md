@@ -804,10 +804,37 @@ Attempts are rate-limited.
       - The card and the dialog were checked by screenshot (`ui_preview_paired`; the dialog by clicking Unpair).
     - **Not run yet:** two PCs (R17's unpair row).
 
-- [ ] **P1.10 Clear version-mismatch messages** (S), branch `phase1/version-ux`.
+- [x] **P1.10 Clear version-mismatch messages** (S), branch `phase1/version-ux`.
   - v2 is detected as described in the design. Discovery's `protocol_version` is shown in the tray list as "needs update".
   - The launcher shows a toast instead of only writing a log line.
   - **Tests:** loopback with `kvm_fake_peer --plaintext-v2`.
+  - **Result (2026-10-21):**
+    - **v2 is named, not just refused:**
+      - `tls::Stream::handshake` (server side) peeks before OpenSSL reads. Two zero bytes and a `{` are logged as `tls::kOlderSarke` ("an older Sarke (protocol v2) tried to connect - update both PCs to the same Sarke version").
+      - Other plaintext is logged as "doesn't speak TLS (it started with 0x47)".
+    - **Another version inside TLS:**
+      - the host answers with its own `hello` first, then both sides log `version: 'NAME' at IP speaks protocol vX, this PC vY`;
+      - the client then retries every 30 s instead of every second.
+    - **New `Connection::wait_peer_close()`:**
+      - the host's answer was sometimes lost, because `close()` right after a last message can reset the connection before the peer reads it;
+      - the sender of that answer and of `unpaired` (P1.9) now waits up to 2 s for the peer to hang up.
+    - **Launcher:**
+      - both log lines become one toast per PC every 10 min ("Sarke versions don't match", saying which PC to update);
+      - the picker lists other versions as "Needs a Sarke update" / "Update Sarke on this PC", which can't be clicked or set to Auto, and they are never auto-connected.
+    - **Found and fixed: `paired.json` saves could fail.**
+      - **The failure:** 2 of 80 `paired_test` runs failed to save ("can't save (0)") while another Store was reading the file.
+      - **The fix:** reads now take the file's named mutex too, and the replace is retried for about 1 s on access-denied or sharing violations (antivirus, indexer).
+      - **Result:** 0 of 150 runs fail; the log shows the real error code.
+    - **Tests:**
+      - `loopback_test` (57 checks, 5 runs in a row clean):
+        - step 2: the in-process v2 hello and `kvm_fake_peer --plaintext-v2` (new) are both closed and logged as an older Sarke;
+        - step 3: the v4 peer gets the host's hello with v3, then the mismatch is logged.
+      - `tls_test`: the v2 hello is named; other plaintext isn't.
+      - `launcher_test`: both version lines.
+      - The picker was checked by screenshot.
+      - `ctest --preset ci`: 3 runs clean after the fix.
+      - One earlier full run, the first right after a rebuild, ran slowly (loopback 46 s instead of 20 s) and failed 2 loopback checks that its output didn't show. It didn't happen again in 8 runs.
+    - **Not run yet:** a real Sarke 1.1 PC against this build (R17's "a v2 peer gets a clear message").
 
 - [ ] **P1.11 Installer hardening** (S), branch `phase1/installer`.
   - **Files:** [installer/sarke.iss](../installer/sarke.iss):

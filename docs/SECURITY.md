@@ -205,6 +205,19 @@ connection and logs "an older Sarke (protocol v2) at *IP* tried to connect; upda
 launcher shows that as a toast. Discovery's `protocol_version` already lets the tray mark an older
 PC before any connection.
 
+Implemented in P1.10:
+- `tls::Stream::handshake` (server side) peeks before OpenSSL reads anything. A first byte other
+  than `0x16` fails the handshake:
+  - two zero bytes and a `{` (a v2 frame) are named as `tls::kOlderSarke`;
+  - anything else is named "doesn't speak TLS".
+- Inside TLS, a paired peer with another `protocol_version` gets the host's `hello` first, then
+  both sides log `version: 'NAME' at IP speaks protocol vX, this PC vY`.
+- The client retries such a host every 30 s, not every second.
+- **The launcher:**
+  - turns both log lines into one toast per PC every 10 minutes ("Sarke versions don't match");
+  - lists PCs with another `protocol_version` as "Needs a Sarke update" or "Update Sarke on this
+    PC", which can't be clicked or set to Auto.
+
 ### 6.8 What never goes into logs
 - Key contents, clipboard contents, file contents, session tokens and private keys are never logged.
 - Allowed: sizes, kinds, device IDs (short form), IPs and file names. Logs stay in the user's

@@ -5,8 +5,10 @@
 // hooks, clipboard, desk mode or discovery (nothing on this desktop or network changes), and checks:
 //   0. each program creates its identity (--print-id) and keeps it;
 //   1. a PC whose key isn't paired is closed right after the TLS handshake: its hello is never read;
-//   2. an older Sarke (plain TCP, protocol v2) is closed;
-//   3. a paired peer speaking another protocol version is dropped, and the host logs why;
+//   2. an older Sarke (plain TCP, protocol v2; in-process and kvm_fake_peer --plaintext-v2) is closed,
+//      and the host logs it as an older Sarke (the launcher shows that as a notification);
+//   3. a paired peer speaking another protocol version gets the host's hello (its version), is dropped,
+//      and the host logs the mismatch;
 //   4. a paired peer speaking this version gets the host's hello back, with its device ID and the
 //      session's side-channel token: with it the peer opens video and files; a wrong token or another
 //      PC's key is refused there and the live channel stays; the session's end closes its channels;
@@ -326,7 +328,14 @@ int wmain(int argc, wchar_t** argv) {
             const char v2_hello[] = "\x00\x00\x00\x12{\"type\":\"hello\"}  ";
             check(closed_after_plain_bytes(control, std::string_view(v2_hello, sizeof(v2_hello) - 1), 5s),
                   "the host closes a connection that doesn't speak TLS");
-            check(wait_until([&] { return host.log_has("handshake failed"); }, 3s), "and logs why");
+            check(wait_until([&] { return host.log_has(kvm::tls::kOlderSarke); }, 3s),
+                  "and logs it as an older Sarke to update");
+            const auto before = count(host.log(), kvm::tls::kOlderSarke);
+            Program fake(job, exe_dir() / L"kvm_fake_peer.exe",
+                         std::format(L"--plaintext-v2 --host 127.0.0.1 --port {}", control), dir / "fake-v2.log");
+            const auto code = fake.started() ? fake.wait_exit(15s) : std::nullopt;
+            check(code == 0u && wait_until([&] { return count(host.log(), kvm::tls::kOlderSarke) > before; }, 3s),
+                  "kvm_fake_peer --plaintext-v2: closed, and logged the same way");
         }
 
         kvm::log::info("3) a paired peer speaking protocol v{}", proto::kProtocolVersion + 1);
@@ -335,8 +344,13 @@ int wmain(int argc, wchar_t** argv) {
             check(conn != nullptr, "it connects");
             if (conn) {
                 conn->send(proto::Hello{.protocol_version = proto::kProtocolVersion + 1, .hostname = "loopback-old"});
+                const auto answer = wait_for_hello(*conn, 5s);
+                check(answer && answer->protocol_version == proto::kProtocolVersion,
+                      "it gets the host's hello first, with the host's version");
                 check(wait_until([&] { return !conn->is_open(); }, 6s), "the host drops it");
-                check(wait_until([&] { return host.log_has("but this host speaks v"); }, 3s),
+                check(wait_until([&] { return host.log_has("version: 'loopback-old' at 127.0.0.1"); }, 3s) &&
+                          host.log_has(std::format("speaks protocol v{}, this PC v{}", proto::kProtocolVersion + 1,
+                                                   proto::kProtocolVersion)),
                       "the host logs the version mismatch");
             }
         }
