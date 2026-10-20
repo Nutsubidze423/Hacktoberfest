@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Hands-on KVM test on one PC, no network: the real hooks capture your mouse and
 // keyboard, and a simulated B screen stands on the config's client_side.
 //

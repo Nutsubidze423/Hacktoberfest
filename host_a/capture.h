@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Windows.Graphics.Capture (WGC) of one whole monitor (the VDD) or one window -> BGRA frames in
 // CPU memory, delivered into a LatestSlot (only the newest frame waits; older ones are dropped).
 //

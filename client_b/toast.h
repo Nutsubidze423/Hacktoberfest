@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Sarke's own notification (owner: Sandro, docs/DESIGN.md 9.3): a rounded card that slides in at
 // the top-right of the main screen, like NVIDIA's overlay notifications, in the website's style
 // (tile, logo, "Sarke · <tag>", title, detail and a thin line that runs out until it hides) instead

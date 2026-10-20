@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Loopback check for kvm/video.h: frames of many sizes arrive intact and in order, concurrent
 // senders do not interleave bytes, close() unblocks a receiver, garbage input is rejected, and a
 // rough throughput number for 1080p-sized JPEG frames.

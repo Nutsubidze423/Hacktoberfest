@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // file_drop_test: the "drop here" catcher (T9).
 //
 //   file_drop_test.exe            automatic: shows, hides after its timeout, hide() works

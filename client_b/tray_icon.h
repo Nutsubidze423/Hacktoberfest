@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Notification-area icon ("show hidden icons") with tooltip, menu and notifications (docs/DESIGN.md
 // section 9). Notifications are Sarke's own card at the top-right (toast.h), not the Windows toast;
 // the Windows one is only the fallback if the card can't be drawn. UI thread only.

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // sarke_driver.exe — installs the Virtual Display Driver (MikeTheTech's signed IddCx driver,
 // installer\vdd) that desk mode uses, the way devcon does: adds the driver package and creates its
 // root device (Root\MttVDD). The Sarke installer runs it elevated; it can also be run by hand.

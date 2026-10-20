@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 #include "capture.h"
 
 // Classic COM headers must come before C++/WinRT so winrt::com_ptr / as<> work with them.

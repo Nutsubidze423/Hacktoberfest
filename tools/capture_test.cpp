@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // capture_test: the A side of "send a window to B", without the network:
 //   pick a window -> VDD on (B's size, on the config.json client_side) -> window onto the VDD
 //   -> capture frames of the VDD -> captures/frame_NN.jpg -> window back -> VDD off.

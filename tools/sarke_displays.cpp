@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Sarke display arrangement: where the other PC stands next to this one (client_b/display_settings.h).
 // Detects this PC's monitors live, shows the other PC (as last seen), writes config.json client_side.
 //

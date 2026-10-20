@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Viewer window on B (docs/DESIGN.md section 4): Direct2D renderer, custom title strip,
 // connection state screens, HUD. Shows A's streamed window with its aspect ratio preserved.
 //

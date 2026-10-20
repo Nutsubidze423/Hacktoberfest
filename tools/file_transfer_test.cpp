@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // file_transfer_test: the 50502 file channel on 127.0.0.1, both directions (T9). No second PC needed.
 //   1. safe_destination(): what a peer may and may not write.
 //   2. B -> A: a folder tree, a 3.5 MB file, an empty file and a Georgian file name, byte for byte.

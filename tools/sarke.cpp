@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // sarke.exe — start Sarke on this PC: runs kvm_host.exe or kvm_client.exe in the background with a
 // tray icon, notifications, Display arrangement and a settings menu (client_b/launcher.h).
 //

@@ -161,13 +161,20 @@ docs/        design, blueprint and plan
 - Builds are not code-signed, so Microsoft Defender may flag the input hooks. The installer can add
   an exclusion.
 
+## License
+
+Sarke is open source under the [Apache License 2.0](LICENSE). The third-party components it
+includes keep their own licenses; their full texts are in
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
 ## Credits
 
-Built by Luka, Demetre, Temo and Sandro.
+Built by Luka, Demetre, Temo and Sandro (see [AUTHORS](AUTHORS)).
 
 Sarke includes or uses:
 
 - [Virtual Display Driver](https://github.com/VirtualDrivers/Virtual-Display-Driver) (MIT)
-- [libjpeg-turbo](https://libjpeg-turbo.org) (BSD-style licenses)
+- [libjpeg-turbo](https://libjpeg-turbo.org) (BSD-3-Clause, IJG, zlib), with
+  [libspng](https://libspng.org) (BSD-2-Clause) and [zlib](https://zlib.net) (Zlib)
 - [nlohmann/json](https://github.com/nlohmann/json) (MIT)
 - Google Sans and Geist Mono fonts (SIL Open Font License 1.1)

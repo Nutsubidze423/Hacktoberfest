@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Direct2D / DirectWrite helpers for Sarke's surfaces (docs/DESIGN.md section 2).
 //
 // Everything here runs on the UI thread. Render targets use 96 dpi, so 1 D2D unit = 1 pixel and

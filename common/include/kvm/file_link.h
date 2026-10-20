@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Glue between Temo's file channel (kvm/file_transfer.h), drop window (kvm/file_drop.h) and drag
 // source (kvm/file_drag.h) for kvm_host and kvm_client: one per process, the current peer
 // connection plugged in per session.

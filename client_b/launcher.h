@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Sarke launcher (owner: Sandro): the app's face on a PC. Runs kvm_host.exe or kvm_client.exe in the
 // background (no console window) and adds what the apps don't have themselves yet: the tray icon
 // with the link state, Sarke's notification card on connect / disconnect, the Display arrangement

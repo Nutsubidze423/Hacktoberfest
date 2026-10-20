@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 #include "ui_draw.h"
 
 #include <dwmapi.h>

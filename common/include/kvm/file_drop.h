@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The "drop here" window at the screen edge (T9, owner: Temo). When a file drag from Explorer reaches
 // the edge towards the other PC, KVM (Demetre, D1: on_drag_at_edge) calls show_at(); the user drops
 // the files on it, and on_drop gets their paths, which go to FileTransfer::send().

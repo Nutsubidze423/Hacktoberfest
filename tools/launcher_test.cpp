@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Checks client_b/launcher.h without starting anything: what each kind of kvm_host / kvm_client log
 // line means, settings.json round trips, config.json key writes, and finding the apps.
 // Usage: launcher_test.exe   (exit code 0 = all passed)

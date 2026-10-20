@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Continues a file drag on this PC with files that arrived from the other PC (T10, owner: Temo), the
 // way Mouse Without Borders does it: the user grabbed files on the other PC, KVM brought the cursor
 // here mid-drag, and the drag goes on here until the button goes up over any folder or the desktop,

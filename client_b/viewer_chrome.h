@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Custom title strip of the viewer window (docs/DESIGN.md 4.2): layout, hit testing, drawing.
 #pragma once
 

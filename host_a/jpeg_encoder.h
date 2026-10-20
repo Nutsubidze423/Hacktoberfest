@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // TurboJPEG encoder for captured frames: BGRX input, 4:2:0 chroma subsampling.
 // Not thread-safe; use one instance per thread (the video sender thread).
 //

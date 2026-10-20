@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Checks kvm/queue.h: ordering, bounded drop-oldest, LatestSlot overwrite, timeouts, close(),
 // and a multi-threaded producer/consumer run.
 // Usage: queue_test.exe   (exit code 0 = all passed)

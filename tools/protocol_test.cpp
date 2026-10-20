@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Round-trip check for kvm/protocol.h: every control message survives encode -> dump -> parse -> decode.
 // Usage: protocol_test.exe   (exit code 0 = all passed)
 

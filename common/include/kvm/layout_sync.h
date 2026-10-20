@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Where the other PC stands, the same on both PCs (owner: Luka). Each PC keeps, per PC it meets,
 // where that one is (config.json "peers", physical: "tabuladze is on my right"), and both tell each
 // other their view after the hellos (proto::Layout). The view the user set last wins on both; a tie

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Reads window-stream frames from the video channel, decodes the newest one and shows it in the
 // viewer (ARTEFACT "გადაწყვეტილებები 2", S1).
 //

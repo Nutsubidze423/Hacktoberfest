@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // window_mover_test: sends one window to the VDD and back, and checks that it fills the VDD and
 // returns exactly where it was. The window is always restored and the VDD detached at the end.
 //

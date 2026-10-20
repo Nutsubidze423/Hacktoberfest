@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Desk mode, window owner (Temo): the other PC's own mouse and keyboard on our windows, which it
 // draws at the same place on its screen (client_b/desk_view). Positions are normalized over our
 // virtual display (VDD) and replayed there, so whatever window is under them gets the input natively.

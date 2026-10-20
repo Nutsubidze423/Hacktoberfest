@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Plays "the other PC" against a real kvm_host / kvm_client for KVM debugging:
 // connects (or listens), says hello, takes control of that PC (focus_enter),
 // wiggles its cursor a few pixels and taps harmless keys (F13/F14) for a while,

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 #include "device_picker.h"
 
 #include <windowsx.h>

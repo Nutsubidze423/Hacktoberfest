@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // fake_streamer: stands in for A's video sender, so the B side can be tested without capture.
 // Listens on the video port (50501) with Luka's kvm::net::VideoServer — the same channel A uses —
 // and sends JPEGs from disk in a loop.

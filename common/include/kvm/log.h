@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Minimal thread-safe logging to stderr and optionally a file: kvm::log::info("connected to {}", ip);
 // Never call from inside a low-level hook callback.
 #pragma once

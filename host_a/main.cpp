@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // kvm_host.exe — runs on A (owns the physical mouse/keyboard, streams a window).
 // Usage: kvm_host.exe [--config <path>] [--log <file>] [--no-kvm] [--no-clipboard] [--no-desk]
 //                     [--test-video [--test-video-kb N] [--test-video-fps N]]

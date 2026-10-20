@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Checks client_b/input_inject: feeds it the messages A would send and verifies
 // what it injects (via a low-level hook) and what it sends back to A.
 // The hook swallows every injected click/key, so nothing reaches the desktop;

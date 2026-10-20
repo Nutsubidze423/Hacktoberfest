@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // vdd_test: checks host_a/virtual_display on this machine, step by step:
 //   list displays -> attach the VDD (1920x1080 @ 60 Hz, right) -> place on the opposite side and back
 //   -> detach -> attach again -> detach.

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Checks common/clipboard: base64 + chunking, then the real clipboard: copied
 // text and images are sent, the peer's content is pasted here (text, CF_DIB +
 // "PNG") without being echoed back, a newer copy cancels an older transfer,

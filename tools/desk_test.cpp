@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // desk_test: desk mode on one PC. The VDD is attached next to the primary monitor, and the windows
 // dragged onto it are drawn back on the primary monitor by a DeskView, exactly as the other PC would
 // draw them (the network is a loopback lambda). Drag a window over the edge and its "ghost" appears

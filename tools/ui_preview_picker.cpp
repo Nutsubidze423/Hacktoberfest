@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Shows the "Connect to another PC" card (client_b/device_picker.h) with sample PCs, at the mouse
 // cursor (move the mouse where it should open first). Clicks are printed; it quits when the card closes.
 // Usage: ui_preview_picker.exe [--empty] [--connected]

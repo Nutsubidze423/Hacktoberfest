@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // ui_preview_viewer: the viewer window in every state with FAKE data, no network
 // (docs/DESIGN.md section 7). For design review only — none of these values are real.
 //

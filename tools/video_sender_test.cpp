@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // video_sender_test: VideoSender without a network (T7). A producer puts 60 frames/s into a
 // LatestSlot, like WGC does; a fake channel spends a fixed time per frame, like Wi-Fi does.
 //

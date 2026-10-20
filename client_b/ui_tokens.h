@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Design tokens (docs/DESIGN.md section 2): the same system as the Sarke website
 // (sarke-nine.vercel.app, D:\sarke-web\src\app\globals.css). Apple-like restraint: a neutral
 // black / white / grey base, one blue for actions and links, solid rounded tiles, no borders or

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // viewer_test: run the B-side viewer without A.
 //
 //   viewer_test.exe <image.jpg | folder> [--fps 30]

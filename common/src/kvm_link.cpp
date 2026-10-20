@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 #include "kvm/kvm_link.h"
 
 #include <windows.h>

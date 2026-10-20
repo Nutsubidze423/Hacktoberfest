@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Window glue for kvm_host and kvm_client (owner: Temo): one per process, the same on both PCs.
 //
 // Desk mode (Options::desk set, both PCs say hello{desk}): the other PC's screen is one more monitor.

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // jpeg_test: TurboJPEG speed and output check (T5). Needs no VDD and no network.
 //
 //   jpeg_test.exe [frame.bmp] [--runs 100] [--quality 75]

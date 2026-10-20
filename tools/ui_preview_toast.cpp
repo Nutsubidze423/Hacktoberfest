@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Shows Sarke's notification card (client_b/toast.h) at the top-right of the main screen.
 // Usage: ui_preview_toast.exe [--kind connected|lost|info] [--title <text>] [--text <text>] [--hold <ms>]
 //                             [--motion on|off]   (default: Windows' "Animation effects" setting)

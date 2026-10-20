@@ -340,6 +340,7 @@ Task-level links that matter:
     - `tools/make_installer.ps1` calls it;
     - `README.md` links to GitHub Releases.
   - **Release:** publish `v1.1.0` as a GitHub Release with the existing installer attached. Optionally, a `release.yml` workflow builds the installer on a tag; it needs Inno Setup on the runner.
+  - **License files (from P0.8):** `installer/sarke.iss` copies `LICENSE`, `NOTICE` and `THIRD_PARTY_NOTICES.md` into `{app}\licenses`, next to the VDD license.
   - **Website (D5):** the same installer is also uploaded to the website with [tools/publish_release.ps1](../tools/publish_release.ps1). Document the two-step release (GitHub Release, then website) in `docs/RELEASING.md`.
   - **Done when:**
     - a fresh clone + `fetch_vdd.ps1` + `make_installer.ps1` produces an installer that works in Windows Sandbox (the existing method, commit `6b58d1f`);
@@ -371,7 +372,7 @@ Task-level links that matter:
     - `ctest -L loopback` passes on this PC;
     - if `--no-kvm` is enough for the hosted runner, it is added to CI.
 
-- [ ] **P0.8 License** (S), branch `phase0/license`. D1 = Apache-2.0, and all four authors agree.
+- [x] **P0.8 License** (S), branch `phase0/license`. D1 = Apache-2.0, and all four authors agree.
   - **Files:**
     - `LICENSE` (Apache-2.0 text) and `NOTICE`;
     - an `SPDX-License-Identifier` line at the top of each source file (scripted);
@@ -380,6 +381,11 @@ Task-level links that matter:
   - **Done when:**
     - GitHub detects the license;
     - the notices list every vcpkg dependency.
+  - **Result (2026-10-20):**
+    - **Files:** `LICENSE` (the canonical Apache-2.0 text, SHA-256 `cfc7749b…`), `NOTICE`, `AUTHORS`, and `"license": "Apache-2.0"` in `vcpkg.json`.
+    - **SPDX:** an SPDX line at the top of all 141 C++/RC source files.
+    - **Notices:** `THIRD_PARTY_NOTICES.md` holds the full license texts. The check found that **libspng 0.7.4 and zlib 1.3.2** are compiled into the exes through libjpeg-turbo (their strings are in `kvm_host.exe`), so they are listed too.
+    - **Moved to P0.5:** shipping `LICENSE`, `NOTICE` and `THIRD_PARTY_NOTICES.md` in the installer's `licenses` folder. Inno Setup isn't on this PC, so the installer change can't be verified here.
 
 - [ ] **P0.9 Window moves right after the VDD attaches** (S/M), branch `phase0/window-mover-race`. Found by P0.2.
   - **Symptom:** `WindowMover::send` sometimes logs "the window did not end up maximized on the target monitor" ([host_a/window_mover.cpp:116](../host_a/window_mover.cpp#L116)) when the VDD was attached a moment earlier. It shows up as intermittent `window_mover_test`/`capture_test` failures in `ctest --preset local`; both pass when run alone.

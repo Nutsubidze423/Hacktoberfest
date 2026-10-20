@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 #include "display_settings.h"
 
 #include <windowsx.h>

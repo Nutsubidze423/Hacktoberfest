@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Checks client_b/display_layout.h: side conversions host/client, drop-to-side, the crossing edge,
 // where the other PC is drawn, config.json round trips (other keys kept) and peer.json; then the
 // monitors of this machine.

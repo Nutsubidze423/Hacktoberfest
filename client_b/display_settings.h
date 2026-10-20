@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Display arrangement window (owner: Sandro): "Where is the other PC?"
 //
 // Shows this PC's real monitors (live: re-read on WM_DISPLAYCHANGE / DPI changes), the other PC

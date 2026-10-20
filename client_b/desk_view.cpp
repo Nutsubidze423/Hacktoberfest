@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 #include "desk_view.h"
 
 #include <windowsx.h>

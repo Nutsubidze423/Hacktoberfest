@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 #include "kvm/dpi.h"
 
 #ifndef WIN32_LEAN_AND_MEAN

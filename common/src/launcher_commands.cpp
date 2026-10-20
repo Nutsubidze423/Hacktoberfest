@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 #include "kvm/launcher_commands.h"
 
 #include <windows.h>

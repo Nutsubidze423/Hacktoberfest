@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Desk mode, window owner (Temo): which windows are on the virtual display (VDD) right now.
 //
 //   kvm::DeskTracker tracker(region, [&](const auto& windows) { ... });  // region.set_vdd(...) first

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Checks kvm/dpi.h: outer-edge geometry on synthetic monitor layouts, then DPI
 // awareness and the monitor list on this machine.
 // Usage: dpi_test.exe   (exit code 0 = all passed)

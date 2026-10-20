@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // remote_input_test: the AnyDesk-like loop without a viewer. Paint is shared onto the VDD and the
 // test sends exactly what a viewer would: remote_mouse_move / mouse_button to draw a line, then
 // key messages for Ctrl+Z. The streamed JPEGs must show the line appear and disappear again.

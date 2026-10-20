@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 #pragma once
 // Display geometry in physical pixels: DPI awareness, the monitor list and the
 // outer edges of the virtual desktop (where the cursor leaves A for B).

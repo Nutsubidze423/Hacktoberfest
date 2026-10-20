@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Thread-safe hand-off between threads (hook thread -> net thread, capture -> encoder -> sender...).
 //
 //   BlockingQueue<T> — FIFO, nothing is dropped. Use for input/control messages.

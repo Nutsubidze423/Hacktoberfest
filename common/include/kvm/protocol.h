@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Wire protocol between host A and client B. This is the frozen team contract:
 // change it only in a PR from the core/net owner, and update the table in CLAUDE.md with it.
 //

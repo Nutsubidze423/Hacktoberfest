@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Checks common/kvm_link: both KVM directions on one PC, the guard that keeps
 // them exclusive, the "both crossed at once" rule and detach.
 //

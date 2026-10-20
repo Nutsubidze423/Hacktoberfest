@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // layout_sync_test: where the other PC stands stays the same on both PCs (kvm/layout_sync.h), per
 // peer (config.json "peers"), and the layout / identify messages survive the wire.
 //

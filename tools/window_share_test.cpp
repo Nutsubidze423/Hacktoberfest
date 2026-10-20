@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // window_share_test: one WindowShare from start to end, with a fake channel instead of the network.
 // The window must go onto the VDD and fill it, JPEG frames of the VDD size must come out, and after
 // the share ends the window must be exactly where it was and the VDD detached. A share of a window

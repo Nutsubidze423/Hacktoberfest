@@ -1,6 +1,7 @@
 {
   "name": "kvm-demo",
   "version-string": "0.1.0",
+  "license": "Apache-2.0",
   "builtin-baseline": "a5f736224e85b32e25a8ffc52562333180396642",
   "dependencies": [
     "nlohmann-json",

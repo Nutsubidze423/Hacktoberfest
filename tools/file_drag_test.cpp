@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // file_drag_test: both halves of the cross-PC file drag with real OLE drag and drop (T10).
 // FileDragSource continues a drag with two temp files ("arrived from the other PC") from the cursor,
 // SendInput moves the mouse onto a FileDropCatcher in this process and lets go: the catcher must get

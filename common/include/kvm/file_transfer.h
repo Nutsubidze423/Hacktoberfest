@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // File transfer channel (port 50502), the same code in both directions (T9, owner: Temo).
 // A listens and B connects, like the other channels; after that either side sends files and
 // receives the other side's files into %USERPROFILE%\Downloads\KVM\ (folders keep their structure).

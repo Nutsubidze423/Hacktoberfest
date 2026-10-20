@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Checks kvm/win32_input.h: installs low-level hooks, injects events and verifies
 // what the hooks see (flags, the KVM marker, exact pixel for absolute moves).
 // Clicks, keys and wheel are swallowed by the hook, so nothing reaches the desktop;

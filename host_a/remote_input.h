@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Replays the viewer's input (from the other computer) into the shared window on the VDD.
 // The viewer sends positions normalized to the stream (0..1); they land on the VDD monitor rect,
 // where WindowShare keeps the window maximized. Clicks and keys go to the shared app, which is

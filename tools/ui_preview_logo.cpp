@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // ui_preview_logo: the app logo (docs/DESIGN.md section 9) at every icon size Windows uses, saved
 // as one image to check the pixels (docs/DESIGN.md section 7). Rows, top to bottom:
 //   1. exact sizes 16 20 24 28 32 40 48 64 96 128 px on a dark taskbar

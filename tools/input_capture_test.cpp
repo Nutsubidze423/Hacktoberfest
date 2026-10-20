@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Checks host_a/input_capture: edge switching, swallowing + forwarding while B
 // has control, held keys/buttons, losing the client, and Ctrl+Alt+Shift+Q.
 //

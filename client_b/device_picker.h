@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // "Connect to another PC" (owner: Temo): the PCs running Sarke on this network, as a Sarke card
 // (docs/DESIGN.md 2 tokens: tile, radius md, Google Sans / Geist Mono) instead of a plain menu.
 // Opens at the mouse cursor (the tray icon or the Displays window's Connect button), or above the tray

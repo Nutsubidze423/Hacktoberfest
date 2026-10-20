@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // kvm_client.exe — runs on B (receives input and the window stream from A).
 // Usage: kvm_client.exe [--host <A's IP>] [--config <path>] [--log <file>] [--no-kvm] [--no-clipboard] [--no-desk]
 //   --no-kvm        don't install the input hooks (A can still control B)

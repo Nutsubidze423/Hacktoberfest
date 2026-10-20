@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 #pragma once
 // KVM, sending side: low-level mouse/keyboard hooks that hand control of this
 // PC's physical mouse and keyboard to the other PC ("the peer"). Runs on A and,

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 #include "kvm/file_transfer.h"
 
 #include <winsock2.h>

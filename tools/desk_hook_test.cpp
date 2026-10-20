@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // desk_hook_test: the KVM hooks in desk mode, on one PC with the real VDD attached on the right.
 // The left half of the VDD plays "one of our windows" (Region rects); the right half is the peer's
 // desktop. Checks: the cursor moves onto the VDD and desk_move follows it; clicks/wheel on the window

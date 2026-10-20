@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The Virtual Display Driver's list of resolutions (C:\VirtualDisplayDriver\vdd_settings.xml).
 //
 // Desk mode maps the VDD 1:1 onto the other PC's screen, so the VDD must have exactly that screen's

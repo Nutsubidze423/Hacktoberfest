@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Windows resources of Sarke's executables: the app icon (Explorer, taskbar, Start menu, installer)
 // and the version and description shown in the file's properties and in Task Manager. Each target
 // defines which executable it is (SARKE_EXE_*).

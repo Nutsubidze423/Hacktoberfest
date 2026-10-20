@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 #include "jpeg_encoder.h"
 
 #include <turbojpeg.h>
