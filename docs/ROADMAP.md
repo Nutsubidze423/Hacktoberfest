@@ -579,7 +579,7 @@ Attempts are rate-limited.
   - **Done when:** you have reviewed it, and D6 and D7 are answered.
   - **Result (2026-10-20):** written as [docs/SECURITY.md](SECURITY.md) and approved by Demetre (PR #3). GitHub private vulnerability reporting is on.
 
-- [ ] **P1.2 TLS transport** (M), branch `phase1/tls`.
+- [x] **P1.2 TLS transport** (M), branch `phase1/tls`.
   - **New dependency:** vcpkg `openssl` (Apache-2.0); why it is needed is in D6.
   - **Files:** new `common/include/kvm/tls.h` and `common/src/tls.cpp`:
     - RAII wrappers for `SSL_CTX` and `SSL`;
@@ -594,6 +594,25 @@ Attempts are rate-limited.
     - the exporter is equal on both sides;
     - **a relaying man-in-the-middle with its own key gives different exporters**.
   - **Measure:** exe size growth and the clean CI build time.
+  - **Result (2026-10-20):**
+    - **OpenSSL 3.6.5** (vcpkg baseline, port 3.6.5#2) is linked statically and privately to `kvm_common`.
+    - **[kvm/tls.h](../common/include/kvm/tls.h):**
+      - `Credentials`: P-256 key, self-signed certificate, DER in and out, device ID = SHA-256 of the SPKI;
+      - `Stream`: TLS 1.3 only, mutual, no tickets, no session cache;
+      - one reader plus many writers: a lock around each OpenSSL call, waits in `select()` outside it;
+      - `abort()`, the exporter, and `pairing_code()`.
+    - **`tls_test` (unit): all checks pass, 10 runs in a row on this PC, and in CI.** It covers:
+      - handshake and device IDs;
+      - the same exporter bytes on both ends;
+      - 1 MB both ways, and full duplex with two writers (600 + 1000 messages, none interleaved);
+      - abort and close;
+      - refusals: a plaintext peer ("wrong version number", 0 ms), a silent peer (timeout), a TLS 1.2 client ("unsupported protocol"), a client without a certificate ("peer did not return a certificate");
+      - a relaying man-in-the-middle: both sides see the relay's key, and the two halves export different codes.
+    - **Found and fixed during the work:** `abort()`'s `CancelIoEx` also cancels the I/O request a `select()` is waiting on, so the wait fails. That is now reported as an abort, not a reset.
+    - **Measured:**
+      - OpenSSL takes 25 min to build on this Celeron; afterwards it comes from the vcpkg binary cache (CI: actions/cache).
+      - The cold CI build step went from about 430 s to 805 s, OpenSSL included.
+      - `kvm_host.exe` is still 6.71 MB (it doesn't use TLS until P1.5); `tls_test.exe` is 9.44 MB.
 
 - [ ] **P1.3 Device identity** (M), branch `phase1/identity`.
   - **Files:** new `common/include/kvm/identity.h` and `common/src/identity.cpp`:

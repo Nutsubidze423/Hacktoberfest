@@ -22,7 +22,7 @@ endforeach()
 # Presets: `ctest --preset ci` (unit + loopback) and `ctest --preset local` (+ desktop + vdd, at the PC).
 set(KVM_UNIT_TESTS
     protocol_test queue_test layout_sync_test display_layout_test launcher_test dpi_test video_test
-    video_sender_test file_transfer_test net_listen_test)
+    video_sender_test file_transfer_test net_listen_test tls_test)
 set(KVM_DESKTOP_TESTS
     win32_input_test input_capture_test input_inject_test kvm_link_test clipboard_test file_drop_test
     file_drag_test)
@@ -31,6 +31,9 @@ set(KVM_VDD_TESTS
 set(KVM_LOOPBACK_TESTS loopback_test)
 set(KVM_BENCH_TESTS jpeg_test)
 set(KVM_MANUAL_TESTS kvm_local_test viewer_test)
+
+# tls_test drives plain OpenSSL clients too (TLS 1.2, no certificate) to check what is refused.
+target_link_libraries(tls_test PRIVATE OpenSSL::SSL OpenSSL::Crypto)
 
 # Arguments for tests that would otherwise ask which window to use.
 set(KVM_PAINT_TESTS window_mover_test window_share_test capture_test desk_test remote_input_test)

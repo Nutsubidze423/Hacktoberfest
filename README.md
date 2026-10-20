@@ -181,4 +181,5 @@ Sarke includes or uses:
 - [libjpeg-turbo](https://libjpeg-turbo.org) (BSD-3-Clause, IJG, zlib), with
   [libspng](https://libspng.org) (BSD-2-Clause) and [zlib](https://zlib.net) (Zlib);
 - [nlohmann/json](https://github.com/nlohmann/json) (MIT);
+- [OpenSSL](https://www.openssl.org) (Apache-2.0), for TLS 1.3 between PCs;
 - the Google Sans and Geist Mono fonts (SIL Open Font License 1.1).
