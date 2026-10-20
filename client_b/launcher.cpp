@@ -23,6 +23,7 @@
 #include <nlohmann/json.hpp>
 
 #include "device_picker.h"
+#include "paired_window.h"
 #include "pairing_dialog.h"
 #include "display_settings.h"
 #include "kvm/config.h"
@@ -76,6 +77,7 @@ enum : UINT {
     kCmdOpenFiles = 60,
     kCmdOpenConfig = 61,
     kCmdShowLog = 62,
+    kCmdPaired = 63,
     kCmdRoleHost = 70,
     kCmdRoleClient = 71,
     kCmdRestart = 80,
@@ -179,6 +181,8 @@ Event parse_line(std::string_view line) {
     static const std::regex kRtt(R"(^link: rtt ([0-9.]+) ms)");
     static const std::regex kPlace(R"(^layout: '(.*)' is on the (left|right|top|bottom) of this PC)");
     static const std::regex kPairingCode(R"(^pairing: code (\d{3} \d{3}) with '(.*)' \(([0-9A-F-]{19})\))");
+    static const std::regex kUnpaired(R"(^unpair: '(.*)' unpaired this PC)");
+    static const std::regex kUnpairDone(R"(^unpair: ([0-9A-F-]{19}) is no longer paired with this PC)");
 
     std::string s(line);
     while (!s.empty() && (s.back() == '\r' || s.back() == '\n')) s.pop_back();
@@ -201,6 +205,8 @@ Event parse_line(std::string_view line) {
     if (std::regex_search(msg, g, kPlace)) return PlaceSet{g[1], g[2]};
     if (msg.starts_with("identify: the other PC shows")) return IdentifyAsked{};
     if (std::regex_search(msg, g, kPairingCode)) return PairingCode{g[1], g[2], g[3]};
+    if (std::regex_search(msg, g, kUnpaired)) return Unpaired{g[1]};
+    if (std::regex_search(msg, g, kUnpairDone)) return UnpairDone{g[1]};
     if (msg.starts_with("pairing: ") && msg != "pairing: nothing to answer") {
         return PairingDone{msg.starts_with("pairing: paired with"), msg.substr(9)};
     }
@@ -248,6 +254,15 @@ fs::path data_dir(const std::vector<std::wstring>& app_args) {
         if (app_args[i] == L"--data-dir") return app_args[i + 1];
     }
     return identity::default_dir();
+}
+
+std::wstring seen_text(std::int64_t last_seen_ms, std::int64_t now_ms) {
+    if (last_seen_ms <= 0) return L"Not seen yet";
+    const std::int64_t minutes = std::max<std::int64_t>(0, now_ms - last_seen_ms) / 60'000;
+    if (minutes < 1) return L"Seen just now";
+    if (minutes < 60) return std::format(L"Seen {} min ago", minutes);
+    if (minutes < 48 * 60) return std::format(L"Seen {} h ago", minutes / 60);
+    return std::format(L"Seen {} days ago", minutes / (24 * 60));
 }
 
 std::optional<paired::Device> paired_as(const discovery::Host& host, const std::vector<paired::Device>& paired) {
@@ -339,6 +354,11 @@ private:
     void pick_device(std::optional<POINT> at = std::nullopt);
     std::vector<DevicePicker::Row> picker_rows();
     void refresh_picker();
+    // "Paired PCs…": the paired.json list, with Auto and Unpair. paired_window_ids_ match the rows.
+    void show_paired();
+    std::vector<PairedWindow::Row> paired_rows();
+    void refresh_paired();
+    void unpair(const paired::Device& device);
     bool auto_on(const discovery::Host& host) const;  // paired, with Auto on
     void toggle_auto(const discovery::Host& host);
     void adopt_old_auto();  // 1.1's Auto by name -> paired.json, once the target is paired
@@ -397,6 +417,8 @@ private:
     std::optional<Target> target_;
     std::vector<Device> devices_;            // UI thread's copy of the scan
     DevicePicker picker_;
+    PairedWindow paired_window_;
+    std::vector<tls::DeviceId> paired_window_ids_;
     PairingDialog pairing_dialog_;
     std::vector<discovery::Host> picker_hosts_;  // what the picker's rows stand for
     std::set<std::string> suppressed_;  // device IDs the user disconnected from: no auto-connect until they go away
@@ -584,6 +606,7 @@ void App::on_devices() {
         return std::none_of(devices_.begin(), devices_.end(), [&](const Device& d) { return d.host.device_id == id; });
     });
     refresh_picker();
+    refresh_paired();
     maybe_auto_connect();
 }
 
@@ -640,6 +663,7 @@ void App::toggle_auto(const discovery::Host& host) {
         return;
     }
     paired_devices_ = paired_.all();
+    refresh_paired();
     if (on) {
         suppressed_.erase(host.device_id);
         notify(L"Connect automatically: on", L"Sarke joins " + widen(known->name) + L" whenever it is on the network.",
@@ -726,6 +750,78 @@ void App::pick_device(std::optional<POINT> at) {
 
 void App::refresh_picker() {
     if (picker_.is_open()) picker_.update(picker_rows());
+}
+
+std::vector<PairedWindow::Row> App::paired_rows() {
+    paired_.reload();
+    paired_devices_ = paired_.all();
+    auto devices = paired_devices_;
+    std::sort(devices.begin(), devices.end(),
+              [](const paired::Device& a, const paired::Device& b) { return lower(a.name) < lower(b.name); });
+    std::vector<PairedWindow::Row> rows;
+    paired_window_ids_.clear();
+    const auto now = paired::now_ms();
+    for (const auto& d : devices) {
+        // Which PC the session is with: the client knows its target's ID; the host only the name it logged.
+        const bool connected =
+            link_ == Link::Linked && (role_ == Role::Client ? target_ && target_->device_id == tls::to_hex(d.id)
+                                                            : same_name(peer_name_, d.name));
+        rows.push_back({.name = widen(d.name),
+                        .fingerprint = widen(tls::short_id(d.id)),
+                        .seen = connected ? std::wstring(L"Connected") : seen_text(d.last_seen, now),
+                        .connected = connected,
+                        .auto_connect = d.auto_connect});
+        paired_window_ids_.push_back(d.id);
+    }
+    return rows;
+}
+
+void App::refresh_paired() {
+    if (paired_window_.is_open()) paired_window_.update(paired_rows());
+}
+
+void App::show_paired() {
+    paired_window_.show(paired_rows(), {.toggle_auto =
+                                            [this](std::size_t i) {
+                                                if (i >= paired_window_ids_.size()) return;
+                                                const auto id = paired_window_ids_[i];
+                                                const auto known = paired_.find(id);
+                                                if (!known) return;
+                                                toggle_auto({.name = known->name, .device_id = tls::to_hex(id)});
+                                                refresh_paired();
+                                                refresh_picker();
+                                            },
+                                        .unpair =
+                                            [this](std::size_t i) {
+                                                if (i >= paired_window_ids_.size()) return;
+                                                const auto known = paired_.find(paired_window_ids_[i]);
+                                                if (!known) return;
+                                                if (!confirm_unpair(paired_window_.hwnd(), widen(known->name))) return;
+                                                unpair(*known);
+                                                refresh_paired();
+                                                refresh_picker();
+                                            }});
+}
+
+void App::unpair(const paired::Device& device) {
+    const std::string id = tls::to_hex(device.id);
+    if (!paired_.remove(device.id)) {
+        paired_.reload();
+        if (paired_.find(device.id)) {
+            notify(L"Sarke can't save", L"Could not remove the PC from paired.json.", Toast::Kind::Lost);
+            return;
+        }
+    }
+    paired_devices_ = paired_.all();
+    log::info("launcher: unpaired {} ({})", device.name, tls::short_id(device.id));
+    // The app forgets it too and ends a session with it, telling the other PC first.
+    const bool sent = send_command("unpair " + id);
+    notify(L"Unpaired " + widen(device.name), L"It can't connect to this PC until you pair again.", Toast::Kind::Info);
+    if (role_ == Role::Client && target_ && target_->device_id == id) {
+        suppressed_.insert(id);
+        // No host left to connect to. With the app running, after it has told the other PC (UnpairDone).
+        if (!sent) switch_role(Role::Host);
+    }
 }
 
 // config.json client_side says where the client stands next to the host, so the same value means
@@ -941,8 +1037,23 @@ void App::handle(const Event& e) {
             } else if constexpr (std::is_same_v<T, PairingDone>) {
                 pairing_dialog_.close();
                 if (ev.paired) adopt_old_auto();
+                refresh_paired();
                 notify(ev.paired ? L"Paired" : L"Not paired", widen(ev.text),
                        ev.paired ? Toast::Kind::Connected : Toast::Kind::Info);
+            } else if constexpr (std::is_same_v<T, Unpaired>) {
+                // The other PC unpaired this one; the app has forgotten it too.
+                notify(widen(ev.name) + L" unpaired this PC", L"To connect again, pair again from the list of PCs.",
+                       Toast::Kind::Lost);
+                if (role_ == Role::Client) {
+                    if (target_) suppressed_.insert(target_->device_id);
+                    switch_role(Role::Host);
+                }
+                refresh_paired();
+                refresh_picker();
+            } else if constexpr (std::is_same_v<T, UnpairDone>) {
+                const auto target_id = target_ ? tls::from_hex(target_->device_id) : std::nullopt;
+                if (role_ == Role::Client && target_id && tls::short_id(*target_id) == ev.id) switch_role(Role::Host);
+                refresh_paired();
             } else if constexpr (std::is_same_v<T, Problem>) {
                 last_problem_ = widen(ev.text);
                 const auto now = std::chrono::steady_clock::now();
@@ -1113,6 +1224,7 @@ std::vector<TrayIcon::MenuItem> App::build_menu() {
     m.push_back({.id = kCmdShowLog, .text = L"Show log", .enabled = !log_path_.empty()});
     // Every PC runs as a host and lists the others; picking one makes this PC its client.
     m.push_back({.id = kCmdRoleClient, .text = L"Connect to another PC…"});
+    m.push_back({.id = kCmdPaired, .text = L"Paired PCs…"});
     if (role_ == Role::Client) {
         const std::wstring who = target_ ? widen(target_->name) : std::wstring(L"the other PC");
         m.push_back({.id = kCmdRoleHost, .text = L"Disconnect from " + who + L" (make this PC the host)"});
@@ -1169,6 +1281,7 @@ void App::on_command(UINT id) {
         break;
     case kCmdRoleHost: disconnect(); break;
     case kCmdRoleClient: pick_device(); break;
+    case kCmdPaired: show_paired(); break;
     case kCmdRestart:
         if (process_) {
             restart(L"");

@@ -18,6 +18,7 @@ namespace kvm {
 namespace {
 
 constexpr int kPairButton = 1001;
+constexpr int kUnpairButton = 1002;
 
 }  // namespace
 
@@ -66,6 +67,32 @@ void PairingDialog::close() {
     if (!hwnd_) return;
     closed_by_app_ = true;
     SendMessageW(hwnd_, TDM_CLICK_BUTTON, IDCANCEL, 0);
+}
+
+bool confirm_unpair(HWND owner, std::wstring_view peer_name) {
+    const std::wstring title = std::format(L"Sarke: unpair {}?", peer_name);
+    const std::wstring instruction = std::format(L"Unpair \"{}\"?", peer_name);
+    const std::wstring content = std::format(
+        L"Both PCs forget each other. If they are connected now, the connection ends.\n\n"
+        L"To use \"{}\" with this PC again, pair again: both PCs show a code to compare.",
+        peer_name);
+    const std::wstring unpair_label = L"Unpair\n" + std::wstring(peer_name) + L" can't connect until you pair again";
+    const TASKDIALOG_BUTTON buttons[] = {{kUnpairButton, unpair_label.c_str()}};
+
+    TASKDIALOGCONFIG config{};
+    config.cbSize = sizeof(config);
+    config.hwndParent = owner;
+    config.dwFlags = TDF_USE_COMMAND_LINKS | TDF_ALLOW_DIALOG_CANCELLATION | TDF_SIZE_TO_CONTENT;
+    config.dwCommonButtons = TDCBF_CANCEL_BUTTON;
+    config.pszWindowTitle = title.c_str();
+    config.pszMainIcon = TD_WARNING_ICON;
+    config.pszMainInstruction = instruction.c_str();
+    config.pszContent = content.c_str();
+    config.cButtons = static_cast<UINT>(std::size(buttons));
+    config.pButtons = buttons;
+    config.nDefaultButton = IDCANCEL;
+    int pressed = IDCANCEL;
+    return SUCCEEDED(TaskDialogIndirect(&config, &pressed, nullptr, nullptr)) && pressed == kUnpairButton;
 }
 
 HRESULT CALLBACK PairingDialog::callback(HWND hwnd, UINT msg, WPARAM, LPARAM, LONG_PTR ref) {

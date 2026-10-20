@@ -777,11 +777,32 @@ Attempts are rate-limited.
       - The picker was checked by screenshot (`ui_preview_picker`).
     - **Not run yet:** two PCs (R3, R13): the list, Pair… on a fresh PC, Auto after pairing.
 
-- [ ] **P1.9 "Paired devices" window and unpair** (M), branch `phase1/paired-ui`. Depends on P1.6.
+- [x] **P1.9 "Paired devices" window and unpair** (M), branch `phase1/paired-ui`. Depends on P1.6.
   - **Files:** new `client_b/paired_window.*` (`ui_draw`) and a tray entry.
   - Lists name, short fingerprint and last seen, with an auto-connect toggle and **Unpair**.
   - Unpair removes the key and drops the live session right away. The other side shows "<name> unpaired this PC".
   - **Tests:** unit for the store; loopback: unpair mid-session closes all three channels.
+  - **Result (2026-10-21):**
+    - **Tray "Paired PCs…"** ([client_b/paired_window.h](../client_b/paired_window.h)): a card like the device picker.
+      - Each row: name, short device ID, "Connected" / "Seen 5 min ago" / "Not seen yet", the Auto switch, and **Unpair**.
+      - Unpair asks first (`confirm_unpair`, a task dialog with Cancel as the default). The card stays open during the question.
+    - **Unpair:**
+      - the launcher removes the entry and sends `unpair <device id>` to the running app;
+      - the app's `CurrentPeer::unpair()` sends the new `unpaired` message to that PC, then closes the session; the host's session end closes video and files (P1.7).
+    - **The other PC:**
+      - forgets this one (`forget_unpaired_peer`) and logs "unpair: '*Name*' unpaired this PC" (a notification);
+      - its client stops offering to pair by itself;
+      - its launcher goes back to being the host.
+    - **A client unpairing its host** switches to host only after its app logged the unpair (`UnpairDone`), so the other PC is told first.
+    - **Tests:**
+      - `loopback_test` (55 checks):
+        - 4b: "unpair <id>" on the host's stdin mid-session; the peer gets `unpaired`; control, video and files all close; its key is refused after;
+        - 5b: the host unpairs the real kvm_client; it is told, forgets the host, and doesn't connect again.
+      - `protocol_test`: `unpaired`.
+      - `launcher_test`: the two unpair log lines and `seen_text`.
+      - The store's cross-process behaviour was covered in P1.8.
+      - The card and the dialog were checked by screenshot (`ui_preview_paired`; the dialog by clicking Unpair).
+    - **Not run yet:** two PCs (R17's unpair row).
 
 - [ ] **P1.10 Clear version-mismatch messages** (S), branch `phase1/version-ux`.
   - v2 is detected as described in the design. Discovery's `protocol_version` is shown in the tray list as "needs update".

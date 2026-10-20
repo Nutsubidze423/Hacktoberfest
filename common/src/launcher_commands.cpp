@@ -57,7 +57,7 @@ void LauncherCommands::run() {
 }
 
 void handle_launcher_command(const std::string& line, layout_sync::Session& places, CurrentPeer& peer,
-                             pairing::Prompt& prompt) {
+                             pairing::Prompt& prompt, paired::Store& paired) {
     if (line.starts_with("layout ")) {
         const auto side = display::parse_side(line.substr(7));
         if (!side) {
@@ -73,9 +73,24 @@ void handle_launcher_command(const std::string& line, layout_sync::Session& plac
         if (!peer.send(proto::Identify{})) log::info("identify: no PC connected");
     } else if (line == "pair yes" || line == "pair no") {
         if (!prompt.answer(line == "pair yes")) log::info("pairing: nothing to answer");
+    } else if (line.starts_with("unpair ")) {
+        const auto id = tls::from_hex(line.substr(7));
+        if (!id) {
+            log::warn("launcher: \"{}\" - expected a device ID (64 hex)", line);
+            return;
+        }
+        paired.remove(*id);  // the launcher may have removed it already
+        const bool live = peer.unpair(*id);
+        log::info("unpair: {} is no longer paired with this PC{}", tls::short_id(*id),
+                  live ? " - its session is closed" : "");
     } else {
         log::warn("launcher: unknown command \"{}\"", line);
     }
+}
+
+void forget_unpaired_peer(paired::Store& paired, const tls::DeviceId& id, std::string_view name) {
+    paired.remove(id);
+    log::warn("unpair: '{}' unpaired this PC ({}). Pair again to connect.", name, tls::short_id(id));
 }
 
 }  // namespace kvm

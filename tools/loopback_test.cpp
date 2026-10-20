@@ -10,7 +10,10 @@
 //   4. a paired peer speaking this version gets the host's hello back, with its device ID and the
 //      session's side-channel token: with it the peer opens video and files; a wrong token or another
 //      PC's key is refused there and the live channel stays; the session's end closes its channels;
+//   4b. "unpair <id>" on the host's stdin (as the launcher sends it) in the middle of that peer's
+//      session: the peer is told (unpaired), all three channels close, and its key is refused after;
 //   5. kvm_client, paired with the host, connects (control, video, files) and both sides log rtt;
+//   5b. the host unpairs kvm_client: the client is told, forgets the host and doesn't connect again;
 //   6. Ctrl+Break, the way the launcher stops them, ends both normally.
 //
 //   loopback_test.exe            (exit code 0 = all passed; ctest label "loopback")
@@ -216,16 +219,21 @@ bool closed_after_plain_bytes(std::uint16_t port, std::string_view bytes, std::c
     return closed;
 }
 
-// The first hello in `conn`'s messages within `timeout` (other messages are skipped).
-std::optional<proto::Hello> wait_for_hello(kvm::net::Connection& conn, std::chrono::milliseconds timeout) {
+// The first M in `conn`'s messages within `timeout` (other messages are skipped).
+template <class M>
+std::optional<M> wait_for(kvm::net::Connection& conn, std::chrono::milliseconds timeout) {
     const auto end = std::chrono::steady_clock::now() + timeout;
     while (std::chrono::steady_clock::now() < end) {
         const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(end - std::chrono::steady_clock::now());
         auto msg = conn.incoming().pop_for(left);
         if (!msg) return std::nullopt;
-        if (const auto* hello = std::get_if<proto::Hello>(&*msg)) return *hello;
+        if (const auto* m = std::get_if<M>(&*msg)) return *m;
     }
     return std::nullopt;
+}
+
+std::optional<proto::Hello> wait_for_hello(kvm::net::Connection& conn, std::chrono::milliseconds timeout) {
+    return wait_for<proto::Hello>(conn, timeout);
 }
 
 }  // namespace
@@ -388,6 +396,53 @@ int wmain(int argc, wchar_t** argv) {
             }
         }
 
+        kvm::log::info("4b) unpairing a PC in the middle of its session");
+        {
+            auto conn = connect_as(peer);
+            if (conn) conn->send(proto::Hello{.hostname = "loopback-peer"});
+            const auto hello = conn ? wait_for_hello(*conn, 5s) : std::nullopt;
+            check(hello.has_value(), "the paired peer connects again");
+            const std::string token = hello ? hello->session_token : std::string();
+            const auto videos = count(host.log(), "video channel from");
+            const auto file_channels = count(host.log(), "file channel from");
+            auto video_ch = kvm::net::connect_video("127.0.0.1", video, peer, *host_id, token, 3s);
+            auto files_ch = kvm::net::connect_side_channel("127.0.0.1", files, peer, *host_id, token, 3s);
+            check(video_ch && files_ch &&
+                      wait_until(
+                          [&] {
+                              return count(host.log(), "video channel from") > videos &&
+                                     count(host.log(), "file channel from") > file_channels;
+                          },
+                          3s),
+                  "with its video and file channels");
+            std::atomic<bool> video_closed = false, files_closed = false;
+            std::thread watch_video([&] {
+                while (video_ch && video_ch->recv_frame()) {}
+                video_closed = true;
+            });
+            std::thread watch_files([&] {
+                char byte = 0;
+                while (files_ch && files_ch->stream->recv_exact(&byte, 1) == 0) {}
+                files_closed = true;
+            });
+            check(host.send_line("unpair " + kvm::tls::to_hex(peer.id())), "the launcher sends \"unpair <its ID>\"");
+            check(conn && wait_for<proto::Unpaired>(*conn, 5s).has_value(), "the peer is told: unpaired");
+            check(conn && wait_until([&] { return !conn->is_open(); }, 5s), "its control channel closes");
+            check(wait_until([&] { return video_closed && files_closed; }, 5s), "and its video and file channels");
+            check(host.log_has("is no longer paired with this PC - its session is closed"), "the host logs it");
+            if (video_ch) video_ch->close();
+            if (files_ch) files_ch->stream->abort();
+            watch_video.join();
+            watch_files.join();
+
+            const auto unknown = count(host.log(), "isn't paired with this PC");
+            auto retry = connect_as(peer);
+            if (retry) retry->send(proto::Hello{.hostname = "loopback-peer"});
+            check(retry && wait_until([&] { return !retry->is_open(); }, 5s) &&
+                      count(host.log(), "isn't paired with this PC") > unknown,
+                  "after that its key is refused like any unknown key");
+        }
+
         kvm::log::info("5) kvm_client, paired with the host");
         {
             Program client(job, client_exe,
@@ -403,6 +458,17 @@ int wmain(int argc, wchar_t** argv) {
             // Both sides log the link every 5 s once the first ping/pong is through.
             check(wait_until([&] { return client.log_has("link: rtt") && host.log_has("link: rtt"); }, 15s),
                   "both sides log the link (rtt)");
+
+            kvm::log::info("5b) the host unpairs kvm_client");
+            check(host.send_line("unpair " + kvm::tls::to_hex(*client_id)), "\"unpair <the client's ID>\" to the host");
+            check(wait_until([&] { return client.log_has("unpaired this PC"); }, 5s), "the client is told and says so");
+            check(wait_until([&] { return client.log_has("reconnecting in"); }, 5s), "its session ends");
+            check(
+                read_file(dir / L"client-data" / L"paired.json").find(kvm::tls::to_hex(*host_id)) == std::string::npos,
+                "the client forgot the host too");
+            check(wait_until([&] { return client.log_has("which isn't paired with this PC"); }, 5s) &&
+                      count(client.log(), "connected to host") == 1,
+                  "so its next try stops at the host's key: it doesn't connect again");
 
             kvm::log::info("6) Ctrl+Break, the way the launcher stops them");
             const auto client_code = client.stop(10s);

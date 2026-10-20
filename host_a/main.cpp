@@ -237,7 +237,8 @@ struct SideChannels {
 
 void run_session(kvm::net::Connection& conn, kvm::KvmLink* kvm, kvm::clip::ClipboardSync* clip, VideoSlot& video,
                  const Options& opt, kvm::display::Side client_side, kvm::WindowLink& windows,
-                 kvm::layout_sync::Session& places, kvm::CurrentPeer& current_peer, const SideChannels& side) {
+                 kvm::layout_sync::Session& places, kvm::CurrentPeer& current_peer, const SideChannels& side,
+                 kvm::paired::Store& paired) {
     const auto hello = handshake(conn);
     if (!hello) {
         return;
@@ -252,7 +253,9 @@ void run_session(kvm::net::Connection& conn, kvm::KvmLink* kvm, kvm::clip::Clipb
     conn.send(reply);
     // Where this client stands, kept per PC and the same on both: before KVM and desk mode use it.
     conn.send(places.begin(hello->hostname));
-    current_peer.set([&conn](const proto::Message& m) { return conn.send_json(proto::encode(m)); });
+    // "unpair" from the launcher ends this session if it is this PC's.
+    current_peer.set([&conn](const proto::Message& m) { return conn.send_json(proto::encode(m)); }, side.peer,
+                     [&conn] { conn.close(); });
     struct PeerReset {
         kvm::layout_sync::Session& places;
         kvm::CurrentPeer& peer;
@@ -301,6 +304,9 @@ void run_session(kvm::net::Connection& conn, kvm::KvmLink* kvm, kvm::clip::Clipb
                 places.on_message(*l);  // the client's view of where it stands, if newer
             } else if (std::holds_alternative<proto::Identify>(*msg)) {
                 kvm::log::info("identify: the other PC shows its screen numbers - showing this PC's too");
+            } else if (std::holds_alternative<proto::Unpaired>(*msg)) {
+                kvm::forget_unpaired_peer(paired, side.peer, hello->hostname);
+                break;  // the client closes the session
             } else {
                 kvm::log::info("from client: {}", proto::encode(*msg).dump());
             }
@@ -443,8 +449,9 @@ int wmain(int argc, wchar_t** argv) {
         struct PromptReset {
             ~PromptReset() { g_pairing_prompt = nullptr; }
         } prompt_reset;
-        kvm::LauncherCommands commands(
-            [&](const std::string& line) { kvm::handle_launcher_command(line, places, current_peer, pairing_prompt); });
+        kvm::LauncherCommands commands([&](const std::string& line) {
+            kvm::handle_launcher_command(line, places, current_peer, pairing_prompt, *trust->paired);
+        });
         VideoSlot video;
         kvm::net::SessionKey session;  // the live session: side channels must present its token
         std::jthread video_acceptor([&] { accept_video_loop(video_server, video, windows, trust->me, session); });
@@ -526,7 +533,7 @@ int wmain(int argc, wchar_t** argv) {
             if (discovery) discovery->set_busy(true);  // other PCs list this one as taken meanwhile
             run_session(*conn, kvm_link ? &*kvm_link : nullptr, clip_on ? &clip : nullptr, video, opt,
                         side.value_or(kvm::display::Side::Right), windows, places, current_peer,
-                        {session, peer_id, cfg.video_port, cfg.file_port});
+                        {session, peer_id, cfg.video_port, cfg.file_port}, *trust->paired);
             // The session is over: its side channels go with it, and no new one is admitted (S4, S8).
             session.close();
             windows.set_video(nullptr);

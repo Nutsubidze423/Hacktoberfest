@@ -58,6 +58,7 @@ int main() {
     round_trip(proto::PairRequest{.name = "laptop-b"});
     round_trip(proto::PairConfirm{.ok = true});
     round_trip(proto::PairResult{.ok = false, .reason = "cancelled"});
+    round_trip(proto::Unpaired{});
 
     check(!proto::decode(nlohmann::json::parse(R"({"type":"no_such_type"})")), "unknown type -> nullopt");
     check(!proto::decode(nlohmann::json::parse(R"({"dx":1})")), "missing type -> nullopt");
