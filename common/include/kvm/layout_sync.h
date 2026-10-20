@@ -51,10 +51,9 @@ std::int64_t now_ms();
 // The place of the PC this one is connected to, for one app: applies it, saves it and says what to
 // send. Thread-safe (the session thread and the launcher's command thread).
 //
-//   Session places(config_file, /*this_is_host=*/true, [&](Side s) { kvm.set_peer_side(s); windows.set_peer_side(s); });
-//   conn.send(places.begin(hello.hostname));          // on connect
-//   on proto::Layout l: places.on_message(l);         // the other PC's view
-//   launcher "layout right": if (auto m = places.set_by_user(Side::Right)) conn.send(*m);
+//   Session places(config_file, /*this_is_host=*/true, [&](Side s) { kvm.set_peer_side(s); windows.set_peer_side(s);
+//   }); conn.send(places.begin(hello.hostname));          // on connect on proto::Layout l: places.on_message(l); //
+//   the other PC's view launcher "layout right": if (auto m = places.set_by_user(Side::Right)) conn.send(*m);
 //   places.end();
 class Session {
 public:

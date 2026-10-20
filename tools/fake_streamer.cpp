@@ -50,7 +50,8 @@ std::string utf8(const std::wstring& s) {
 
 bool is_jpeg(const fs::path& p) {
     std::wstring ext = p.extension().wstring();
-    std::transform(ext.begin(), ext.end(), ext.begin(), [](wchar_t c) { return static_cast<wchar_t>(std::towlower(c)); });
+    std::transform(ext.begin(), ext.end(), ext.begin(),
+                   [](wchar_t c) { return static_cast<wchar_t>(std::towlower(c)); });
     return ext == L".jpg" || ext == L".jpeg";
 }
 

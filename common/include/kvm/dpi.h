@@ -44,10 +44,10 @@ enum class Side { Left, Right, Top, Bottom };
 
 constexpr Side opposite(Side s) {
     switch (s) {
-        case Side::Left: return Side::Right;
-        case Side::Right: return Side::Left;
-        case Side::Top: return Side::Bottom;
-        default: return Side::Top;
+    case Side::Left: return Side::Right;
+    case Side::Right: return Side::Left;
+    case Side::Top: return Side::Bottom;
+    default: return Side::Top;
     }
 }
 
@@ -114,10 +114,10 @@ Point point_on_outer_edge(const std::vector<Monitor>& mons, Side side, double t)
 // p moved `px` pixels away from the `side` edge, towards the desktop interior.
 constexpr Point inward(Point p, Side side, int px) {
     switch (side) {
-        case Side::Left: return {p.x + px, p.y};
-        case Side::Right: return {p.x - px, p.y};
-        case Side::Top: return {p.x, p.y + px};
-        default: return {p.x, p.y - px};
+    case Side::Left: return {p.x + px, p.y};
+    case Side::Right: return {p.x - px, p.y};
+    case Side::Top: return {p.x, p.y + px};
+    default: return {p.x, p.y - px};
     }
 }
 

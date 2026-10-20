@@ -53,9 +53,9 @@ void VideoSender::stop() {
 void VideoSender::run(std::stop_token stop) {
     JpegEncoder jpeg(options_.jpeg_quality);
     std::vector<std::uint8_t> encoded;
-    const auto min_interval = options_.max_fps > 0
-                                  ? std::chrono::duration_cast<Clock::duration>(std::chrono::seconds(1)) / options_.max_fps
-                                  : Clock::duration::zero();
+    const auto min_interval =
+        options_.max_fps > 0 ? std::chrono::duration_cast<Clock::duration>(std::chrono::seconds(1)) / options_.max_fps
+                             : Clock::duration::zero();
     std::uint32_t seq = 0;
     auto next_send = Clock::now();
     std::vector<std::uint8_t> last_payload;  // the last frame sent, repeated while the window is still

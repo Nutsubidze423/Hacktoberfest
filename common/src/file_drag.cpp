@@ -155,9 +155,9 @@ FileDragSource::FileDragSource() {
         wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
         wc.lpszClassName = kClassName;
         RegisterClassExW(&wc);  // fails harmlessly if registered already
-        const HWND hwnd = CreateWindowExW(WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_LAYERED,
-                                          kClassName, L"", WS_POPUP, 0, 0, kSize, kSize, nullptr, nullptr,
-                                          GetModuleHandleW(nullptr), this);
+        const HWND hwnd =
+            CreateWindowExW(WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_LAYERED, kClassName, L"",
+                            WS_POPUP, 0, 0, kSize, kSize, nullptr, nullptr, GetModuleHandleW(nullptr), this);
         if (!hwnd) {
             log::error("file_drag: CreateWindowEx failed ({})", GetLastError());
             OleUninitialize();
@@ -261,8 +261,8 @@ void FileDragSource::on_button_down(HWND hwnd) {
         bool shown = false;
         if (picture) {
             if (HBITMAP bitmap = make_bitmap(*picture)) {
-                SHDRAGIMAGE image{{picture->width, picture->height}, {picture->cursor_x, picture->cursor_y}, bitmap,
-                                  CLR_NONE};
+                SHDRAGIMAGE image{
+                    {picture->width, picture->height}, {picture->cursor_x, picture->cursor_y}, bitmap, CLR_NONE};
                 shown = SUCCEEDED(helper->InitializeFromBitmap(&image, data));  // the helper owns it now
                 if (!shown) DeleteObject(bitmap);
             }
@@ -329,37 +329,31 @@ void FileDragSource::finish(DWORD effect) {
 LRESULT CALLBACK FileDragSource::wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     auto* self = reinterpret_cast<FileDragSource*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
     switch (msg) {
-        case WM_NCCREATE:
-            SetWindowLongPtrW(hwnd, GWLP_USERDATA,
-                              reinterpret_cast<LONG_PTR>(reinterpret_cast<CREATESTRUCTW*>(lp)->lpCreateParams));
-            break;
-        case kStartMessage:
-            if (self) self->on_start(hwnd);
-            return 0;
-        case WM_LBUTTONDOWN:
-            if (self && self->armed_) self->on_button_down(hwnd);
-            return 0;
-        case WM_TIMER:
-            if (self && wp == kArmTimer && self->armed_) {
+    case WM_NCCREATE:
+        SetWindowLongPtrW(hwnd, GWLP_USERDATA,
+                          reinterpret_cast<LONG_PTR>(reinterpret_cast<CREATESTRUCTW*>(lp)->lpCreateParams));
+        break;
+    case kStartMessage:
+        if (self) self->on_start(hwnd);
+        return 0;
+    case WM_LBUTTONDOWN:
+        if (self && self->armed_) self->on_button_down(hwnd);
+        return 0;
+    case WM_TIMER:
+        if (self && wp == kArmTimer && self->armed_) {
                 // Our press never reached the window (something else was under the cursor).
-                self->armed_ = false;
-                KillTimer(hwnd, kArmTimer);
-                ShowWindow(hwnd, SW_HIDE);
-                input::send_mouse_button(input::MouseButton::Left, false);
-                log::warn("file_drag: the drag could not start here");
-                self->finish(DROPEFFECT_NONE);
-            }
-            return 0;
-        case WM_MOUSEACTIVATE:
-            return MA_NOACTIVATE;
-        case WM_CLOSE:
-            DestroyWindow(hwnd);
-            return 0;
-        case WM_DESTROY:
-            PostQuitMessage(0);
-            return 0;
-        default:
-            break;
+            self->armed_ = false;
+            KillTimer(hwnd, kArmTimer);
+            ShowWindow(hwnd, SW_HIDE);
+            input::send_mouse_button(input::MouseButton::Left, false);
+            log::warn("file_drag: the drag could not start here");
+            self->finish(DROPEFFECT_NONE);
+        }
+        return 0;
+    case WM_MOUSEACTIVATE: return MA_NOACTIVATE;
+    case WM_CLOSE: DestroyWindow(hwnd); return 0;
+    case WM_DESTROY: PostQuitMessage(0); return 0;
+    default: break;
     }
     return DefWindowProcW(hwnd, msg, wp, lp);
 }

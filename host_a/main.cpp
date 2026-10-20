@@ -136,9 +136,9 @@ void send_test_video(std::stop_token stop, const VideoSlot& slot, const Options&
     auto next = std::chrono::steady_clock::now();
     while (!stop.stop_requested()) {
         if (const auto channel = slot.get(); channel && channel->is_open()) {
-            channel->send_frame({.seq = seq++, .t_capture_us = kvm::steady_now_us(), .width = 1920, .height = 1080,
-                                 .codec = "test"},
-                                payload);
+            channel->send_frame(
+                {.seq = seq++, .t_capture_us = kvm::steady_now_us(), .width = 1920, .height = 1080, .codec = "test"},
+                payload);
         }
         next += period;
         const auto now = std::chrono::steady_clock::now();
@@ -329,8 +329,9 @@ int wmain(int argc, wchar_t** argv) {
         // KVM: hooks run for the whole process; sessions attach/detach the client.
         const auto side = kvm::display::parse_side(cfg.client_side);
         if (opt.kvm_enabled && !side) {
-            kvm::log::error("config: client_side must be \"left\", \"right\", \"top\" or \"bottom\", got \"{}\" - KVM disabled",
-                            cfg.client_side);
+            kvm::log::error(
+                "config: client_side must be \"left\", \"right\", \"top\" or \"bottom\", got \"{}\" - KVM disabled",
+                cfg.client_side);
             opt.kvm_enabled = false;
         }
         // Desk mode (Temo): A's virtual display = B's screen; the KVM hooks and WindowLink share it.

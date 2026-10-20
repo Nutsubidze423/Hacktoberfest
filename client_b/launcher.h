@@ -50,7 +50,8 @@ struct PlaceSet {  // where the connected PC stands was applied ("layout: 'name'
     std::string side;
 };
 struct IdentifyAsked {};  // the other PC pressed Identify: show this PC's screen numbers
-using Event = std::variant<std::monostate, Connected, LinkUp, SessionEnded, Searching, Rtt, Problem, PlaceSet, IdentifyAsked>;
+using Event =
+    std::variant<std::monostate, Connected, LinkUp, SessionEnded, Searching, Rtt, Problem, PlaceSet, IdentifyAsked>;
 
 Event parse_line(std::string_view line);
 

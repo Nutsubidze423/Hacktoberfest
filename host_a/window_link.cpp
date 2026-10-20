@@ -69,11 +69,16 @@ const char* cursor_shape(HCURSOR cursor) {
         HCURSOR handle;
         const char* name;
     } kShapes[] = {
-        {LoadCursorW(nullptr, IDC_IBEAM), "ibeam"},       {LoadCursorW(nullptr, IDC_HAND), "hand"},
-        {LoadCursorW(nullptr, IDC_WAIT), "wait"},         {LoadCursorW(nullptr, IDC_APPSTARTING), "appstarting"},
-        {LoadCursorW(nullptr, IDC_CROSS), "cross"},       {LoadCursorW(nullptr, IDC_SIZEWE), "sizewe"},
-        {LoadCursorW(nullptr, IDC_SIZENS), "sizens"},     {LoadCursorW(nullptr, IDC_SIZENWSE), "sizenwse"},
-        {LoadCursorW(nullptr, IDC_SIZENESW), "sizenesw"}, {LoadCursorW(nullptr, IDC_SIZEALL), "sizeall"},
+        {LoadCursorW(nullptr, IDC_IBEAM), "ibeam"},
+        {LoadCursorW(nullptr, IDC_HAND), "hand"},
+        {LoadCursorW(nullptr, IDC_WAIT), "wait"},
+        {LoadCursorW(nullptr, IDC_APPSTARTING), "appstarting"},
+        {LoadCursorW(nullptr, IDC_CROSS), "cross"},
+        {LoadCursorW(nullptr, IDC_SIZEWE), "sizewe"},
+        {LoadCursorW(nullptr, IDC_SIZENS), "sizens"},
+        {LoadCursorW(nullptr, IDC_SIZENWSE), "sizenwse"},
+        {LoadCursorW(nullptr, IDC_SIZENESW), "sizenesw"},
+        {LoadCursorW(nullptr, IDC_SIZEALL), "sizeall"},
         {LoadCursorW(nullptr, IDC_NO), "no"},
     };
     for (const auto& s : kShapes) {
@@ -194,7 +199,9 @@ void WindowLink::set_peer(const proto::Hello& hello) {
     set_peer_screen(hello.screen_w, hello.screen_h);
     if (!options_.desk) return;
     if (!hello.desk) {
-        log::info("desk: the other PC doesn't show desk mode (--no-desk or an older build); Ctrl+Alt+Shift+W uses the viewer");
+        log::info(
+            "desk: the other PC doesn't show desk mode (--no-desk or an older build); Ctrl+Alt+Shift+W uses the "
+            "viewer");
         return;
     }
     if (hello.screen_w > 0 && hello.screen_h > 0) {
@@ -238,39 +245,39 @@ bool WindowLink::handle(const proto::Message& msg) {
         if (desk_input_) return desk_input_->handle(msg);
         return false;
     };
-    return std::visit(
-        proto::Overloaded{
-            [this](const proto::StreamStart& s) {
-                if (viewer_) viewer_->start_stream(s);  // the other PC's window, shown here
-                return true;
-            },
-            [this](const proto::StreamStop& s) {
-                if (share_ && s.hwnd == reinterpret_cast<std::uint64_t>(share_->window())) {
-                    log::info("windows: the other PC gives the window back");
-                    stop_share(/*tell_peer=*/false);
-                } else if (viewer_) {
-                    viewer_->stop_stream();
-                }
-                return true;
-            },
-            [this](const proto::DeskCursor& c) {
-                if (desk_view_) desk_view_->set_cursor_shape(c.shape);
-                return true;
-            },
-            [this](const proto::DeskLayout& l) {
-                if (desk_view_) desk_view_->set_layout(l);  // the other PC's windows: where, in what order
-                return true;
-            },
-            [&](const proto::RemoteMouseMove&) {
-                remote_input();
-                return true;
-            },
-            [&](const proto::MouseButtonEvent&) { return remote_input(); },
-            [&](const proto::MouseWheel&) { return remote_input(); },
-            [&](const proto::Key&) { return remote_input(); },
-            [](const auto&) { return false; },
-        },
-        msg);
+    return std::visit(proto::Overloaded{
+                          [this](const proto::StreamStart& s) {
+                              if (viewer_) viewer_->start_stream(s);  // the other PC's window, shown here
+                              return true;
+                          },
+                          [this](const proto::StreamStop& s) {
+                              if (share_ && s.hwnd == reinterpret_cast<std::uint64_t>(share_->window())) {
+                                  log::info("windows: the other PC gives the window back");
+                                  stop_share(/*tell_peer=*/false);
+                              } else if (viewer_) {
+                                  viewer_->stop_stream();
+                              }
+                              return true;
+                          },
+                          [this](const proto::DeskCursor& c) {
+                              if (desk_view_) desk_view_->set_cursor_shape(c.shape);
+                              return true;
+                          },
+                          [this](const proto::DeskLayout& l) {
+                              if (desk_view_)
+                                  desk_view_->set_layout(l);  // the other PC's windows: where, in what order
+                              return true;
+                          },
+                          [&](const proto::RemoteMouseMove&) {
+                              remote_input();
+                              return true;
+                          },
+                          [&](const proto::MouseButtonEvent&) { return remote_input(); },
+                          [&](const proto::MouseWheel&) { return remote_input(); },
+                          [&](const proto::Key&) { return remote_input(); },
+                          [](const auto&) { return false; },
+                      },
+                      msg);
 }
 
 void WindowLink::toggle() {
@@ -303,7 +310,8 @@ void WindowLink::toggle() {
     // without one they are dropped and the share keeps running.
     try {
         share_ = WindowShare::start(
-            foreground, [this](const proto::FrameHeader& h, std::span<const std::uint8_t> p) { return send_frame(h, p); },
+            foreground,
+            [this](const proto::FrameHeader& h, std::span<const std::uint8_t> p) { return send_frame(h, p); },
             {.width = peer_w_,
              .height = peer_h_,
              .hz = 60,
@@ -320,8 +328,8 @@ void WindowLink::toggle() {
                             .title = title,
                             .width = share_->width(),
                             .height = share_->height()});
-    log::info("windows: \"{}\" is on the other PC now ({}x{}); Ctrl+Alt+Shift+W brings it back", title,
-              share_->width(), share_->height());
+    log::info("windows: \"{}\" is on the other PC now ({}x{}); Ctrl+Alt+Shift+W brings it back", title, share_->width(),
+              share_->height());
 }
 
 // Desk mode: the window in front goes onto the other PC's screen, maximized, or comes back.
@@ -351,22 +359,22 @@ void WindowLink::toggle_desk(HWND window) {
         GetWindowRect(window, &wr);
         const int w = std::min<int>(wr.right - wr.left, primary.width());
         const int h = std::min<int>(wr.bottom - wr.top, primary.height());
-        SetWindowPos(window, nullptr, primary.left + (primary.width() - w) / 2, primary.top + (primary.height() - h) / 2, w,
-                     h, SWP_NOZORDER);
+        SetWindowPos(window, nullptr, primary.left + (primary.width() - w) / 2,
+                     primary.top + (primary.height() - h) / 2, w, h, SWP_NOZORDER);
         log::info("desk: \"{}\" is back here", title);
         return;
     }
     auto mover = std::make_unique<WindowMover>();
     const RECT target{vdd.left, vdd.top, vdd.right, vdd.bottom};
     switch (mover->send(window, target)) {
-        case WindowMover::Result::Ok:
-            parked_[window] = std::move(mover);
-            log::info("desk: \"{}\" is on the other PC's screen; Ctrl+Alt+Shift+W brings it back", title);
-            break;
-        case WindowMover::Result::Elevated:
-            log::warn("desk: \"{}\" runs as administrator; run this app as administrator to move it", title);
-            break;
-        default: log::warn("desk: \"{}\" could not be moved", title); break;
+    case WindowMover::Result::Ok:
+        parked_[window] = std::move(mover);
+        log::info("desk: \"{}\" is on the other PC's screen; Ctrl+Alt+Shift+W brings it back", title);
+        break;
+    case WindowMover::Result::Elevated:
+        log::warn("desk: \"{}\" runs as administrator; run this app as administrator to move it", title);
+        break;
+    default: log::warn("desk: \"{}\" could not be moved", title); break;
     }
 }
 
@@ -377,7 +385,8 @@ void WindowLink::desk_main(std::stop_token stop) {
     if (!options_.own_vdd) {
         log::info("desk: --desk-no-vdd - this PC only shows the other PC's windows");
     } else if (!vdd) {
-        log::info("desk: no Virtual Display Driver here - this PC shows the other PC's windows, but can't send its own");
+        log::info(
+            "desk: no Virtual Display Driver here - this PC shows the other PC's windows, but can't send its own");
     } else {
         device = to_utf8(vdd->device());
         region.set_vdd({.device = device});  // the hooks know which monitor is ours from now on
@@ -422,7 +431,8 @@ void WindowLink::desk_main(std::stop_token stop) {
     const auto make_share = [&](const VirtualDisplay::MonitorRect& r) {
         try {
             share = std::make_unique<DeskShare>(
-                r, region, [this](const proto::FrameHeader& hdr, std::span<const std::uint8_t> p) { return send_frame(hdr, p); },
+                r, region,
+                [this](const proto::FrameHeader& hdr, std::span<const std::uint8_t> p) { return send_frame(hdr, p); },
                 [this](const proto::DeskLayout& layout) { send(layout); },
                 DeskShare::Options{.jpeg_quality = std::max(options_.jpeg_quality, 80), .max_fps = options_.max_fps});
             return true;
@@ -456,8 +466,7 @@ void WindowLink::desk_main(std::stop_token stop) {
         go_live(false);
         share.reset();
         const auto side = peer_side_.load();
-        const bool ok = vdd->attached() ? vdd->match_peer(w, h, side)
-                                        : vdd->attach(w, h, 60, side);
+        const bool ok = vdd->attached() ? vdd->match_peer(w, h, side) : vdd->attach(w, h, 60, side);
         const auto r = vdd->rect();
         if (!ok || !r) {
             log::error("desk: the virtual display could not be attached - Ctrl+Alt+Shift+W uses the viewer");
@@ -477,34 +486,35 @@ void WindowLink::desk_main(std::stop_token stop) {
         }
         size = want;
         go_live(true);
-        log::info("desk: on - the other PC's screen ({}x{}) is on the {}: drag windows over the edge",
-                  vdd_rect.width(), vdd_rect.height(), display::to_string(side));
+        log::info("desk: on - the other PC's screen ({}x{}) is on the {}: drag windows over the edge", vdd_rect.width(),
+                  vdd_rect.height(), display::to_string(side));
     };
 
     while (!stop.stop_requested()) {
         if (auto cmd = desk_commands_.pop_for(kDeskPoll)) {
             switch (cmd->kind) {
-                case DeskCommand::Start: start(cmd->width, cmd->height, cmd->scale); break;
-                case DeskCommand::Side:
+            case DeskCommand::Start: start(cmd->width, cmd->height, cmd->scale); break;
+            case DeskCommand::Side:
                     // The other PC stands elsewhere now: move the VDD there. The recheck below sees it
                     // moved and shares it anew from its new place.
-                    if (share && vdd && vdd->attached()) {
-                        const auto side = peer_side_.load();
-                        if (vdd->place(side)) log::info("desk: the other PC's screen moved to the {}", display::to_string(side));
-                        next_recheck = Clock::now();
-                    }
-                    break;
-                case DeskCommand::Stop:
-                    if (share) {
-                        go_live(false);  // the cursor can't go there meanwhile; windows stay put
-                        stop_at = Clock::now() + kDeskGrace;
-                    }
-                    break;
-                case DeskCommand::Disable:
-                    disabled = true;
-                    finish();
-                    break;
-                case DeskCommand::Exit: finish(); return;
+                if (share && vdd && vdd->attached()) {
+                    const auto side = peer_side_.load();
+                    if (vdd->place(side))
+                        log::info("desk: the other PC's screen moved to the {}", display::to_string(side));
+                    next_recheck = Clock::now();
+                }
+                break;
+            case DeskCommand::Stop:
+                if (share) {
+                    go_live(false);  // the cursor can't go there meanwhile; windows stay put
+                    stop_at = Clock::now() + kDeskGrace;
+                }
+                break;
+            case DeskCommand::Disable:
+                disabled = true;
+                finish();
+                break;
+            case DeskCommand::Exit: finish(); return;
             }
         }
         const auto now = Clock::now();
@@ -526,7 +536,8 @@ void WindowLink::desk_main(std::stop_token stop) {
         // The cursor shape over our windows on the other PC's screen (I-beam, hand, resize arrows...).
         if (share && desk_live_) {
             CURSORINFO ci{sizeof(ci)};
-            if (GetCursorInfo(&ci) && (ci.flags & CURSOR_SHOWING) && vdd_rect.contains({ci.ptScreenPos.x, ci.ptScreenPos.y})) {
+            if (GetCursorInfo(&ci) && (ci.flags & CURSOR_SHOWING) &&
+                vdd_rect.contains({ci.ptScreenPos.x, ci.ptScreenPos.y})) {
                 const std::string shape = cursor_shape(ci.hCursor);
                 if (shape != last_shape && send(proto::DeskCursor{.shape = shape})) last_shape = shape;
             }

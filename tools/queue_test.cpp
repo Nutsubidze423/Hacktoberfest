@@ -111,7 +111,8 @@ void test_queue_threads() {
     }
     q.close();
     consumer.join();
-    check(count == kProducers * kPerProducer && ordered, "queue: 4 producers x 20000, none lost, per-producer order kept");
+    check(count == kProducers * kPerProducer && ordered,
+          "queue: 4 producers x 20000, none lost, per-producer order kept");
 }
 
 void test_slot() {

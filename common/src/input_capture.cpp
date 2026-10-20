@@ -142,9 +142,7 @@ struct CaptureThread {
         cap->events_.push({std::move(msg), send, emergency});
     }
 
-    static void note(const char* text) {
-        cap->events_.push({proto::MouseMove{}, false, false, text});
-    }
+    static void note(const char* text) { cap->events_.push({proto::MouseMove{}, false, false, text}); }
 
     static input::Point cursor_pos() {
         POINT pt{};
@@ -162,7 +160,8 @@ struct CaptureThread {
         GetMonitorInfoW(MonitorFromPoint(at, MONITOR_DEFAULTTONEAREST), &mi);
         park = {(mi.rcMonitor.left + mi.rcMonitor.right) / 2, (mi.rcMonitor.top + mi.rcMonitor.bottom) / 2};
         SetCursorPos(park.x, park.y);
-        if (cap->options_.raw_input) note("input capture: no Raw Input motion from this device, taking motion from the hook");
+        if (cap->options_.raw_input)
+            note("input capture: no Raw Input motion from this device, taking motion from the hook");
     }
 
     static void refresh_monitors() {
@@ -211,10 +210,10 @@ struct CaptureThread {
     // cursor if the VDD weren't there).
     static input::Point before_vdd(input::Point p) {
         switch (cap->options_.client_side) {
-            case display::Side::Left: p.x = vdd.right; break;
-            case display::Side::Top: p.y = vdd.bottom; break;
-            case display::Side::Bottom: p.y = vdd.top - 1; break;
-            default: p.x = vdd.left - 1; break;
+        case display::Side::Left: p.x = vdd.right; break;
+        case display::Side::Top: p.y = vdd.bottom; break;
+        case display::Side::Bottom: p.y = vdd.top - 1; break;
+        default: p.x = vdd.left - 1; break;
         }
         return nearest_real(p);
     }
@@ -231,7 +230,8 @@ struct CaptureThread {
     // Where p is along the VDD's edge toward this PC (0..1): the height for a peer on the left or
     // right, the x position for one above or below.
     static double vdd_y_norm(input::Point p) {
-        const bool along_x = cap->options_.client_side == display::Side::Top || cap->options_.client_side == display::Side::Bottom;
+        const bool along_x =
+            cap->options_.client_side == display::Side::Top || cap->options_.client_side == display::Side::Bottom;
         const int len = along_x ? vdd.width() : vdd.height();
         const int at = along_x ? p.x - vdd.left : p.y - vdd.top;
         return len > 0 ? std::clamp((at + 0.5) / len, 0.0, 1.0) : 0.5;
@@ -241,10 +241,10 @@ struct CaptureThread {
     // screen), as opposed to running off its top / bottom / outer edges (which are walls).
     static bool left_vdd_inward(input::Point p) {
         switch (cap->options_.client_side) {
-            case display::Side::Right: return p.x < vdd.left;
-            case display::Side::Left: return p.x >= vdd.right;
-            case display::Side::Top: return p.y >= vdd.bottom;
-            default: return p.y < vdd.top;  // Bottom
+        case display::Side::Right: return p.x < vdd.left;
+        case display::Side::Left: return p.x >= vdd.right;
+        case display::Side::Top: return p.y >= vdd.bottom;
+        default: return p.y < vdd.top;  // Bottom
         }
     }
 
@@ -252,9 +252,7 @@ struct CaptureThread {
         return {std::clamp(p.x, vdd.left, vdd.right - 1), std::clamp(p.y, vdd.top, vdd.bottom - 1)};
     }
 
-    static void desk_move(input::Point p) {
-        push(proto::DeskMove{.x = p.x - vdd.left, .y = p.y - vdd.top});
-    }
+    static void desk_move(input::Point p) { push(proto::DeskMove{.x = p.x - vdd.left, .y = p.y - vdd.top}); }
 
     static bool peer_buttons() {
         return std::any_of(button_owner.begin(), button_owner.end(), [](Owner o) { return o == Owner::Peer; });
@@ -268,7 +266,8 @@ struct CaptureThread {
     // The cursor moves onto the VDD: from now on it is on the peer's screen. Returns false if desk
     // mode can't start now (no peer, the peer controls this PC, cooldown...).
     static bool desk_enter(input::Point p) {
-        if (cap->remote_ || cap->disabled_ || !cap->has_client_ || cap->suspended_ || GetTickCount64() < no_switch_until) {
+        if (cap->remote_ || cap->disabled_ || !cap->has_client_ || cap->suspended_ ||
+            GetTickCount64() < no_switch_until) {
             return false;
         }
         cap->remote_ = true;
@@ -278,7 +277,8 @@ struct CaptureThread {
         keys_on_peer.reset();
         keys_pass_up.reset();
         for (unsigned i = 0; i < button_owner.size(); ++i) {
-            button_owner[i] = (buttons_down & (1u << i)) ? Owner::Local : Owner::None;  // e.g. a window being dragged over
+            button_owner[i] =
+                (buttons_down & (1u << i)) ? Owner::Local : Owner::None;  // e.g. a window being dragged over
         }
         exit_point = p;
         push(proto::FocusEnter{.y_norm = vdd_y_norm(p), .desk = true});
@@ -321,21 +321,21 @@ struct CaptureThread {
         }
         input::Point onto = p;
         switch (cap->options_.client_side) {
-            case display::Side::Left:
-            case display::Side::Right: {
-                const bool right = cap->options_.client_side == display::Side::Right;
-                if (right ? p.x < vdd.left : p.x >= vdd.right) return std::nullopt;  // not past the edge
-                onto.x = right ? vdd.left : vdd.right - 1;
-                onto.y = std::clamp(p.y, vdd.top, vdd.bottom - 1);
-                break;
-            }
-            default: {
-                const bool bottom = cap->options_.client_side == display::Side::Bottom;
-                if (bottom ? p.y < vdd.top : p.y >= vdd.bottom) return std::nullopt;
-                onto.y = bottom ? vdd.top : vdd.bottom - 1;
-                onto.x = std::clamp(p.x, vdd.left, vdd.right - 1);
-                break;
-            }
+        case display::Side::Left:
+        case display::Side::Right: {
+            const bool right = cap->options_.client_side == display::Side::Right;
+            if (right ? p.x < vdd.left : p.x >= vdd.right) return std::nullopt;  // not past the edge
+            onto.x = right ? vdd.left : vdd.right - 1;
+            onto.y = std::clamp(p.y, vdd.top, vdd.bottom - 1);
+            break;
+        }
+        default: {
+            const bool bottom = cap->options_.client_side == display::Side::Bottom;
+            if (bottom ? p.y < vdd.top : p.y >= vdd.bottom) return std::nullopt;
+            onto.y = bottom ? vdd.top : vdd.bottom - 1;
+            onto.x = std::clamp(p.x, vdd.left, vdd.right - 1);
+            break;
+        }
         }
         return onto;
     }
@@ -404,7 +404,8 @@ struct CaptureThread {
                 button_owner[i] = owner;
                 set_key_peer(owner == Owner::Peer);
                 if (owner == Owner::Peer) {
-                    cap->events_.push({.msg = proto::MouseButtonEvent{.button = *button, .down = true}, .cancel_menus = true});
+                    cap->events_.push(
+                        {.msg = proto::MouseButtonEvent{.button = *button, .down = true}, .cancel_menus = true});
                     return 1;
                 }
                 leave_if_home();
@@ -421,7 +422,8 @@ struct CaptureThread {
             return CallNextHookEx(nullptr, code, wp, lp);
         }
         if ((wp == WM_MOUSEWHEEL || wp == WM_MOUSEHWHEEL) && on_vdd && !on_window) {
-            push(proto::MouseWheel{.delta = static_cast<short>(HIWORD(m.mouseData)), .horizontal = wp == WM_MOUSEHWHEEL});
+            push(proto::MouseWheel{.delta = static_cast<short>(HIWORD(m.mouseData)),
+                                   .horizontal = wp == WM_MOUSEHWHEEL});
             return 1;
         }
         return CallNextHookEx(nullptr, code, wp, lp);
@@ -485,7 +487,8 @@ struct CaptureThread {
             desk = false;
             cap->desk_ = false;
         } else if (cap->remote_) {
-            const auto back = edge.position(exit_point) ? display::inward(exit_point, edge.side(), kReturnInset) : exit_point;
+            const auto back =
+                edge.position(exit_point) ? display::inward(exit_point, edge.side(), kReturnInset) : exit_point;
             SetCursorPos(back.x, back.y);
         }
         bounce_out_of_vdd();
@@ -515,14 +518,27 @@ struct CaptureThread {
         std::optional<proto::MouseButton> button;
         bool down = false;
         switch (wp) {
-            case WM_LBUTTONDOWN: case WM_LBUTTONUP: button = proto::MouseButton::Left; down = wp == WM_LBUTTONDOWN; break;
-            case WM_RBUTTONDOWN: case WM_RBUTTONUP: button = proto::MouseButton::Right; down = wp == WM_RBUTTONDOWN; break;
-            case WM_MBUTTONDOWN: case WM_MBUTTONUP: button = proto::MouseButton::Middle; down = wp == WM_MBUTTONDOWN; break;
-            case WM_XBUTTONDOWN: case WM_XBUTTONUP:
-                button = HIWORD(m.mouseData) == XBUTTON1 ? proto::MouseButton::X1 : proto::MouseButton::X2;
-                down = wp == WM_XBUTTONDOWN;
-                break;
-            default: break;
+        case WM_LBUTTONDOWN:
+        case WM_LBUTTONUP:
+            button = proto::MouseButton::Left;
+            down = wp == WM_LBUTTONDOWN;
+            break;
+        case WM_RBUTTONDOWN:
+        case WM_RBUTTONUP:
+            button = proto::MouseButton::Right;
+            down = wp == WM_RBUTTONDOWN;
+            break;
+        case WM_MBUTTONDOWN:
+        case WM_MBUTTONUP:
+            button = proto::MouseButton::Middle;
+            down = wp == WM_MBUTTONDOWN;
+            break;
+        case WM_XBUTTONDOWN:
+        case WM_XBUTTONUP:
+            button = HIWORD(m.mouseData) == XBUTTON1 ? proto::MouseButton::X1 : proto::MouseButton::X2;
+            down = wp == WM_XBUTTONDOWN;
+            break;
+        default: break;
         }
         if (button) {
             const unsigned bit = 1u << static_cast<unsigned>(*button);
@@ -580,7 +596,8 @@ struct CaptureThread {
         } else if (button) {
             push(proto::MouseButtonEvent{.button = *button, .down = down});
         } else if (wp == WM_MOUSEWHEEL || wp == WM_MOUSEHWHEEL) {
-            push(proto::MouseWheel{.delta = static_cast<short>(HIWORD(m.mouseData)), .horizontal = wp == WM_MOUSEHWHEEL});
+            push(proto::MouseWheel{.delta = static_cast<short>(HIWORD(m.mouseData)),
+                                   .horizontal = wp == WM_MOUSEHWHEEL});
         }
         return 1;
     }
@@ -642,7 +659,8 @@ struct CaptureThread {
         RAWINPUT raw{};
         UINT size = sizeof(raw);
         if (GetRawInputData(handle, RID_INPUT, &raw, &size, sizeof(RAWINPUTHEADER)) == static_cast<UINT>(-1)) return;
-        if (raw.header.dwType != RIM_TYPEMOUSE || !cap->remote_ || hook_motion || desk) return;  // desk: the cursor really moves
+        if (raw.header.dwType != RIM_TYPEMOUSE || !cap->remote_ || hook_motion || desk)
+            return;  // desk: the cursor really moves
         const RAWMOUSE& rm = raw.data.mouse;
         // Only our own injected moves are skipped. A null hDevice does NOT mean
         // injected: precision touchpads deliver all their motion that way.
@@ -651,10 +669,12 @@ struct CaptureThread {
         int dx = 0, dy = 0;
         if (rm.usFlags & MOUSE_MOVE_ABSOLUTE) {
             const bool virtual_desk = (rm.usFlags & MOUSE_VIRTUAL_DESKTOP) != 0;
-            const display::Rect area = virtual_desk ? display::virtual_desktop()
-                                                    : display::Rect{0, 0, GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN)};
-            const input::Point p{area.left + static_cast<int>(static_cast<long long>(rm.lLastX) * area.width() / 65536),
-                                 area.top + static_cast<int>(static_cast<long long>(rm.lLastY) * area.height() / 65536)};
+            const display::Rect area =
+                virtual_desk ? display::virtual_desktop()
+                             : display::Rect{0, 0, GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN)};
+            const input::Point p{
+                area.left + static_cast<int>(static_cast<long long>(rm.lLastX) * area.width() / 65536),
+                area.top + static_cast<int>(static_cast<long long>(rm.lLastY) * area.height() / 65536)};
             if (have_abs) {
                 dx = p.x - last_abs.x;
                 dy = p.y - last_abs.y;
@@ -673,46 +693,43 @@ struct CaptureThread {
 
     static LRESULT CALLBACK wnd_proc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
         switch (msg) {
-            case WM_INPUT:
-                raw_input(reinterpret_cast<HRAWINPUT>(lp));
-                return DefWindowProcW(h, msg, wp, lp);  // required for RIM_INPUT cleanup
-            case WM_DISPLAYCHANGE:
-                refresh_monitors();
-                return 0;
-            case WM_TIMER:
-                if (wp == kMonitorTimer) refresh_monitors();
-                return 0;
-            case kMsgRemote:
-                if (desk) {
-                    desk_drag();  // a file drag caught over the peer's desktop continues there
-                } else {
-                    enter_remote(unpack(wp), cursor_pos());
-                }
-                return 0;
-            case kMsgDeskChanged: refresh_monitors(); return 0;
-            case kMsgSide: {
-                // Only here, on the hook thread, which is the only one reading it.
-                const auto side = static_cast<display::Side>(wp);
-                if (cap->options_.client_side != side) {
-                    if (cap->remote_ && !desk) leave_remote(true);  // the edge it crossed is no edge any more
-                    cap->options_.client_side = side;
-                    refresh_monitors();
-                    note("input capture: the other PC stands on another side now");
-                }
-                return 0;
+        case WM_INPUT:
+            raw_input(reinterpret_cast<HRAWINPUT>(lp));
+            return DefWindowProcW(h, msg, wp, lp);  // required for RIM_INPUT cleanup
+        case WM_DISPLAYCHANGE: refresh_monitors(); return 0;
+        case WM_TIMER:
+            if (wp == kMonitorTimer) refresh_monitors();
+            return 0;
+        case kMsgRemote:
+            if (desk) {
+                desk_drag();  // a file drag caught over the peer's desktop continues there
+            } else {
+                enter_remote(unpack(wp), cursor_pos());
             }
-            case kMsgLocal: leave_remote(wp != 0); return 0;
-            case kMsgReturned: returned(unpack(wp)); return 0;
-            case kMsgUnhook: unhook(); return 0;
-            case kMsgCooldown: start_cooldown(); return 0;
-            case kMsgSuspended: reset_takeover(); return 0;
-            case kMsgStop:
-                leave_remote(true);
-                unhook();
-                PostQuitMessage(0);
-                return 0;
-            default:
-                return DefWindowProcW(h, msg, wp, lp);
+            return 0;
+        case kMsgDeskChanged: refresh_monitors(); return 0;
+        case kMsgSide: {
+            // Only here, on the hook thread, which is the only one reading it.
+            const auto side = static_cast<display::Side>(wp);
+            if (cap->options_.client_side != side) {
+                if (cap->remote_ && !desk) leave_remote(true);  // the edge it crossed is no edge any more
+                cap->options_.client_side = side;
+                refresh_monitors();
+                note("input capture: the other PC stands on another side now");
+            }
+            return 0;
+        }
+        case kMsgLocal: leave_remote(wp != 0); return 0;
+        case kMsgReturned: returned(unpack(wp)); return 0;
+        case kMsgUnhook: unhook(); return 0;
+        case kMsgCooldown: start_cooldown(); return 0;
+        case kMsgSuspended: reset_takeover(); return 0;
+        case kMsgStop:
+            leave_remote(true);
+            unhook();
+            PostQuitMessage(0);
+            return 0;
+        default: return DefWindowProcW(h, msg, wp, lp);
         }
     }
 };
@@ -840,7 +857,8 @@ void InputCapture::hook_thread_main() {
     wc.lpszClassName = kWindowClass;
     RegisterClassExW(&wc);  // fails harmlessly if already registered by an earlier run
     // Hidden top-level window (message-only windows miss WM_DISPLAYCHANGE broadcasts).
-    T::hwnd = CreateWindowExW(WS_EX_TOOLWINDOW, kWindowClass, L"", WS_POPUP, 0, 0, 0, 0, nullptr, nullptr, inst, nullptr);
+    T::hwnd =
+        CreateWindowExW(WS_EX_TOOLWINDOW, kWindowClass, L"", WS_POPUP, 0, 0, 0, 0, nullptr, nullptr, inst, nullptr);
     if (!T::hwnd) return fail("CreateWindowEx");
 
     const RAWINPUTDEVICE rid{.usUsagePage = 0x01, .usUsage = 0x02, .dwFlags = RIDEV_INPUTSINK, .hwndTarget = T::hwnd};
@@ -882,7 +900,8 @@ void InputCapture::worker_main() {
     Clock::time_point last_move_sent{};
 
     const auto is_move = [](const Event& ev) {
-        return !ev.note && (std::holds_alternative<proto::MouseMove>(ev.msg) || std::holds_alternative<proto::DeskMove>(ev.msg));
+        return !ev.note &&
+               (std::holds_alternative<proto::MouseMove>(ev.msg) || std::holds_alternative<proto::DeskMove>(ev.msg));
     };
     // Appends ev, merging consecutive mouse moves into one message (relative ones add up, desk
     // positions: the newest wins).
@@ -953,7 +972,8 @@ void InputCapture::worker_main() {
                 }
             } else if (const auto* leave = std::get_if<proto::FocusLeave>(&ev.msg)) {
                 if (ev.emergency) {
-                    log::warn("input capture: Ctrl+Alt+Shift+Q - control back here, hooks removed (restart to use the KVM)");
+                    log::warn(
+                        "input capture: Ctrl+Alt+Shift+Q - control back here, hooks removed (restart to use the KVM)");
                     Emergency callback;
                     {
                         std::lock_guard lock(sink_mutex_);
@@ -963,14 +983,15 @@ void InputCapture::worker_main() {
                 } else {
                     log::info("input capture: control back here (edge at {:.3f})", leave->y_norm);
                 }
-                log::info("input capture: sent to the other PC: {} moves, {} buttons, {} wheel, {} keys", sent.moves, sent.buttons,
-                          sent.wheels, sent.keys);
+                log::info("input capture: sent to the other PC: {} moves, {} buttons, {} wheel, {} keys", sent.moves,
+                          sent.buttons, sent.wheels, sent.keys);
             }
             if (!ev.send) continue;
             std::lock_guard lock(sink_mutex_);
             if (!sink_) continue;
             if (sink_(ev.msg)) {
-                if (std::holds_alternative<proto::MouseMove>(ev.msg) || std::holds_alternative<proto::DeskMove>(ev.msg)) {
+                if (std::holds_alternative<proto::MouseMove>(ev.msg) ||
+                    std::holds_alternative<proto::DeskMove>(ev.msg)) {
                     ++sent.moves;
                     last_move_sent = Clock::now();
                 }

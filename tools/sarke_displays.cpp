@@ -47,8 +47,9 @@ bool parse_size(std::wstring_view s, kvm::layout::Peer& peer) {
 }
 
 int usage() {
-    std::fputs("usage: sarke_displays.exe [--config <path>] [--role host|client] [--peer <W>x<H>[@<scale>] <hostname>]\n",
-               stderr);
+    std::fputs(
+        "usage: sarke_displays.exe [--config <path>] [--role host|client] [--peer <W>x<H>[@<scale>] <hostname>]\n",
+        stderr);
     return 2;
 }
 

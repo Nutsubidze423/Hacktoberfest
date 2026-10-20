@@ -57,8 +57,8 @@ void draw_hud(ui::Painter& p, const D2D1_RECT_F& r, const HudValues& v, UINT dpi
     const ui::Palette& c = pal();
     p.round(r, static_cast<float>(px(ui::radius::sm, dpi)), c.tile, ui::alpha::hud);
 
-    const std::wstring res = v.width && v.height ? std::format(L"{}{}{}", *v.width, ui::kTimes, *v.height)
-                                                 : std::wstring(ui::kUnknown);
+    const std::wstring res =
+        v.width && v.height ? std::format(L"{}{}{}", *v.width, ui::kTimes, *v.height) : std::wstring(ui::kUnknown);
     // The website's feature list: "RTT, FPS, latency, bitrate, resolution and dropped frames".
     const Row rows[kRows] = {
         {L"RTT", int_or_unknown(v.rtt_ms), L"ms", above(v.rtt_ms, vt::rtt_warn_ms, vt::rtt_err_ms)},

@@ -42,7 +42,9 @@ int wmain(int argc, wchar_t** argv) {
         } else if (arg == L"--") {
             for (++i; i < argc; ++i) options.app_args.emplace_back(argv[i]);
         } else {
-            std::fputs("usage: sarke.exe [--host | --client] [--background] [--config <path>] [-- <args for the app>]\n", stderr);
+            std::fputs(
+                "usage: sarke.exe [--host | --client] [--background] [--config <path>] [-- <args for the app>]\n",
+                stderr);
             return 2;
         }
     }

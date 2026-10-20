@@ -188,9 +188,8 @@ void DeskView::decode_main(std::stop_token stop) {
             Picture pic{.width = image.width, .height = image.height, .x = h.x, .y = h.y};
             pic.pixels = std::move(image.pixels);
             pic.opaque_rows.assign(static_cast<size_t>(pic.height), 1);
-            if (h.alpha_bytes > 0 &&
-                !apply_alpha(std::span(frame.payload.data() + jpeg_size, h.alpha_bytes), pic.width, pic.height,
-                             pic.pixels, pic.opaque_rows)) {
+            if (h.alpha_bytes > 0 && !apply_alpha(std::span(frame.payload.data() + jpeg_size, h.alpha_bytes), pic.width,
+                                                  pic.height, pic.pixels, pic.opaque_rows)) {
                 log::warn("desk: picture {}: bad transparency, shown opaque", h.seq);
             }
             image = {};  // the pixels moved out
@@ -248,7 +247,8 @@ void DeskView::on_local_foreground(HWND fg) {
     if (fg == hwnd_ || GetAncestor(fg, GA_ROOT) != fg) return;  // our overlay or a child control
     DWORD pid = 0;
     GetWindowThreadProcessId(fg, &pid);
-    if (pid == GetCurrentProcessId()) return;  // one of our own windows (WINEVENT_SKIPOWNPROCESS should already skip it)
+    if (pid == GetCurrentProcessId())
+        return;  // one of our own windows (WINEVENT_SKIPOWNPROCESS should already skip it)
     local_foreground_ = fg;
     front_ = Front::Local;  // the user raised a window of this PC: let it cover the owner's windows
     if (visible_) apply_z();
@@ -423,7 +423,8 @@ void DeskView::update() {
 void DeskView::compose(const std::vector<Placed>& placed, const RECT& dirty) {
     const size_t pitch = static_cast<size_t>(screen_.right - screen_.left) * 4;
     for (int y = dirty.top; y < dirty.bottom; ++y) {
-        std::memset(bits_ + y * pitch + static_cast<size_t>(dirty.left) * 4, 0, static_cast<size_t>(dirty.right - dirty.left) * 4);
+        std::memset(bits_ + y * pitch + static_cast<size_t>(dirty.left) * 4, 0,
+                    static_cast<size_t>(dirty.right - dirty.left) * 4);
     }
     // Alpha 1 (premultiplied, colour 0) where nothing is drawn yet: invisible, but it takes clicks.
     const auto fill_rim = [&](RECT strip) {
@@ -459,7 +460,8 @@ void DeskView::compose(const std::vector<Placed>& placed, const RECT& dirty) {
                     std::memcpy(dst, src, 4);
                 } else if (a != 0) {
                     const unsigned keep = 255 - a;
-                    for (int c = 0; c < 4; ++c) dst[c] = static_cast<std::uint8_t>(src[c] + (dst[c] * keep + 127) / 255);
+                    for (int c = 0; c < 4; ++c)
+                        dst[c] = static_cast<std::uint8_t>(src[c] + (dst[c] * keep + 127) / 255);
                 }
             }
         }
@@ -499,36 +501,36 @@ NormPoint DeskView::norm(LPARAM lp) const {
 bool DeskView::on_input(UINT msg, WPARAM wp, LPARAM lp) {
     const auto button_of = [](UINT m, WPARAM w) -> std::optional<std::pair<proto::MouseButton, bool>> {
         switch (m) {
-            case WM_LBUTTONDOWN: return std::pair{proto::MouseButton::Left, true};
-            case WM_LBUTTONUP: return std::pair{proto::MouseButton::Left, false};
-            case WM_RBUTTONDOWN: return std::pair{proto::MouseButton::Right, true};
-            case WM_RBUTTONUP: return std::pair{proto::MouseButton::Right, false};
-            case WM_MBUTTONDOWN: return std::pair{proto::MouseButton::Middle, true};
-            case WM_MBUTTONUP: return std::pair{proto::MouseButton::Middle, false};
-            case WM_XBUTTONDOWN:
-            case WM_XBUTTONUP:
-                return std::pair{GET_XBUTTON_WPARAM(w) == XBUTTON1 ? proto::MouseButton::X1 : proto::MouseButton::X2,
-                                 m == WM_XBUTTONDOWN};
-            default: return std::nullopt;
+        case WM_LBUTTONDOWN: return std::pair{proto::MouseButton::Left, true};
+        case WM_LBUTTONUP: return std::pair{proto::MouseButton::Left, false};
+        case WM_RBUTTONDOWN: return std::pair{proto::MouseButton::Right, true};
+        case WM_RBUTTONUP: return std::pair{proto::MouseButton::Right, false};
+        case WM_MBUTTONDOWN: return std::pair{proto::MouseButton::Middle, true};
+        case WM_MBUTTONUP: return std::pair{proto::MouseButton::Middle, false};
+        case WM_XBUTTONDOWN:
+        case WM_XBUTTONUP:
+            return std::pair{GET_XBUTTON_WPARAM(w) == XBUTTON1 ? proto::MouseButton::X1 : proto::MouseButton::X2,
+                             m == WM_XBUTTONDOWN};
+        default: return std::nullopt;
         }
     };
 
     switch (msg) {
-        case WM_MOUSEMOVE:
-            if (!injected_by_us() && layout_.desk_w > 0) input_.mouse_move(norm(lp));
-            return true;
-        case WM_MOUSEWHEEL:
-        case WM_MOUSEHWHEEL:
-            if (!injected_by_us()) input_.wheel(GET_WHEEL_DELTA_WPARAM(wp), msg == WM_MOUSEHWHEEL);
-            return true;
-        case WM_KEYDOWN:
-        case WM_SYSKEYDOWN:
-        case WM_KEYUP:
-        case WM_SYSKEYUP:
+    case WM_MOUSEMOVE:
+        if (!injected_by_us() && layout_.desk_w > 0) input_.mouse_move(norm(lp));
+        return true;
+    case WM_MOUSEWHEEL:
+    case WM_MOUSEHWHEEL:
+        if (!injected_by_us()) input_.wheel(GET_WHEEL_DELTA_WPARAM(wp), msg == WM_MOUSEHWHEEL);
+        return true;
+    case WM_KEYDOWN:
+    case WM_SYSKEYDOWN:
+    case WM_KEYUP:
+    case WM_SYSKEYUP:
             // Everything goes to the owner's window, Alt+F4 included (it closes that window, like on one PC).
-            if (!injected_by_us()) input_.key(wp, lp, msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN);
-            return true;
-        default: break;
+        if (!injected_by_us()) input_.key(wp, lp, msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN);
+        return true;
+    default: break;
     }
     if (const auto b = button_of(msg, wp)) {
         if (injected_by_us() || layout_.desk_w <= 0) return true;
@@ -562,59 +564,54 @@ LRESULT CALLBACK DeskView::wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
 
 LRESULT DeskView::handle(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     switch (msg) {
-        case kMsgUpdate:
-            update();
-            return 0;
-        case kMsgSave: {
-            const auto& path = *reinterpret_cast<const std::wstring*>(wp);
-            if (!bits_) return 0;
-            const int w = screen_.right - screen_.left, h = screen_.bottom - screen_.top;
-            BITMAPINFOHEADER bh{sizeof(bh)};
-            bh.biWidth = w;
-            bh.biHeight = -h;  // top-down
-            bh.biPlanes = 1;
-            bh.biBitCount = 32;
-            BITMAPFILEHEADER fh{};
-            fh.bfType = 0x4D42;
-            fh.bfOffBits = sizeof(fh) + sizeof(bh);
-            fh.bfSize = fh.bfOffBits + static_cast<DWORD>(w) * h * 4;
-            FILE* f = nullptr;
-            if (_wfopen_s(&f, path.c_str(), L"wb") != 0 || !f) return 0;
-            fwrite(&fh, sizeof(fh), 1, f);
-            fwrite(&bh, sizeof(bh), 1, f);
-            fwrite(bits_, 1, static_cast<size_t>(w) * h * 4, f);
-            fclose(f);
-            return 1;
+    case kMsgUpdate: update(); return 0;
+    case kMsgSave: {
+        const auto& path = *reinterpret_cast<const std::wstring*>(wp);
+        if (!bits_) return 0;
+        const int w = screen_.right - screen_.left, h = screen_.bottom - screen_.top;
+        BITMAPINFOHEADER bh{sizeof(bh)};
+        bh.biWidth = w;
+        bh.biHeight = -h;  // top-down
+        bh.biPlanes = 1;
+        bh.biBitCount = 32;
+        BITMAPFILEHEADER fh{};
+        fh.bfType = 0x4D42;
+        fh.bfOffBits = sizeof(fh) + sizeof(bh);
+        fh.bfSize = fh.bfOffBits + static_cast<DWORD>(w) * h * 4;
+        FILE* f = nullptr;
+        if (_wfopen_s(&f, path.c_str(), L"wb") != 0 || !f) return 0;
+        fwrite(&fh, sizeof(fh), 1, f);
+        fwrite(&bh, sizeof(bh), 1, f);
+        fwrite(bits_, 1, static_cast<size_t>(w) * h * 4, f);
+        fclose(f);
+        return 1;
+    }
+    case WM_DISPLAYCHANGE:
+        hide();
+        if (make_surface()) {
+            SetWindowPos(hwnd, nullptr, screen_.left, screen_.top, screen_.right - screen_.left,
+                         screen_.bottom - screen_.top, SWP_NOZORDER | SWP_NOACTIVATE);
         }
-        case WM_DISPLAYCHANGE:
-            hide();
-            if (make_surface()) {
-                SetWindowPos(hwnd, nullptr, screen_.left, screen_.top, screen_.right - screen_.left,
-                             screen_.bottom - screen_.top, SWP_NOZORDER | SWP_NOACTIVATE);
-            }
-            {
-                std::lock_guard lock(pending_mutex_);
-                pending_layout_ = layout_;  // draw everything again on the new surface
-            }
-            update();
-            return 0;
-        case WM_MOUSEACTIVATE:
-            return MA_NOACTIVATE;  // a click doesn't activate it; on_input decides when it takes the keyboard
-        case WM_SETCURSOR:
-            SetCursor(cursor_.load());
-            return TRUE;
-        case WM_CAPTURECHANGED:
-            if (buttons_held_ > 0 && reinterpret_cast<HWND>(lp) != hwnd) {
-                buttons_held_ = 0;
-                input_.release_all();
-            }
-            return 0;
-        case WM_KILLFOCUS:
-            input_.release_all();  // no stuck keys on the owner
-            return 0;
-        case WM_CLOSE:
-            return 0;  // only the destructor closes it
-        default: break;
+        {
+            std::lock_guard lock(pending_mutex_);
+            pending_layout_ = layout_;  // draw everything again on the new surface
+        }
+        update();
+        return 0;
+    case WM_MOUSEACTIVATE:
+        return MA_NOACTIVATE;  // a click doesn't activate it; on_input decides when it takes the keyboard
+    case WM_SETCURSOR: SetCursor(cursor_.load()); return TRUE;
+    case WM_CAPTURECHANGED:
+        if (buttons_held_ > 0 && reinterpret_cast<HWND>(lp) != hwnd) {
+            buttons_held_ = 0;
+            input_.release_all();
+        }
+        return 0;
+    case WM_KILLFOCUS:
+        input_.release_all();  // no stuck keys on the owner
+        return 0;
+    case WM_CLOSE: return 0;  // only the destructor closes it
+    default: break;
     }
     if (on_input(msg, wp, lp)) return 0;
     return DefWindowProcW(hwnd, msg, wp, lp);

@@ -235,7 +235,10 @@ bool within_limits(const std::vector<std::filesystem::path>& items, std::uint64_
     bytes = 0;
     count = 0;
     std::error_code ec;
-    const auto add = [&](std::uint64_t size) { bytes += size; return ++count <= max_count && bytes <= max_bytes; };
+    const auto add = [&](std::uint64_t size) {
+        bytes += size;
+        return ++count <= max_count && bytes <= max_bytes;
+    };
     for (const auto& item : items) {
         if (fs::is_directory(item, ec)) {
             for (auto it = fs::recursive_directory_iterator(item, fs::directory_options::skip_permission_denied, ec);
@@ -368,45 +371,44 @@ struct ClipboardThread {
         }
         ClipboardSync* sync = self(h);
         switch (msg) {
-            case WM_CLIPBOARDUPDATE:
+        case WM_CLIPBOARDUPDATE:
                 // Our own write (content from the peer) must not travel back.
-                if (GetClipboardOwner() != h) {
-                    if (sync) sync->read_tries_ = 0;
-                    SetTimer(h, kSettleTimer, kSettleMs, nullptr);
-                }
-                return 0;
-            case WM_TIMER:
-                if (wp == kSettleTimer) {
-                    KillTimer(h, kSettleTimer);
-                    if (sync) read_and_send(*sync, h);
-                } else if (wp == kApplyTimer) {
-                    KillTimer(h, kApplyTimer);
-                    if (sync) apply(*sync, h);
-                }
-                return 0;
-            case kMsgApply:
-                if (sync) {
-                    sync->apply_tries_ = 0;
-                    apply(*sync, h);
-                }
-                return 0;
-            case kMsgResync:
+            if (GetClipboardOwner() != h) {
+                if (sync) sync->read_tries_ = 0;
+                SetTimer(h, kSettleTimer, kSettleMs, nullptr);
+            }
+            return 0;
+        case WM_TIMER:
+            if (wp == kSettleTimer) {
+                KillTimer(h, kSettleTimer);
+                if (sync) read_and_send(*sync, h);
+            } else if (wp == kApplyTimer) {
+                KillTimer(h, kApplyTimer);
+                if (sync) apply(*sync, h);
+            }
+            return 0;
+        case kMsgApply:
+            if (sync) {
+                sync->apply_tries_ = 0;
+                apply(*sync, h);
+            }
+            return 0;
+        case kMsgResync:
                 // Copied while the peer was away, or its sending broke off: it goes now.
-                if (sync && GetClipboardSequenceNumber() != sync->synced_clip_seq_ && GetClipboardOwner() != h) {
-                    log::info("clipboard: the other PC is back - sending what was copied meanwhile");
-                    sync->read_tries_ = 0;
-                    SetTimer(h, kSettleTimer, kResyncMs, nullptr);
-                }
-                return 0;
-            case kMsgApplyFiles:
-                if (sync) apply_files(*sync, h);
-                return 0;
-            case kMsgStop:
-                RemoveClipboardFormatListener(h);
-                PostQuitMessage(0);
-                return 0;
-            default:
-                return DefWindowProcW(h, msg, wp, lp);
+            if (sync && GetClipboardSequenceNumber() != sync->synced_clip_seq_ && GetClipboardOwner() != h) {
+                log::info("clipboard: the other PC is back - sending what was copied meanwhile");
+                sync->read_tries_ = 0;
+                SetTimer(h, kSettleTimer, kResyncMs, nullptr);
+            }
+            return 0;
+        case kMsgApplyFiles:
+            if (sync) apply_files(*sync, h);
+            return 0;
+        case kMsgStop:
+            RemoveClipboardFormatListener(h);
+            PostQuitMessage(0);
+            return 0;
+        default: return DefWindowProcW(h, msg, wp, lp);
         }
     }
 
@@ -495,15 +497,17 @@ struct ClipboardThread {
         std::uint64_t bytes = 0;
         std::size_t count = 0;
         if (!within_limits(files, sync.options_.max_file_bytes, sync.options_.max_file_count, bytes, count)) {
-            log::warn("clipboard: copied files are too big to share (limit {} / {} files) - drag them to the edge instead",
-                      size_text(static_cast<std::size_t>(sync.options_.max_file_bytes)), sync.options_.max_file_count);
+            log::warn(
+                "clipboard: copied files are too big to share (limit {} / {} files) - drag them to the edge instead",
+                size_text(static_cast<std::size_t>(sync.options_.max_file_bytes)), sync.options_.max_file_count);
             sync.synced_clip_seq_ = clip_seq;
             return false;
         }
         std::string names;
         for (const auto& f : files) names += to_utf8(f.filename().wstring()) + "\n";
         sync.send_content({"files", std::vector<std::uint8_t>(names.begin(), names.end())}, clip_seq);
-        log::info("clipboard: sharing {} copied file(s), {}, over the file channel", count, size_text(static_cast<std::size_t>(bytes)));
+        log::info("clipboard: sharing {} copied file(s), {}, over the file channel", count,
+                  size_text(static_cast<std::size_t>(bytes)));
         callback(std::move(files));
         return true;
     }
@@ -567,7 +571,8 @@ struct ClipboardThread {
             }
             EmptyClipboard();  // makes this window the owner, so the change isn't echoed back
             if (content->kind == "text") {
-                const std::wstring w = to_wide({reinterpret_cast<const char*>(content->bytes.data()), content->bytes.size()});
+                const std::wstring w =
+                    to_wide({reinterpret_cast<const char*>(content->bytes.data()), content->bytes.size()});
                 ok = set_data(CF_UNICODETEXT, make_global(w.c_str(), (w.size() + 1) * sizeof(wchar_t)));
                 log::info("clipboard: text from the other PC ({} characters)", w.size());
             } else {
@@ -602,7 +607,8 @@ bool ClipboardSync::start() {
         return false;
     }
     sender_ = std::thread(&ClipboardSync::sender_main, this);
-    log::info("clipboard: sharing {}{}", options_.text ? "text" : "", options_.images ? (options_.text ? " and images" : "images") : "");
+    log::info("clipboard: sharing {}{}", options_.text ? "text" : "",
+              options_.images ? (options_.text ? " and images" : "images") : "");
     return true;
 }
 

@@ -292,7 +292,9 @@ int main() {
         sync.attach(sink);
 
         // -- copy text here -> sent to the peer
-        const std::string hello = "Hello KVM \xE2\x80\x94 \xE1\x83\xA5\xE1\x83\x90\xE1\x83\xA0\xE1\x83\x97\xE1\x83\xA3\xE1\x83\x9A\xE1\x83\x98 \xE2\x9C\x93";
+        const std::string hello =
+            "Hello KVM \xE2\x80\x94 "
+            "\xE1\x83\xA5\xE1\x83\x90\xE1\x83\xA0\xE1\x83\x97\xE1\x83\xA3\xE1\x83\x9A\xE1\x83\x98 \xE2\x9C\x93";
         set_text(wide(hello));
         const auto sent = wait_content();
         check(sent && sent->kind == "text" && sent->bytes == bytes_of(hello), "copied text (UTF-8, Georgian) is sent");
@@ -318,7 +320,8 @@ int main() {
             wait_content();
             for (const auto& c : clip::split(1002, "png", png->bytes)) sync.receive(c);
             const UINT png_format = RegisterClipboardFormatW(L"PNG");
-            check(wait_until([&] { return IsClipboardFormatAvailable(CF_DIB) && IsClipboardFormatAvailable(png_format); }),
+            check(wait_until(
+                      [&] { return IsClipboardFormatAvailable(CF_DIB) && IsClipboardFormatAvailable(png_format); }),
                   "peer's image is on this clipboard as CF_DIB and PNG");
             const auto got = get_format(CF_DIB);
             bool same = got && got->size() >= dib.size();
@@ -339,7 +342,8 @@ int main() {
         // -- text and an image together: only the text goes
         set_text(L"text wins", /*with_image=*/true);
         const auto both = wait_content();
-        check(both && both->kind == "text" && both->bytes == bytes_of("text wins"), "text + image copied -> text is sent");
+        check(both && both->kind == "text" && both->bytes == bytes_of("text wins"),
+              "text + image copied -> text is sent");
 
         // -- big text in many chunks
         std::string big;

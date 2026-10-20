@@ -67,18 +67,20 @@ bool is_on_side(const kvm::VirtualDisplay& vdd, Side side) {
     int edge = 0;
     for (const auto& m : kvm::display::monitors()) {
         if (m.name == me) continue;
-        const int e = side == Side::Right ? m.rect.right : side == Side::Left ? m.rect.left
-                    : side == Side::Bottom ? m.rect.bottom : m.rect.top;
+        const int e = side == Side::Right    ? m.rect.right
+                      : side == Side::Left   ? m.rect.left
+                      : side == Side::Bottom ? m.rect.bottom
+                                             : m.rect.top;
         const bool further = side == Side::Right || side == Side::Bottom ? e > edge : e < edge;
         if (!any || further) edge = e;
         any = true;
     }
     if (!any) return true;
     switch (side) {
-        case Side::Right: return r->rect.left == edge;
-        case Side::Left: return r->rect.right == edge;
-        case Side::Bottom: return r->rect.top == edge;
-        default: return r->rect.bottom == edge;
+    case Side::Right: return r->rect.left == edge;
+    case Side::Left: return r->rect.right == edge;
+    case Side::Bottom: return r->rect.top == edge;
+    default: return r->rect.bottom == edge;
     }
 }
 

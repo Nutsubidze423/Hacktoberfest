@@ -68,7 +68,8 @@ std::string socket_error_text(int code) {
         while (!w.empty() && (w.back() == L'\r' || w.back() == L'\n' || w.back() == L'.')) {
             w.remove_suffix(1);
         }
-        const int len = WideCharToMultiByte(CP_UTF8, 0, w.data(), static_cast<int>(w.size()), nullptr, 0, nullptr, nullptr);
+        const int len =
+            WideCharToMultiByte(CP_UTF8, 0, w.data(), static_cast<int>(w.size()), nullptr, 0, nullptr, nullptr);
         std::string narrow(len, '\0');
         WideCharToMultiByte(CP_UTF8, 0, w.data(), static_cast<int>(w.size()), narrow.data(), len, nullptr, nullptr);
         text += " (" + narrow + ")";

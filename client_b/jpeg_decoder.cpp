@@ -53,8 +53,8 @@ bool JpegDecoder::decode(std::span<const uint8_t> jpeg, BgraImage& out) {
     out.pixels.resize(out.stride() * static_cast<size_t>(height));
 
     // TJPF_BGRA matches the Windows DIB byte order; alpha is filled with 0xFF.
-    if (tj3Decompress8(tj, jpeg.data(), jpeg.size(), out.pixels.data(),
-                       static_cast<int>(out.stride()), TJPF_BGRA) != 0) {
+    if (tj3Decompress8(tj, jpeg.data(), jpeg.size(), out.pixels.data(), static_cast<int>(out.stride()), TJPF_BGRA) !=
+        0) {
         // A warning (e.g. a slightly truncated stream) still leaves a usable image,
         // which is better than a frozen viewer. Only fatal errors drop the frame.
         if (tj3GetErrorCode(tj) == TJERR_FATAL) {

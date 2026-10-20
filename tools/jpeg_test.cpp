@@ -32,8 +32,9 @@ std::optional<kvm::CapturedFrame> load_bmp(const std::filesystem::path& path) {
     std::ifstream in(path, std::ios::binary);
     BITMAPFILEHEADER file{};
     BITMAPINFOHEADER info{};
-    if (!in.read(reinterpret_cast<char*>(&file), sizeof(file)) || !in.read(reinterpret_cast<char*>(&info), sizeof(info)) ||
-        file.bfType != 0x4D42 || info.biBitCount != 32 || info.biCompression != BI_RGB) {
+    if (!in.read(reinterpret_cast<char*>(&file), sizeof(file)) ||
+        !in.read(reinterpret_cast<char*>(&info), sizeof(info)) || file.bfType != 0x4D42 || info.biBitCount != 32 ||
+        info.biCompression != BI_RGB) {
         return std::nullopt;
     }
     kvm::CapturedFrame f;
@@ -66,8 +67,13 @@ kvm::CapturedFrame synthetic_screen(int width, int height) {
         for (int x = 0; x < width; ++x) {
             auto* p = f.bgra.data() + static_cast<size_t>(y) * f.stride + static_cast<size_t>(x) * 4;
             std::uint8_t b = 243, g = 243, r = 243;
-            if (y < 40) b = g = r = 32;                                    // title bar
-            else if (x < 260) { b = 230; g = 220; r = 210; }               // side panel
+            if (y < 40)
+                b = g = r = 32;                                    // title bar
+            else if (x < 260) {
+                b = 230;
+                g = 220;
+                r = 210;
+            }               // side panel
             else if (y % 28 < 16 && x < width - 300 && rnd() % 3 == 0) {   // text lines
                 b = g = r = static_cast<std::uint8_t>(20 + rnd() % 60);
             }
@@ -103,9 +109,12 @@ int main(int argc, char** argv) {
     std::optional<int> quality;
     for (int i = 1; i < argc; ++i) {
         const std::string_view arg = argv[i];
-        if (arg == "--runs" && i + 1 < argc) runs = std::max(1, std::atoi(argv[++i]));
-        else if (arg == "--quality" && i + 1 < argc) quality = std::atoi(argv[++i]);
-        else bmp = arg;
+        if (arg == "--runs" && i + 1 < argc)
+            runs = std::max(1, std::atoi(argv[++i]));
+        else if (arg == "--quality" && i + 1 < argc)
+            quality = std::atoi(argv[++i]);
+        else
+            bmp = arg;
     }
     kvm::Config config;
     try {
@@ -123,8 +132,8 @@ int main(int argc, char** argv) {
     }
     const bool real = frame.has_value();
     if (!frame) frame = synthetic_screen(1920, 1080);
-    kvm::log::info("input: {} {}x{}, quality {}", real ? bmp->string() : std::string("synthetic screen"),
-                   frame->width, frame->height, *quality);
+    kvm::log::info("input: {} {}x{}, quality {}", real ? bmp->string() : std::string("synthetic screen"), frame->width,
+                   frame->height, *quality);
 
     kvm::JpegEncoder encoder(*quality);
     std::vector<std::uint8_t> jpeg;

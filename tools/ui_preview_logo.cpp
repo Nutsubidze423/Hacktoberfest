@@ -192,8 +192,8 @@ int wmain(int argc, wchar_t** argv) {
     const int largest = *std::max_element(std::begin(kSizes), std::end(kSizes));
     const int row_h = largest + 2 * kGap;
     const int zoom_row_h = kMagnified[std::size(kMagnified) - 1] * kZoom + 2 * kGap;
-    const int sizes_w = std::accumulate(std::begin(kSizes), std::end(kSizes), kGap,
-                                        [](int acc, int s) { return acc + s + kGap; });
+    const int sizes_w =
+        std::accumulate(std::begin(kSizes), std::end(kSizes), kGap, [](int acc, int s) { return acc + s + kGap; });
     const int zoom_w = std::accumulate(std::begin(kMagnified), std::end(kMagnified), kGap,
                                        [](int acc, int s) { return acc + s * kZoom + kGap; });
     const int width = std::max(sizes_w, zoom_w);

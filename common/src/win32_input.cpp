@@ -50,14 +50,26 @@ LONG to_absolute(int offset, int extent) {
 // without it, because they share the scan code with a numpad key.
 bool is_always_extended(std::uint16_t vk) {
     switch (vk) {
-        case VK_LEFT: case VK_RIGHT: case VK_UP: case VK_DOWN:
-        case VK_INSERT: case VK_DELETE: case VK_HOME: case VK_END:
-        case VK_PRIOR: case VK_NEXT:
-        case VK_RCONTROL: case VK_RMENU: case VK_LWIN: case VK_RWIN: case VK_APPS:
-        case VK_DIVIDE: case VK_NUMLOCK: case VK_SNAPSHOT: case VK_CANCEL:
-            return true;
-        default:
-            return false;
+    case VK_LEFT:
+    case VK_RIGHT:
+    case VK_UP:
+    case VK_DOWN:
+    case VK_INSERT:
+    case VK_DELETE:
+    case VK_HOME:
+    case VK_END:
+    case VK_PRIOR:
+    case VK_NEXT:
+    case VK_RCONTROL:
+    case VK_RMENU:
+    case VK_LWIN:
+    case VK_RWIN:
+    case VK_APPS:
+    case VK_DIVIDE:
+    case VK_NUMLOCK:
+    case VK_SNAPSHOT:
+    case VK_CANCEL: return true;
+    default: return false;
     }
 }
 
@@ -74,8 +86,8 @@ bool move_cursor_abs(int x, int y) {
     if (vd.width <= 0 || vd.height <= 0) return false;
     const int ox = std::clamp(x - vd.left, 0, vd.width - 1);
     const int oy = std::clamp(y - vd.top, 0, vd.height - 1);
-    INPUT in = make_mouse(MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK,
-                          to_absolute(ox, vd.width), to_absolute(oy, vd.height));
+    INPUT in = make_mouse(MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK, to_absolute(ox, vd.width),
+                          to_absolute(oy, vd.height));
     return send_one(in);
 }
 
@@ -83,15 +95,15 @@ bool send_mouse_button(MouseButton button, bool down) {
     DWORD flags = 0;
     DWORD data = 0;
     switch (button) {
-        case MouseButton::Left:   flags = down ? MOUSEEVENTF_LEFTDOWN : MOUSEEVENTF_LEFTUP; break;
-        case MouseButton::Right:  flags = down ? MOUSEEVENTF_RIGHTDOWN : MOUSEEVENTF_RIGHTUP; break;
-        case MouseButton::Middle: flags = down ? MOUSEEVENTF_MIDDLEDOWN : MOUSEEVENTF_MIDDLEUP; break;
-        case MouseButton::X1:
-        case MouseButton::X2:
-            flags = down ? MOUSEEVENTF_XDOWN : MOUSEEVENTF_XUP;
-            data = button == MouseButton::X1 ? XBUTTON1 : XBUTTON2;
-            break;
-        default: return false;
+    case MouseButton::Left: flags = down ? MOUSEEVENTF_LEFTDOWN : MOUSEEVENTF_LEFTUP; break;
+    case MouseButton::Right: flags = down ? MOUSEEVENTF_RIGHTDOWN : MOUSEEVENTF_RIGHTUP; break;
+    case MouseButton::Middle: flags = down ? MOUSEEVENTF_MIDDLEDOWN : MOUSEEVENTF_MIDDLEUP; break;
+    case MouseButton::X1:
+    case MouseButton::X2:
+        flags = down ? MOUSEEVENTF_XDOWN : MOUSEEVENTF_XUP;
+        data = button == MouseButton::X1 ? XBUTTON1 : XBUTTON2;
+        break;
+    default: return false;
     }
     INPUT in = make_mouse(flags, 0, 0, data);
     return send_one(in);
@@ -100,8 +112,7 @@ bool send_mouse_button(MouseButton button, bool down) {
 bool send_wheel(int delta, bool horizontal) {
     if (delta == 0) return true;
     // mouseData is a DWORD but carries a signed delta.
-    INPUT in = make_mouse(horizontal ? MOUSEEVENTF_HWHEEL : MOUSEEVENTF_WHEEL, 0, 0,
-                          static_cast<DWORD>(delta));
+    INPUT in = make_mouse(horizontal ? MOUSEEVENTF_HWHEEL : MOUSEEVENTF_WHEEL, 0, 0, static_cast<DWORD>(delta));
     return send_one(in);
 }
 
@@ -120,9 +131,8 @@ bool send_key(std::uint16_t vk, std::uint16_t scan, bool down, bool extended) {
     in.ki.wScan = scan;
     // With a VK the target sees both vk and scan; without one, Windows maps
     // the scan code through the local layout.
-    in.ki.dwFlags = (vk == 0 ? KEYEVENTF_SCANCODE : 0) |
-                    (extended ? KEYEVENTF_EXTENDEDKEY : 0) |
-                    (down ? 0 : KEYEVENTF_KEYUP);
+    in.ki.dwFlags =
+        (vk == 0 ? KEYEVENTF_SCANCODE : 0) | (extended ? KEYEVENTF_EXTENDEDKEY : 0) | (down ? 0 : KEYEVENTF_KEYUP);
     in.ki.dwExtraInfo = kInjectedMarker;
     return send_one(in);
 }

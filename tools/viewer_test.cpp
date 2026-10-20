@@ -54,7 +54,8 @@ std::string utf8(const std::wstring& s) {
 
 bool is_jpeg(const fs::path& p) {
     std::wstring ext = p.extension().wstring();
-    std::transform(ext.begin(), ext.end(), ext.begin(), [](wchar_t c) { return static_cast<wchar_t>(std::towlower(c)); });
+    std::transform(ext.begin(), ext.end(), ext.begin(),
+                   [](wchar_t c) { return static_cast<wchar_t>(std::towlower(c)); });
     return ext == L".jpg" || ext == L".jpeg";
 }
 
@@ -131,7 +132,8 @@ std::vector<uint8_t> read_file(const fs::path& path) {
     return {std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
 }
 
-void play_loop(std::stop_token stop, const std::vector<std::vector<uint8_t>>& jpegs, int fps, kvm::ViewerWindow& viewer) {
+void play_loop(std::stop_token stop, const std::vector<std::vector<uint8_t>>& jpegs, int fps,
+               kvm::ViewerWindow& viewer) {
     kvm::JpegDecoder decoder;
     kvm::BgraImage spare;  // reused: present() hands back a spare buffer
     const auto period = std::chrono::microseconds(1'000'000 / fps);
@@ -184,8 +186,8 @@ int run_connect(int argc, wchar_t** argv) {
     kvm::DisplaySettings displays;
     kvm::TrayIcon tray;
     tray.create(kvm::ui::kAppName, {.open = [&] { viewer.bring_to_front(); },
-                                .displays = [&] { displays.show({.role = kvm::layout::Role::Client}); },
-                                .quit = [&] { PostMessageW(viewer.hwnd(), WM_CLOSE, 0, 0); }});
+                                    .displays = [&] { displays.show({.role = kvm::layout::Role::Client}); },
+                                    .quit = [&] { PostMessageW(viewer.hwnd(), WM_CLOSE, 0, 0); }});
     viewer.set_link_listener(
         [&](kvm::LinkState before, kvm::LinkState now) { tray.on_link_change(before, now, endpoint, true); });
 
@@ -242,8 +244,8 @@ int run_local(const fs::path& input, int fps) {
     // Local playback stands in for a linked owner streaming the folder. hwnd 0 is a placeholder:
     // closing the window logs the stream_stop that would give the window back.
     viewer.set_link_state(kvm::LinkState::Linked);
-    viewer.start_stream({.hwnd = 0, .title = utf8(input.filename().wstring()), .width = first.width,
-                         .height = first.height});
+    viewer.start_stream(
+        {.hwnd = 0, .title = utf8(input.filename().wstring()), .width = first.width, .height = first.height});
 
     kvm::log::info("playing at {} fps; close the window to quit", fps);
     std::jthread player(play_loop, std::cref(jpegs), fps, std::ref(viewer));  // stops before viewer dies

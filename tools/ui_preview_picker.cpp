@@ -24,7 +24,10 @@ int wmain(int argc, wchar_t** argv) {
     using State = kvm::DevicePicker::Row::State;
     std::vector<kvm::DevicePicker::Row> rows;
     if (!empty) {
-        rows = {{.name = L"DESKTOP-9THG8KK", .ip = L"172.20.10.4", .state = connected ? State::Connected : State::Free, .auto_connect = true},
+        rows = {{.name = L"DESKTOP-9THG8KK",
+                 .ip = L"172.20.10.4",
+                 .state = connected ? State::Connected : State::Free,
+                 .auto_connect = true},
                 {.name = L"luka-laptop", .ip = L"172.20.10.7", .state = State::Busy},
                 {.name = L"sandro-pc", .ip = L"172.20.10.9", .state = State::Free},
                 {.name = L"office-desktop", .state = State::Offline, .auto_connect = true}};

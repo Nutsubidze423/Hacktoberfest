@@ -74,7 +74,8 @@ public:
     // the drag there (on_drag_received). False if the channel is closed.
     // image: with a drag, the picture the shell showed under the cursor here; the drag over there
     // shows the same one (on_drag_begin).
-    bool send(std::vector<std::filesystem::path> items, bool drag = false, std::optional<DragImage> image = std::nullopt);
+    bool send(std::vector<std::filesystem::path> items, bool drag = false,
+              std::optional<DragImage> image = std::nullopt);
 
     bool is_open() const { return open_; }
     const std::string& peer() const { return peer_; }

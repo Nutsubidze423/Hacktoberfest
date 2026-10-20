@@ -336,14 +336,12 @@ LRESULT ViewerWindow::handle_message(UINT msg, WPARAM wp, LPARAM lp) {
             return 0;
         }
         break;
-    case WM_NCHITTEST:
-        return hit_test_nc({GET_X_LPARAM(lp), GET_Y_LPARAM(lp)});
+    case WM_NCHITTEST: return hit_test_nc({GET_X_LPARAM(lp), GET_Y_LPARAM(lp)});
     case WM_PAINT:
         render();
         ValidateRect(hwnd, nullptr);
         return 0;
-    case WM_ERASEBKGND:
-        return 1;
+    case WM_ERASEBKGND: return 1;
     case WM_SIZE:
         if (rt_) {
             rt_->Resize(D2D1::SizeU(LOWORD(lp), HIWORD(lp)));
@@ -432,13 +430,9 @@ LRESULT ViewerWindow::handle_message(UINT msg, WPARAM wp, LPARAM lp) {
         return 0;
     }
     case WM_RBUTTONDOWN:
-    case WM_RBUTTONUP:
-        on_mouse_button(proto::MouseButton::Right, msg == WM_RBUTTONDOWN, lp);
-        return 0;
+    case WM_RBUTTONUP: on_mouse_button(proto::MouseButton::Right, msg == WM_RBUTTONDOWN, lp); return 0;
     case WM_MBUTTONDOWN:
-    case WM_MBUTTONUP:
-        on_mouse_button(proto::MouseButton::Middle, msg == WM_MBUTTONDOWN, lp);
-        return 0;
+    case WM_MBUTTONUP: on_mouse_button(proto::MouseButton::Middle, msg == WM_MBUTTONDOWN, lp); return 0;
     case WM_XBUTTONDOWN:
     case WM_XBUTTONUP:
         on_mouse_button(GET_XBUTTON_WPARAM(wp) == XBUTTON1 ? proto::MouseButton::X1 : proto::MouseButton::X2,
@@ -491,9 +485,9 @@ LRESULT ViewerWindow::handle_message(UINT msg, WPARAM wp, LPARAM lp) {
         } else {
             RECT rc;
             GetClientRect(hwnd, &rc);
-            const auto released_on = viewer::hit_test(viewer::layout_strip(static_cast<float>(rc.right), dpi_, text_),
-                                                      static_cast<float>(GET_X_LPARAM(lp)),
-                                                      static_cast<float>(GET_Y_LPARAM(lp)));
+            const auto released_on =
+                viewer::hit_test(viewer::layout_strip(static_cast<float>(rc.right), dpi_, text_),
+                                 static_cast<float>(GET_X_LPARAM(lp)), static_cast<float>(GET_Y_LPARAM(lp)));
             const auto was_pressed = std::exchange(pressed_, viewer::StripButton::None);
             ReleaseCapture();
             if (released_on == was_pressed) {
@@ -513,8 +507,7 @@ LRESULT ViewerWindow::handle_message(UINT msg, WPARAM wp, LPARAM lp) {
         hwnd_ = nullptr;
         break;
     }
-    default:
-        break;
+    default: break;
     }
     return DefWindowProcW(hwnd, msg, wp, lp);
 }
@@ -542,8 +535,8 @@ LRESULT ViewerWindow::hit_test_nc(POINT screen) const {
     }
     const auto layout = viewer::layout_strip(static_cast<float>(rc.right), dpi_, text_);
     if (static_cast<float>(pt.y) < layout.strip.bottom) {
-        const bool on_button = viewer::hit_test(layout, static_cast<float>(pt.x), static_cast<float>(pt.y)) !=
-                               viewer::StripButton::None;
+        const bool on_button =
+            viewer::hit_test(layout, static_cast<float>(pt.x), static_cast<float>(pt.y)) != viewer::StripButton::None;
         return on_button ? HTCLIENT : HTCAPTION;
     }
     return HTCLIENT;
@@ -551,23 +544,12 @@ LRESULT ViewerWindow::hit_test_nc(POINT screen) const {
 
 void ViewerWindow::on_strip_click(viewer::StripButton button) {
     switch (button) {
-    case viewer::StripButton::Close:
-        PostMessageW(hwnd_, WM_CLOSE, 0, 0);
-        break;
-    case viewer::StripButton::Maximize:
-        ShowWindow(hwnd_, IsZoomed(hwnd_) ? SW_RESTORE : SW_MAXIMIZE);
-        break;
-    case viewer::StripButton::Minimize:
-        ShowWindow(hwnd_, SW_MINIMIZE);
-        break;
-    case viewer::StripButton::Fit:
-        one_to_one_ = !one_to_one_;
-        break;
-    case viewer::StripButton::Hud:
-        hud_visible_ = !hud_visible_;
-        break;
-    case viewer::StripButton::None:
-        break;
+    case viewer::StripButton::Close: PostMessageW(hwnd_, WM_CLOSE, 0, 0); break;
+    case viewer::StripButton::Maximize: ShowWindow(hwnd_, IsZoomed(hwnd_) ? SW_RESTORE : SW_MAXIMIZE); break;
+    case viewer::StripButton::Minimize: ShowWindow(hwnd_, SW_MINIMIZE); break;
+    case viewer::StripButton::Fit: one_to_one_ = !one_to_one_; break;
+    case viewer::StripButton::Hud: hud_visible_ = !hud_visible_; break;
+    case viewer::StripButton::None: break;
     }
 }
 
@@ -678,20 +660,16 @@ ViewerWindow::View ViewerWindow::current_view() const {
         link = shared_.link;
     }
     switch (link) {
-    case LinkState::Waiting:
-        return View::Waiting;
-    case LinkState::Connecting:
-        return View::Connecting;
-    case LinkState::Lost:
-        return View::Lost;
-    case LinkState::Linked:
-        break;
+    case LinkState::Waiting: return View::Waiting;
+    case LinkState::Connecting: return View::Connecting;
+    case LinkState::Lost: return View::Lost;
+    case LinkState::Linked: break;
     }
     if (!have_frame_) {
         return View::Linked;
     }
     return Clock::now() - last_frame_time_ > std::chrono::milliseconds(vt::stall_after_ms) ? View::Stalled
-                                                                                          : View::Streaming;
+                                                                                           : View::Streaming;
 }
 
 bool ViewerWindow::blinking_visible(View view) const {
@@ -864,11 +842,13 @@ void ViewerWindow::draw_content(ui::Painter& p, View view, const D2D1_RECT_F& co
             dst = to_rect_f(fit_rect(displayed_.width, displayed_.height, area));
         }
         image_rect_ = dst;
-        const bool exact = dst.right - dst.left == static_cast<float>(fw) && dst.bottom - dst.top == static_cast<float>(fh);
+        const bool exact =
+            dst.right - dst.left == static_cast<float>(fw) && dst.bottom - dst.top == static_cast<float>(fh);
         if (bitmap_) {
             rt_->PushAxisAlignedClip(content, D2D1_ANTIALIAS_MODE_ALIASED);
-            rt_->DrawBitmap(bitmap_.Get(), dst, 1.0f,
-                            exact ? D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR : D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
+            rt_->DrawBitmap(
+                bitmap_.Get(), dst, 1.0f,
+                exact ? D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR : D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
             rt_->PopAxisAlignedClip();
         }
     }
@@ -913,8 +893,7 @@ void ViewerWindow::draw_state_block(ui::Painter& p, View view, const D2D1_RECT_F
         headline = L"Connection lost";
         details.push_back(reconnects ? L"Reconnecting by itself." : L"Restart Sarke on this PC.");
         break;
-    default:
-        return;
+    default: return;
     }
 
     const ui::Palette& c = pal();
@@ -925,7 +904,8 @@ void ViewerWindow::draw_state_block(ui::Painter& p, View view, const D2D1_RECT_F
     const float side = P(ui::space::s32);
     const float max_w = content.right - content.left - 2 * side;
     // The biggest headline that fits.
-    const TextStyle big = text.measure(TextStyle::Display, headline) <= max_w ? TextStyle::Display : TextStyle::Headline;
+    const TextStyle big =
+        text.measure(TextStyle::Display, headline) <= max_w ? TextStyle::Display : TextStyle::Headline;
     const float eyebrow_h = text.metrics(TextStyle::Title).line_px;
     const float big_h = text.metrics(big).line_px;
     const float body_h = text.metrics(TextStyle::Body).line_px;
@@ -953,7 +933,8 @@ void ViewerWindow::draw_state_block(ui::Painter& p, View view, const D2D1_RECT_F
         constexpr std::wstring_view keys[] = {L"Ctrl", L"Alt", L"Shift", L"W"};
         const float gap = P(ui::space::s8);
         const float pad = P(vt::keycap_pad);
-        float width = std::round(text.measure(TextStyle::Body, before)) + std::round(text.measure(TextStyle::Body, after)) + 2 * gap;
+        float width = std::round(text.measure(TextStyle::Body, before)) +
+                      std::round(text.measure(TextStyle::Body, after)) + 2 * gap;
         for (const auto k : keys) width += std::round(text.measure(TextStyle::Mono, k)) + 2 * pad + P(ui::space::s4);
         width -= P(ui::space::s4);
         if (width <= max_w) {
@@ -977,8 +958,8 @@ void ViewerWindow::draw_state_block(ui::Painter& p, View view, const D2D1_RECT_F
     // This PC, small at the bottom (the website's meta line).
     const float caption_h = text.metrics(TextStyle::Caption).line_px;
     const float footer_top = content.bottom - P(vt::footer_bottom_gap) - caption_h;
-    p.text_center(TextStyle::Caption, footer_, {content.left + side, footer_top, content.right - side, footer_top + caption_h},
-                  c.ink3);
+    p.text_center(TextStyle::Caption, footer_,
+                  {content.left + side, footer_top, content.right - side, footer_top + caption_h}, c.ink3);
 }
 
 void ViewerWindow::draw_stalled(ui::Painter& p, const D2D1_RECT_F& content) {
@@ -996,7 +977,8 @@ void ViewerWindow::draw_stalled(ui::Painter& p, const D2D1_RECT_F& content) {
     const float body_h = text.metrics(TextStyle::Body).line_px;
     const float pad = P(ui::space::s24);
     const float w = std::max(std::round(text.measure(TextStyle::Headline, word)),
-                             std::round(text.measure(TextStyle::Body, L"999.9 s without frames"))) + 2 * pad;
+                             std::round(text.measure(TextStyle::Body, L"999.9 s without frames"))) +
+                    2 * pad;
     const float h = head_h + P(ui::space::s4) + body_h + 2 * pad;
     const float cx = std::floor((content.left + content.right - w) / 2);
     const float cy = std::floor((content.top + content.bottom - h) / 2);

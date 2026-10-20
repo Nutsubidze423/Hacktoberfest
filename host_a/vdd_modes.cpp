@@ -36,7 +36,8 @@ const std::regex& mode_pattern() {
 }
 
 int count_modes(const std::string& xml) {
-    return static_cast<int>(std::distance(std::sregex_iterator(xml.begin(), xml.end(), mode_pattern()), std::sregex_iterator()));
+    return static_cast<int>(
+        std::distance(std::sregex_iterator(xml.begin(), xml.end(), mode_pattern()), std::sregex_iterator()));
 }
 
 std::string utf8(const fs::path& p) {
@@ -100,9 +101,10 @@ bool add(int width, int height) {
     }
     if (has_mode(xml, width, height)) return true;
     if (const int n = count_modes(xml); n >= kMaxResolutions) {
-        log::warn("vdd: {} lists {} resolutions already - more and the driver's monitor stops working, so {}x{} isn't added "
-                  "(tools\\vdd_modes.ps1 -Restore puts the driver's own list back)",
-                  utf8(settings_path()), n, width, height);
+        log::warn(
+            "vdd: {} lists {} resolutions already - more and the driver's monitor stops working, so {}x{} isn't added "
+            "(tools\\vdd_modes.ps1 -Restore puts the driver's own list back)",
+            utf8(settings_path()), n, width, height);
         return false;
     }
     const auto end = xml.find("</resolutions>");
@@ -114,9 +116,9 @@ bool add(int width, int height) {
     const auto line_start = xml.rfind('\n', end);
     const std::size_t at = line_start == std::string::npos ? end : line_start + 1;
     std::ostringstream block;
-    block << "        <resolution>" << nl << "            <width>" << width << "</width>" << nl << "            <height>"
-          << height << "</height>" << nl << "            <refresh_rate>60</refresh_rate>" << nl << "        </resolution>"
-          << nl;
+    block << "        <resolution>" << nl << "            <width>" << width << "</width>" << nl
+          << "            <height>" << height << "</height>" << nl << "            <refresh_rate>60</refresh_rate>"
+          << nl << "        </resolution>" << nl;
     xml.insert(at, block.str());
 
     std::ofstream out(settings_path(), std::ios::binary | std::ios::trunc);
@@ -140,7 +142,8 @@ bool restart_driver() {
         L"    Disable-PnpDevice -InstanceId $x.InstanceId -Confirm:$false;"
         L"    Enable-PnpDevice -InstanceId $x.InstanceId -Confirm:$false } };"
         L"exit 0";
-    const std::wstring params = L"-NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand " + encoded_command(script);
+    const std::wstring params =
+        L"-NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand " + encoded_command(script);
 
     SHELLEXECUTEINFOW info{};
     info.cbSize = sizeof(info);

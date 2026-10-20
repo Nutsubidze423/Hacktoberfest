@@ -47,7 +47,8 @@ public:
     // source's thread. False if a drag is already running or `files` is empty.
     // image: the picture to show under the cursor (the one the other PC's shell drew for these files,
     // so the drag looks the same on both screens); without it the shell draws a generic one.
-    bool start(std::vector<std::filesystem::path> files, OnDone on_done = {}, std::optional<DragImage> image = std::nullopt);
+    bool start(std::vector<std::filesystem::path> files, OnDone on_done = {},
+               std::optional<DragImage> image = std::nullopt);
 
     bool dragging() const { return dragging_; }
 

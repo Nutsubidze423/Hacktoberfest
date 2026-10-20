@@ -35,12 +35,12 @@ inline constexpr std::uint32_t kMaxFramePayloadBytes = 32 * 1024 * 1024;
 enum class MouseButton { Left, Right, Middle, X1, X2 };
 
 NLOHMANN_JSON_SERIALIZE_ENUM(MouseButton, {
-    {MouseButton::Left, "left"},
-    {MouseButton::Right, "right"},
-    {MouseButton::Middle, "middle"},
-    {MouseButton::X1, "x1"},
-    {MouseButton::X2, "x2"},
-})
+                                              {MouseButton::Left, "left"},
+                                              {MouseButton::Right, "right"},
+                                              {MouseButton::Middle, "middle"},
+                                              {MouseButton::X1, "x1"},
+                                              {MouseButton::X2, "x2"},
+                                          })
 
 // Both directions, first message on a new connection: B (always the TCP client) sends it, A checks
 // protocol_version and answers with its own. screen_* = the sender's primary monitor, so a window
@@ -58,8 +58,8 @@ struct Hello {
 };
 
 // Both directions (KVM), controller -> controlled. Either PC can be the controller: the side whose
-// physical mouse/keyboard crossed its edge; from now on its input drives the receiver. y_norm = edge crossing height (0..1).
-// desk = desk mode: the cursor follows desk_move (absolute) instead of mouse_move, no edge logic.
+// physical mouse/keyboard crossed its edge; from now on its input drives the receiver. y_norm = edge crossing height
+// (0..1). desk = desk mode: the cursor follows desk_move (absolute) instead of mouse_move, no edge logic.
 struct FocusEnter {
     static constexpr std::string_view kType = "focus_enter";
     double y_norm = 0.5;
@@ -208,7 +208,7 @@ struct DeskLayout {
 // remembers this per peer (config.json "peers"), so every PC it meets keeps its own place.
 struct Layout {
     static constexpr std::string_view kType = "layout";
-    std::string you_are;     // "left" / "right" / "top" / "bottom"
+    std::string you_are;  // "left" / "right" / "top" / "bottom"
     std::int64_t set_at = 0;
 };
 
@@ -260,15 +260,17 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(DeskRect, x, y, w, h)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(DeskWindow, id, x, y, w, h)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(DeskLayout, desk_w, desk_h, active, windows)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(Layout, you_are, set_at)
-inline void to_json(nlohmann::json& j, const Identify&) { j = nlohmann::json::object(); }
+inline void to_json(nlohmann::json& j, const Identify&) {
+    j = nlohmann::json::object();
+}
 inline void from_json(const nlohmann::json&, Identify&) {}
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(FrameHeader, seq, t_capture_us, width, height, codec, layer, x, y,
                                                 desk_w, desk_h, rects, window, alpha_bytes)
 
 // Any message that travels on the control channel (port 50500).
-using Message = std::variant<Hello, FocusEnter, FocusLeave, MouseMove, MouseButtonEvent, MouseWheel,
-                             Key, StreamStart, StreamStop, RemoteMouseMove, Clipboard, Ping, Pong,
-                             DeskMove, DeskCursor, DeskLayout, Layout, Identify>;
+using Message =
+    std::variant<Hello, FocusEnter, FocusLeave, MouseMove, MouseButtonEvent, MouseWheel, Key, StreamStart, StreamStop,
+                 RemoteMouseMove, Clipboard, Ping, Pong, DeskMove, DeskCursor, DeskLayout, Layout, Identify>;
 
 // Serializes a message struct (including FrameHeader) to JSON with its "type" field set.
 template <class M>

@@ -237,7 +237,8 @@ int main() {
         const double reachable = reachable_fps(20.0, 30);
         const auto r = run(20ms, 30, 3s);
         const double fps = static_cast<double>(r.headers.size()) / r.seconds;
-        check(!r.headers.empty() && seq_without_gaps(r), std::format("{} frames, seq 0..n-1, codec jpeg", r.headers.size()));
+        check(!r.headers.empty() && seq_without_gaps(r),
+              std::format("{} frames, seq 0..n-1, codec jpeg", r.headers.size()));
         check(r.all_valid_jpeg, "every payload is a 1920x1080 JPEG");
         check(fps <= 31.0, std::format("{:.1f} frames/s (cap 30; this CPU reaches about {:.0f})", fps, reachable));
         // Too few frames means a stalled sender, or a CPU busy with other work: on a shared dev PC that

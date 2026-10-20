@@ -41,7 +41,7 @@ public:
     struct Window {
         HWND hwnd = nullptr;
         display::Rect frame;  // the whole frame (no shadow), screen coordinates
-        display::Rect rect;   // the part of it on the VDD that takes clicks (incl. resize borders), screen coordinates
+        display::Rect rect;  // the part of it on the VDD that takes clicks (incl. resize borders), screen coordinates
         std::string cls;
         std::string title;
     };

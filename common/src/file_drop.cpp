@@ -78,7 +78,8 @@ std::optional<DragImage> drag_image_in(IDataObject* data) {
         std::int32_t head[4]{};  // width, height, cursor x, cursor y
         if (size >= kHeaderBytes) std::memcpy(head, p, sizeof(head));
         const int w = head[0], h = head[1];
-        const std::size_t pixels = static_cast<std::size_t>(w > 0 ? w : 0) * static_cast<std::size_t>(h > 0 ? h : 0) * 4;
+        const std::size_t pixels =
+            static_cast<std::size_t>(w > 0 ? w : 0) * static_cast<std::size_t>(h > 0 ? h : 0) * 4;
         if (w > 0 && h > 0 && w <= 1024 && h <= 1024 && size >= kHeaderBytes + pixels) {
             DragImage image{.width = w, .height = h, .cursor_x = head[2], .cursor_y = head[3]};
             image.bgra.resize(pixels);
@@ -274,7 +275,8 @@ void catch_over_window(HWND hwnd, WindowState& state, const CatchOverRequest& re
     SetLayeredWindowAttributes(hwnd, 0, 1, LWA_ALPHA);
     SetWindowRgn(hwnd, region, FALSE);  // the window owns the region from now on
     state.shaped = true;
-    SetWindowPos(hwnd, HWND_TOPMOST, a.left, a.top, a.right - a.left, a.bottom - a.top, SWP_NOACTIVATE | SWP_SHOWWINDOW);
+    SetWindowPos(hwnd, HWND_TOPMOST, a.left, a.top, a.right - a.left, a.bottom - a.top,
+                 SWP_NOACTIVATE | SWP_SHOWWINDOW);
     POINT cur{};
     GetCursorPos(&cur);
     start_catching(hwnd, state, cur);
@@ -302,72 +304,68 @@ void paint(HWND hwnd, WindowState& state) {
 LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     auto* state = reinterpret_cast<WindowState*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
     switch (msg) {
-        case WM_NCCREATE:
-            SetWindowLongPtrW(hwnd, GWLP_USERDATA,
-                              reinterpret_cast<LONG_PTR>(reinterpret_cast<CREATESTRUCTW*>(lp)->lpCreateParams));
-            break;
-        case kShowMessage:
-            if (state) show_window(hwnd, *state, POINT{GET_X_LPARAM(lp), GET_Y_LPARAM(lp)}, static_cast<UINT>(wp));
-            return 0;
-        case kHideMessage:
-            if (state) hide_window(hwnd, *state);
-            return 0;
-        case kCatchMessage:
-            if (state) catch_window(hwnd, *state, POINT{GET_X_LPARAM(lp), GET_Y_LPARAM(lp)});
-            return 0;
-        case kCatchOverMessage: {
-            std::unique_ptr<CatchOverRequest> req(reinterpret_cast<CatchOverRequest*>(lp));
-            if (state && req) catch_over_window(hwnd, *state, *req);
+    case WM_NCCREATE:
+        SetWindowLongPtrW(hwnd, GWLP_USERDATA,
+                          reinterpret_cast<LONG_PTR>(reinterpret_cast<CREATESTRUCTW*>(lp)->lpCreateParams));
+        break;
+    case kShowMessage:
+        if (state) show_window(hwnd, *state, POINT{GET_X_LPARAM(lp), GET_Y_LPARAM(lp)}, static_cast<UINT>(wp));
+        return 0;
+    case kHideMessage:
+        if (state) hide_window(hwnd, *state);
+        return 0;
+    case kCatchMessage:
+        if (state) catch_window(hwnd, *state, POINT{GET_X_LPARAM(lp), GET_Y_LPARAM(lp)});
+        return 0;
+    case kCatchOverMessage: {
+        std::unique_ptr<CatchOverRequest> req(reinterpret_cast<CatchOverRequest*>(lp));
+        if (state && req) catch_over_window(hwnd, *state, *req);
+        return 0;
+    }
+    case WM_TIMER:
+        if (wp == kReleaseTimer) {
+            KillTimer(hwnd, kReleaseTimer);
+            KillTimer(hwnd, kGiveUpTimer);
+            if (state) state->catching = false;
+            input::send_mouse_button(input::MouseButton::Left, false);  // the file drag drops onto us
             return 0;
         }
-        case WM_TIMER:
-            if (wp == kReleaseTimer) {
-                KillTimer(hwnd, kReleaseTimer);
-                KillTimer(hwnd, kGiveUpTimer);
-                if (state) state->catching = false;
-                input::send_mouse_button(input::MouseButton::Left, false);  // the file drag drops onto us
-                return 0;
-            }
-            if (wp == kGiveUpTimer) {
-                KillTimer(hwnd, kGiveUpTimer);
-                if (state && state->catching) {
-                    state->catching = false;
-                    hide_window(hwnd, *state);
-                    log::info("file_drop: no file drag arrived here, left the drag alone");
-                }
-                return 0;
-            }
-            if (state && wp == kHideTimer) {
-                if (state->target && state->target->dragging()) {
-                    SetTimer(hwnd, kHideTimer, 500, nullptr);  // a drag is over us: stay
-                } else {
-                    hide_window(hwnd, *state);
-                }
+        if (wp == kGiveUpTimer) {
+            KillTimer(hwnd, kGiveUpTimer);
+            if (state && state->catching) {
+                state->catching = false;
+                hide_window(hwnd, *state);
+                log::info("file_drop: no file drag arrived here, left the drag alone");
             }
             return 0;
-        case WM_MOUSEACTIVATE:
-            return MA_NOACTIVATE;
-        case WM_PAINT:
-            if (state) {
-                paint(hwnd, *state);
-                return 0;
+        }
+        if (state && wp == kHideTimer) {
+            if (state->target && state->target->dragging()) {
+                SetTimer(hwnd, kHideTimer, 500, nullptr);  // a drag is over us: stay
+            } else {
+                hide_window(hwnd, *state);
             }
-            break;
-        case WM_CLOSE:
-            DestroyWindow(hwnd);
+        }
+        return 0;
+    case WM_MOUSEACTIVATE: return MA_NOACTIVATE;
+    case WM_PAINT:
+        if (state) {
+            paint(hwnd, *state);
             return 0;
-        case WM_DESTROY:
-            RevokeDragDrop(hwnd);
-            if (state) {
-                if (state->target) state->target->Release();
-                if (state->font) DeleteObject(state->font);
-                delete state;
-                SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
-            }
-            PostQuitMessage(0);
-            return 0;
-        default:
-            break;
+        }
+        break;
+    case WM_CLOSE: DestroyWindow(hwnd); return 0;
+    case WM_DESTROY:
+        RevokeDragDrop(hwnd);
+        if (state) {
+            if (state->target) state->target->Release();
+            if (state->font) DeleteObject(state->font);
+            delete state;
+            SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
+        }
+        PostQuitMessage(0);
+        return 0;
+    default: break;
     }
     return DefWindowProcW(hwnd, msg, wp, lp);
 }
@@ -399,9 +397,9 @@ FileDropCatcher::FileDropCatcher(OnDrop on_drop, std::wstring label)
         RegisterClassExW(&wc);  // fails harmlessly if another catcher registered it already
 
         auto* state = new WindowState{label_, &visible_};
-        const HWND hwnd = CreateWindowExW(WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_LAYERED,
-                                          kClassName, label_.c_str(), WS_POPUP, 0, 0, 1, 1, nullptr, nullptr,
-                                          GetModuleHandleW(nullptr), state);
+        const HWND hwnd =
+            CreateWindowExW(WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_LAYERED, kClassName,
+                            label_.c_str(), WS_POPUP, 0, 0, 1, 1, nullptr, nullptr, GetModuleHandleW(nullptr), state);
         if (!hwnd) {
             log::error("file_drop: CreateWindowEx failed ({})", GetLastError());
             delete state;
@@ -453,7 +451,8 @@ void FileDropCatcher::catch_over(RECT area, std::vector<RECT> holes) {
     const HWND h = hwnd_;
     if (!h) return;
     auto req = std::make_unique<CatchOverRequest>(CatchOverRequest{area, std::move(holes)});
-    if (PostMessageW(h, kCatchOverMessage, 0, reinterpret_cast<LPARAM>(req.get()))) req.release();  // the catcher thread owns it now
+    if (PostMessageW(h, kCatchOverMessage, 0, reinterpret_cast<LPARAM>(req.get())))
+        req.release();  // the catcher thread owns it now
 }
 
 }  // namespace kvm::files

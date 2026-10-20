@@ -43,7 +43,9 @@ constexpr int kShadowRings = 7;
 
 using State = DevicePicker::Row::State;
 
-bool clickable(State s) { return s == State::Free; }
+bool clickable(State s) {
+    return s == State::Free;
+}
 
 std::uint32_t dot_color(State s) {
     switch (s) {
@@ -95,8 +97,8 @@ bool DevicePicker::ensure_window() {
         if (!RegisterClassExW(&wc)) return false;
     }
     // Per-pixel alpha: the rounded corners and the shadow are really transparent (and click-through).
-    CreateWindowExW(WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_LAYERED, kClassName, L"Connect to another PC", WS_POPUP, 0, 0,
-                    1, 1, nullptr, nullptr, GetModuleHandleW(nullptr), this);
+    CreateWindowExW(WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_LAYERED, kClassName, L"Connect to another PC", WS_POPUP, 0,
+                    0, 1, 1, nullptr, nullptr, GetModuleHandleW(nullptr), this);
     return hwnd_ != nullptr;  // set in WM_NCCREATE
 }
 
@@ -247,7 +249,8 @@ void DevicePicker::render() {
         const auto r = row_rect(0);
         p.round(r, P(ui::radius::sm), c.fill);
         const float ty = std::round((r.top + r.bottom - line(TextStyle::BodyStrong) - line(TextStyle::Caption)) / 2);
-        p.text(TextStyle::BodyStrong, L"Looking for other PCs…", r.left + P(kRowPad), ty, r.right - r.left - 2 * P(kRowPad), c.ink2);
+        p.text(TextStyle::BodyStrong, L"Looking for other PCs…", r.left + P(kRowPad), ty,
+               r.right - r.left - 2 * P(kRowPad), c.ink2);
         p.text(TextStyle::Caption, L"Start Sarke on the other PC, on the same Wi-Fi", r.left + P(kRowPad),
                ty + line(TextStyle::BodyStrong), r.right - r.left - 2 * P(kRowPad), c.ink3);
     }
@@ -272,14 +275,17 @@ void DevicePicker::render() {
                                                    std::round(mid - line(TextStyle::Caption) / 2), c.ink3);
         float text_right = auto_label_left - P(kRowPad);
         if (const std::wstring_view st = state_text(row.state); !st.empty()) {
-            const std::uint32_t ink = row.state == State::Connected ? c.ok : row.state == State::Connecting ? c.warn : c.ink3;
-            text_right = p.text_right(TextStyle::Caption, st, text_right, std::round(mid - line(TextStyle::Caption) / 2), ink) -
-                         P(kRowPad);
+            const std::uint32_t ink = row.state == State::Connected    ? c.ok
+                                      : row.state == State::Connecting ? c.warn
+                                                                       : c.ink3;
+            text_right =
+                p.text_right(TextStyle::Caption, st, text_right, std::round(mid - line(TextStyle::Caption) / 2), ink) -
+                P(kRowPad);
         }
         const float name_top = std::round(mid - (line(TextStyle::BodyStrong) + line(TextStyle::Mono)) / 2);
         p.text(TextStyle::BodyStrong, row.name, tx, name_top, std::max(0.0f, text_right - tx), c.ink, dim);
-        p.text(TextStyle::Mono, row.ip.empty() ? std::wstring(L"—") : row.ip, tx, name_top + line(TextStyle::BodyStrong),
-               std::max(0.0f, text_right - tx), c.ink2, dim);
+        p.text(TextStyle::Mono, row.ip.empty() ? std::wstring(L"—") : row.ip, tx,
+               name_top + line(TextStyle::BodyStrong), std::max(0.0f, text_right - tx), c.ink2, dim);
 
         // The Auto switch: a pill track and a round knob.
         const bool auto_hot = hover_.row == i && hover_.part == Part::Auto;
@@ -331,7 +337,8 @@ LRESULT DevicePicker::handle_message(UINT msg, WPARAM wp, LPARAM lp) {
         return 0;
     case WM_TIMER:
         if (wp == kOutsideTimer) {
-            const bool pressed = (GetAsyncKeyState(VK_LBUTTON) | GetAsyncKeyState(VK_RBUTTON) | GetAsyncKeyState(VK_MBUTTON)) & 0x8000;
+            const bool pressed =
+                (GetAsyncKeyState(VK_LBUTTON) | GetAsyncKeyState(VK_RBUTTON) | GetAsyncKeyState(VK_MBUTTON)) & 0x8000;
             POINT pt{};
             GetCursorPos(&pt);
             const HWND under = WindowFromPoint(pt);
@@ -364,8 +371,9 @@ LRESULT DevicePicker::handle_message(UINT msg, WPARAM wp, LPARAM lp) {
         return 0;
     case WM_SETCURSOR:
         if (LOWORD(lp) == HTCLIENT) {
-            const bool hand = hover_.part == Part::Auto || hover_.part == Part::Disconnect ||
-                              (hover_.part == Part::Row && hover_.row < rows_.size() && clickable(rows_[hover_.row].state));
+            const bool hand =
+                hover_.part == Part::Auto || hover_.part == Part::Disconnect ||
+                (hover_.part == Part::Row && hover_.row < rows_.size() && clickable(rows_[hover_.row].state));
             SetCursor(LoadCursorW(nullptr, hand ? IDC_HAND : IDC_ARROW));
             return TRUE;
         }
@@ -401,8 +409,7 @@ LRESULT DevicePicker::handle_message(UINT msg, WPARAM wp, LPARAM lp) {
         SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
         hwnd_ = nullptr;
         break;
-    default:
-        break;
+    default: break;
     }
     return DefWindowProcW(hwnd, msg, wp, lp);
 }

@@ -21,10 +21,22 @@ RemoteInput::~RemoteInput() {
 
 bool RemoteInput::handle(const proto::Message& msg) {
     return std::visit(proto::Overloaded{
-                          [this](const proto::RemoteMouseMove& m) { handle(m); return true; },
-                          [this](const proto::MouseButtonEvent& m) { handle(m); return true; },
-                          [this](const proto::MouseWheel& m) { handle(m); return true; },
-                          [this](const proto::Key& m) { handle(m); return true; },
+                          [this](const proto::RemoteMouseMove& m) {
+                              handle(m);
+                              return true;
+                          },
+                          [this](const proto::MouseButtonEvent& m) {
+                              handle(m);
+                              return true;
+                          },
+                          [this](const proto::MouseWheel& m) {
+                              handle(m);
+                              return true;
+                          },
+                          [this](const proto::Key& m) {
+                              handle(m);
+                              return true;
+                          },
                           [](const auto&) { return false; },
                       },
                       msg);
@@ -107,8 +119,8 @@ bool RemoteInput::ensure_foreground() {
 
     // Only the foreground window's thread may hand the foreground over, so borrow its input queue.
     const DWORD me = GetCurrentThreadId();
-    const bool attached = foreground_thread != 0 && foreground_thread != me &&
-                          AttachThreadInput(me, foreground_thread, TRUE);
+    const bool attached =
+        foreground_thread != 0 && foreground_thread != me && AttachThreadInput(me, foreground_thread, TRUE);
     const bool ok = SetForegroundWindow(window_) != FALSE;
     if (attached) AttachThreadInput(me, foreground_thread, FALSE);
     if (!ok) log::warn("remote_input: couldn't bring the shared window to the foreground");

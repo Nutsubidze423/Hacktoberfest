@@ -24,14 +24,15 @@ host::CaptureOptions capture_options(const KvmOptions& o) {
 
 KvmLink::KvmLink(KvmOptions options)
     : options_(std::move(options)),
-      inject_(options_.peer_side,
-              [this](const proto::Message& m) {
+      inject_(
+          options_.peer_side,
+          [this](const proto::Message& m) {
                   // Our injected cursor went back through the edge: the peer has
                   // its input again, so this PC may hand over its own.
-                  if (std::holds_alternative<proto::FocusLeave>(m) && capture_) capture_->set_suspended(false);
-                  return send(m);
-              },
-              options_.leave_cooldown) {
+              if (std::holds_alternative<proto::FocusLeave>(m) && capture_) capture_->set_suspended(false);
+              return send(m);
+          },
+          options_.leave_cooldown) {
     inject_.set_desk(options_.desk);
 }
 

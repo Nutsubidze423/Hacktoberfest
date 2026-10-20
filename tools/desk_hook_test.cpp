@@ -208,7 +208,8 @@ int main() {
 
     std::atomic<int> emergencies{0};
     {
-        InputCapture cap({.client_side = display::Side::Right, .switch_cooldown_ms = 0, .accept_injected = true, .desk = &region});
+        InputCapture cap(
+            {.client_side = display::Side::Right, .switch_cooldown_ms = 0, .accept_injected = true, .desk = &region});
         check(cap.start(), "hooks installed");
         cap.set_on_emergency([&] { ++emergencies; });
         cap.set_client(sink);
@@ -257,10 +258,12 @@ int main() {
         key('A', true);
         key('A', false);
         settle();
-        check(only<proto::Key>(take_sent()).size() == 2 && take_seen().empty(), "keys go to the peer after clicking there");
+        check(only<proto::Key>(take_sent()).size() == 2 && take_seen().empty(),
+              "keys go to the peer after clicking there");
         mouse(MOUSEEVENTF_WHEEL, static_cast<DWORD>(-120));
         settle();
-        check(only<proto::MouseWheel>(take_sent()).size() == 1 && take_seen().empty(), "wheel on the peer's desktop -> peer");
+        check(only<proto::MouseWheel>(take_sent()).size() == 1 && take_seen().empty(),
+              "wheel on the peer's desktop -> peer");
 
         // -- on our window: everything stays here
         abs_move(on_window);
@@ -277,10 +280,12 @@ int main() {
         key('B', true);
         key('B', false);
         settle();
-        check(only<proto::Key>(take_sent()).empty() && take_seen().size() == 2, "keys stay here after clicking our window");
+        check(only<proto::Key>(take_sent()).empty() && take_seen().size() == 2,
+              "keys stay here after clicking our window");
         mouse(MOUSEEVENTF_WHEEL, static_cast<DWORD>(120));
         settle();
-        check(only<proto::MouseWheel>(take_sent()).empty() && take_seen().size() == 1, "wheel on our window stays here");
+        check(only<proto::MouseWheel>(take_sent()).empty() && take_seen().size() == 1,
+              "wheel on our window stays here");
 
         // -- a button pressed on the peer's desktop is released there, wherever the cursor is
         abs_move(on_peer);
@@ -342,9 +347,11 @@ int main() {
         settle();
         {
             const auto c = cursor();
-            check(!v.contains(c) && c.x == v.left - 1, "not live: the cursor can't go onto the VDD (stops at the edge)");
+            check(!v.contains(c) && c.x == v.left - 1,
+                  "not live: the cursor can't go onto the VDD (stops at the edge)");
             const auto enters = only<proto::FocusEnter>(take_sent());
-            check(enters.size() == 1 && !enters[0].desk && cap.remote() && !cap.desk(), "... where the old edge switch happens");
+            check(enters.size() == 1 && !enters[0].desk && cap.remote() && !cap.desk(),
+                  "... where the old edge switch happens");
         }
         cap.switch_to_local(true);
         settle();
@@ -376,6 +383,7 @@ int main() {
     observer.join();
     vdd->detach();
     SetCursorPos(orig.x, orig.y);
-    std::printf(g_failures == 0 ? "desk_hook_test: all checks passed\n" : "desk_hook_test: %d check(s) FAILED\n", g_failures);
+    std::printf(g_failures == 0 ? "desk_hook_test: all checks passed\n" : "desk_hook_test: %d check(s) FAILED\n",
+                g_failures);
     return g_failures == 0 ? 0 : 1;
 }

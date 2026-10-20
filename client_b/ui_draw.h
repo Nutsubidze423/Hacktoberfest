@@ -108,7 +108,8 @@ public:
     // Same, right-aligned so the text ends at `right`. Returns the text's left x.
     float text_right(TextStyle style, std::wstring_view s, float right, float top, std::uint32_t rgb);
     // One line centred in `r` (both ways). Returns the text's left x.
-    float text_center(TextStyle style, std::wstring_view s, const D2D1_RECT_F& r, std::uint32_t rgb, float alpha = 1.0f);
+    float text_center(TextStyle style, std::wstring_view s, const D2D1_RECT_F& r, std::uint32_t rgb,
+                      float alpha = 1.0f);
 
     const TextStyles& styles() const { return text_; }
     ID2D1RenderTarget* rt() const { return rt_; }

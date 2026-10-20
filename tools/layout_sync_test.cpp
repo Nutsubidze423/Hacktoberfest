@@ -38,8 +38,9 @@ int main() {
     kvm::Config cfg;
     cfg.client_side = "left";  // the host's default: the client stands on its left
     cfg.peers["tabuladze"] = {.side = "right", .set_at = 1000};
-    check(ls::for_peer(cfg, "tabuladze", true).side == Side::Right && ls::for_peer(cfg, "tabuladze", true).set_at == 1000,
-          "a saved peer keeps its own place");
+    check(
+        ls::for_peer(cfg, "tabuladze", true).side == Side::Right && ls::for_peer(cfg, "tabuladze", true).set_at == 1000,
+        "a saved peer keeps its own place");
     check(ls::for_peer(cfg, "tabuladze", false).side == Side::Right, "...whichever role this PC has now");
     check(ls::for_peer(cfg, "new-pc", true).side == Side::Left && ls::for_peer(cfg, "new-pc", true).set_at == 0,
           "an unknown peer: host default = client_side");
@@ -61,7 +62,8 @@ int main() {
     // Later tabuladze's user moves Luka to the top: that is newer, Luka follows (tabuladze is below).
     const View temo_moved{Side::Top, 3000};
     const auto moved = ls::resolve(luka, ls::to_message(temo_moved), true);
-    check(moved.adopted && moved.view.side == Side::Bottom && moved.view.set_at == 3000, "a later change on the other PC wins");
+    check(moved.adopted && moved.view.side == Side::Bottom && moved.view.set_at == 3000,
+          "a later change on the other PC wins");
 
     // Two defaults: the host's wins, the client takes the opposite.
     const View host_default{Side::Left, 0}, client_default{Side::Left, 0};

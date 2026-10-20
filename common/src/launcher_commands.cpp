@@ -11,7 +11,8 @@
 
 namespace kvm {
 
-LauncherCommands::LauncherCommands(std::function<void(const std::string& line)> on_line) : on_line_(std::move(on_line)) {
+LauncherCommands::LauncherCommands(std::function<void(const std::string& line)> on_line)
+    : on_line_(std::move(on_line)) {
     const HANDLE in = GetStdHandle(STD_INPUT_HANDLE);
     if (in == nullptr || in == INVALID_HANDLE_VALUE || GetFileType(in) != FILE_TYPE_PIPE) return;
     thread_ = std::thread([this] { run(); });

@@ -108,7 +108,9 @@ fs::path known_folder(REFKNOWNFOLDERID id) {
     return out;
 }
 
-fs::path sarke_dir() { return known_folder(FOLDERID_LocalAppData) / L"Sarke"; }
+fs::path sarke_dir() {
+    return known_folder(FOLDERID_LocalAppData) / L"Sarke";
+}
 
 fs::path launcher_dir() {
     std::wstring buf(MAX_PATH, L'\0');
@@ -123,7 +125,9 @@ fs::path launcher_dir() {
     }
 }
 
-const wchar_t* role_word(Role r) { return r == Role::Host ? L"host" : L"client"; }
+const wchar_t* role_word(Role r) {
+    return r == Role::Host ? L"host" : L"client";
+}
 
 // Computer names compare without case (Windows treats them that way).
 std::string lower(std::string_view s) {
@@ -132,7 +136,9 @@ std::string lower(std::string_view s) {
     return out;
 }
 
-bool same_name(std::string_view a, std::string_view b) { return lower(a) == lower(b); }
+bool same_name(std::string_view a, std::string_view b) {
+    return lower(a) == lower(b);
+}
 
 // This PC's name as kvm_host announces it (main.cpp's hello).
 std::string computer_name() {
@@ -142,7 +148,9 @@ std::string computer_name() {
     return narrow(std::wstring_view(name, len));
 }
 
-std::wstring scale_text(double scale) { return std::format(L"{}%", std::lround(scale * 100)); }
+std::wstring scale_text(double scale) {
+    return std::format(L"{}%", std::lround(scale * 100));
+}
 
 // The bottom-right corner of the main monitor's work area: where the tray and its cards are.
 POINT tray_corner() {
@@ -159,7 +167,8 @@ POINT tray_corner() {
 
 Event parse_line(std::string_view line) {
     static const std::regex kLine(R"(^\d\d:\d\d:\d\d\.\d{3} \[(\w+)\] (.*)$)");
-    static const std::regex kHostConnected(R"(^client '(.*)' connected from (.+): screen (\d+)x(\d+), dpi scale ([0-9.]+)$)");
+    static const std::regex kHostConnected(
+        R"(^client '(.*)' connected from (.+): screen (\d+)x(\d+), dpi scale ([0-9.]+)$)");
     static const std::regex kHostEnded(R"(^client '(.*)' session ended$)");
     static const std::regex kClientLinkUp(R"(^connected to host (.+)$)");
     static const std::regex kClientHello(R"(^host '(.*)': screen (\d+)x(\d+), dpi scale ([0-9.]+)$)");
@@ -195,7 +204,9 @@ Event parse_line(std::string_view line) {
 
 namespace {
 
-fs::path settings_file(const std::optional<fs::path>& file) { return file ? *file : sarke_dir() / L"settings.json"; }
+fs::path settings_file(const std::optional<fs::path>& file) {
+    return file ? *file : sarke_dir() / L"settings.json";
+}
 
 }  // namespace
 
@@ -245,7 +256,8 @@ bool save_settings(const Settings& s, const std::optional<fs::path>& file) {
 
 std::optional<fs::path> find_app(Role role, const fs::path& dir) {
     const bool host = role == Role::Host;
-    const wchar_t* names[] = {host ? L"sarke_host.exe" : L"sarke_client.exe", host ? L"kvm_host.exe" : L"kvm_client.exe"};
+    const wchar_t* names[] = {host ? L"sarke_host.exe" : L"sarke_client.exe",
+                              host ? L"kvm_host.exe" : L"kvm_client.exe"};
     const fs::path places[] = {dir, dir.parent_path() / (host ? L"host_a" : L"client_b")};
     std::error_code ec;
     for (const auto& place : places) {
@@ -357,7 +369,8 @@ private:
     DevicePicker picker_;
     std::vector<discovery::Host> picker_hosts_;  // what the picker's rows stand for
     std::vector<std::string> picker_names_;
-    std::set<std::string> suppressed_;       // lower-case names the user disconnected from: no auto-connect until they go away
+    std::set<std::string>
+        suppressed_;       // lower-case names the user disconnected from: no auto-connect until they go away
     std::chrono::steady_clock::time_point auto_block_until_{};
     std::mutex scan_mutex_;
     std::vector<Device> scanned_;            // written by the scanner thread
@@ -420,10 +433,10 @@ int App::run() {
     config_path_ = cfg.path;
     if (const auto err = layout::ensure_config(config_path_); !err.empty()) log::warn("launcher: {}", err);
 
-    tray_.create(ui::kAppName, {.open = [this] {
-                                    displays_.show({.config_path = config_path_, .role = role_, .app_restarts = true});
-                                },
-                                .quit = [this] { on_command(kCmdQuit); }});
+    tray_.create(
+        ui::kAppName,
+        {.open = [this] { displays_.show({.config_path = config_path_, .role = role_, .app_restarts = true}); },
+         .quit = [this] { on_command(kCmdQuit); }});
     tray_.set_menu([this] { return build_menu(); }, [this](UINT id) { on_command(id); });
     displays_.set_applied_handler([this](display::Side side) {
         // Connected: the running app moves the other PC at once, on both PCs (kvm/launcher_commands.h).
@@ -451,7 +464,8 @@ int App::run() {
         if (options_.show_devices) {
             pick_device(tray_corner());
         } else {
-            notify(L"Sarke is running", std::format(L"{} · settings are in the tray", role_ == Role::Host ? L"Host" : L"Client"),
+            notify(L"Sarke is running",
+                   std::format(L"{} · settings are in the tray", role_ == Role::Host ? L"Host" : L"Client"),
                    Toast::Kind::Info);
         }
     }
@@ -534,7 +548,8 @@ void App::on_devices() {
     }
     // A PC the user disconnected from may connect automatically again once it has gone away.
     std::erase_if(suppressed_, [&](const std::string& name) {
-        return std::none_of(devices_.begin(), devices_.end(), [&](const Device& d) { return lower(d.host.name) == name; });
+        return std::none_of(devices_.begin(), devices_.end(),
+                            [&](const Device& d) { return lower(d.host.name) == name; });
     });
     refresh_picker();
     maybe_auto_connect();
@@ -598,10 +613,12 @@ std::vector<DevicePicker::Row> App::picker_rows() {
     picker_hosts_.clear();
     picker_names_.clear();
     const auto listed = [&](std::string_view name) {
-        return std::any_of(picker_names_.begin(), picker_names_.end(), [&](const std::string& n) { return same_name(n, name); });
+        return std::any_of(picker_names_.begin(), picker_names_.end(),
+                           [&](const std::string& n) { return same_name(n, name); });
     };
     const auto add = [&](const discovery::Host& host, State state) {
-        rows.push_back({.name = widen(host.name), .ip = widen(host.ip), .state = state, .auto_connect = auto_listed(host.name)});
+        rows.push_back(
+            {.name = widen(host.name), .ip = widen(host.ip), .state = state, .auto_connect = auto_listed(host.name)});
         picker_hosts_.push_back(host);
         picker_names_.push_back(host.name);
     };
@@ -619,22 +636,23 @@ std::vector<DevicePicker::Row> App::picker_rows() {
 }
 
 void App::pick_device(std::optional<POINT> at) {
-    picker_.show(picker_rows(), {
-                                    .connect =
-                                        [this](std::size_t i) {
-                                            if (i >= picker_hosts_.size()) return;
-                                            const discovery::Host host = picker_hosts_[i];
-                                            log::info("launcher: connecting to {} ({}) - picked by the user", host.name, host.ip);
-                                            connect_to(host, /*automatic=*/false);
-                                        },
-                                    .toggle_auto =
-                                        [this](std::size_t i) {
-                                            if (i >= picker_names_.size()) return;
-                                            toggle_auto(picker_names_[i]);
-                                            refresh_picker();
-                                        },
-                                    .disconnect = [this] { disconnect(); },
-                                },
+    picker_.show(picker_rows(),
+                 {
+                     .connect =
+                         [this](std::size_t i) {
+                             if (i >= picker_hosts_.size()) return;
+                             const discovery::Host host = picker_hosts_[i];
+                             log::info("launcher: connecting to {} ({}) - picked by the user", host.name, host.ip);
+                             connect_to(host, /*automatic=*/false);
+                         },
+                     .toggle_auto =
+                         [this](std::size_t i) {
+                             if (i >= picker_names_.size()) return;
+                             toggle_auto(picker_names_[i]);
+                             refresh_picker();
+                         },
+                     .disconnect = [this] { disconnect(); },
+                 },
                  at);
 }
 
@@ -653,7 +671,8 @@ void App::keep_peer_side(Role from, Role to) {
         return;
     }
     // Missing client_side: the apps use "right".
-    const auto client_side = cfg.client_side.empty() ? std::optional(display::Side::Right) : display::parse_side(cfg.client_side);
+    const auto client_side =
+        cfg.client_side.empty() ? std::optional(display::Side::Right) : display::parse_side(cfg.client_side);
     if (!client_side) return;  // invalid: the Displays window asks for a side
     const auto peer_side = layout::peer_side_from(from, *client_side);
     const auto now = layout::client_side_for(to, peer_side);
@@ -670,8 +689,10 @@ bool App::start_app() {
     const auto exe = find_app(role_, launcher_dir());
     if (!exe) {
         set_link(Link::Stopped);
-        notify(L"Sarke can't start", std::format(L"{} not found next to sarke.exe", role_ == Role::Host ? L"kvm_host.exe" : L"kvm_client.exe"),
-               Toast::Kind::Lost);
+        notify(
+            L"Sarke can't start",
+            std::format(L"{} not found next to sarke.exe", role_ == Role::Host ? L"kvm_host.exe" : L"kvm_client.exe"),
+            Toast::Kind::Lost);
         return false;
     }
     if (const auto running = layout::running_role()) {
@@ -725,7 +746,8 @@ bool App::start_app() {
         CloseHandle(out_read);
         CloseHandle(stdin_write_);
         stdin_write_ = nullptr;
-        notify(L"Sarke can't start", std::format(L"Starting {} failed (error {}).", exe->filename().wstring(), GetLastError()),
+        notify(L"Sarke can't start",
+               std::format(L"Starting {} failed (error {}).", exe->filename().wstring(), GetLastError()),
                Toast::Kind::Lost);
         set_link(Link::Stopped);
         return false;
@@ -808,7 +830,8 @@ void App::handle(const Event& e) {
                 displays_.set_peer(peer_, /*connected=*/true);  // also saved in peer.json
                 set_link(Link::Linked);
                 if (!was_linked && settings_.notify_connected) {
-                    std::wstring detail = std::format(L"{}{}{}{}{}", ev.width, ui::kTimes, ev.height, ui::kSeparator, scale_text(ev.scale));
+                    std::wstring detail = std::format(L"{}{}{}{}{}", ev.width, ui::kTimes, ev.height, ui::kSeparator,
+                                                      scale_text(ev.scale));
                     if (!peer_address_.empty()) detail = widen(peer_address_) + ui::kSeparator + detail;
                     notify(L"Connected to " + widen(ev.name), detail, Toast::Kind::Connected);
                 }
@@ -824,7 +847,8 @@ void App::handle(const Event& e) {
                     if (settings_.notify_lost) {
                         const std::wstring who = peer_name_.empty() ? std::wstring(L"the other PC") : widen(peer_name_);
                         notify(L"Connection lost",
-                               role_ == Role::Host ? L"Waiting for " + who + L" to come back." : L"Reconnecting to " + who + L"\u2026",
+                               role_ == Role::Host ? L"Waiting for " + who + L" to come back."
+                                                   : L"Reconnecting to " + who + L"\u2026",
                                Toast::Kind::Lost);
                     }
                 }
@@ -918,8 +942,9 @@ void App::on_reader_done() {
     }
     if (!expected) {
         notify(L"Sarke stopped",
-               last_problem_.empty() ? std::format(L"The {} exited (code {}). Restart it from the Sarke menu.", role_word(role_), code)
-                                     : last_problem_,
+               last_problem_.empty()
+                   ? std::format(L"The {} exited (code {}). Restart it from the Sarke menu.", role_word(role_), code)
+                   : last_problem_,
                Toast::Kind::Lost);
     }
 }
@@ -940,8 +965,8 @@ void App::update_tray() {
     case Link::Starting: word += L"Starting"; break;
     case Link::Waiting:
         word += role_ == Role::Host ? L"Waiting for the other PC"
-                : target_          ? L"Connecting to " + widen(target_->name)
-                                   : L"Looking for the host";
+                : target_           ? L"Connecting to " + widen(target_->name)
+                                    : L"Looking for the host";
         break;
     case Link::Linked:
         word += L"Linked to " + widen(peer_name_);
@@ -975,22 +1000,29 @@ std::vector<TrayIcon::MenuItem> App::build_menu() {
     for (std::size_t i = 0; i < std::size(kQualities); ++i) {
         const bool on = cfg && cfg->jpeg_quality == kQualities[i].value;
         matched = matched || on;
-        quality.submenu.push_back({.id = kCmdQualityBase + static_cast<UINT>(i), .text = kQualities[i].text, .checked = on, .radio = true});
+        quality.submenu.push_back(
+            {.id = kCmdQualityBase + static_cast<UINT>(i), .text = kQualities[i].text, .checked = on, .radio = true});
     }
-    if (cfg && !matched) quality.submenu.push_back({.text = std::format(L"Custom ({})", cfg->jpeg_quality), .checked = true, .radio = true, .enabled = false});
+    if (cfg && !matched)
+        quality.submenu.push_back(
+            {.text = std::format(L"Custom ({})", cfg->jpeg_quality), .checked = true, .radio = true, .enabled = false});
     m.push_back(std::move(quality));
 
     Item fps{.text = L"Frame rate"};
     for (std::size_t i = 0; i < std::size(kFrameRates); ++i) {
-        fps.submenu.push_back({.id = kCmdFpsBase + static_cast<UINT>(i), .text = kFrameRates[i].text,
-                               .checked = cfg && cfg->max_fps == kFrameRates[i].value, .radio = true});
+        fps.submenu.push_back({.id = kCmdFpsBase + static_cast<UINT>(i),
+                               .text = kFrameRates[i].text,
+                               .checked = cfg && cfg->max_fps == kFrameRates[i].value,
+                               .radio = true});
     }
     m.push_back(std::move(fps));
     m.push_back({.id = kCmdDesk, .text = L"Desk mode (the other PC as a monitor)", .checked = cfg && cfg->desk});
 
     Item notes{.text = L"Notifications"};
-    notes.submenu.push_back({.id = kCmdNotifyConnected, .text = L"When the other PC connects", .checked = settings_.notify_connected});
-    notes.submenu.push_back({.id = kCmdNotifyLost, .text = L"When the connection drops", .checked = settings_.notify_lost});
+    notes.submenu.push_back(
+        {.id = kCmdNotifyConnected, .text = L"When the other PC connects", .checked = settings_.notify_connected});
+    notes.submenu.push_back(
+        {.id = kCmdNotifyLost, .text = L"When the connection drops", .checked = settings_.notify_lost});
     m.push_back(std::move(notes));
     m.push_back({.separator = true});
 
@@ -1021,9 +1053,7 @@ void App::on_command(UINT id) {
         return;
     }
     switch (id) {
-    case kCmdDisplays:
-        displays_.show({.config_path = config_path_, .role = role_, .app_restarts = true});
-        break;
+    case kCmdDisplays: displays_.show({.config_path = config_path_, .role = role_, .app_restarts = true}); break;
     case kCmdDesk: {
         const auto cfg = current_config();
         const bool on = !(cfg && cfg->desk);
@@ -1047,17 +1077,16 @@ void App::on_command(UINT id) {
         break;
     }
     case kCmdOpenConfig:
-        ShellExecuteW(nullptr, L"open", L"notepad.exe", (L"\"" + config_path_.wstring() + L"\"").c_str(), nullptr, SW_SHOWNORMAL);
+        ShellExecuteW(nullptr, L"open", L"notepad.exe", (L"\"" + config_path_.wstring() + L"\"").c_str(), nullptr,
+                      SW_SHOWNORMAL);
         break;
     case kCmdShowLog:
-        if (!log_path_.empty()) ShellExecuteW(nullptr, L"open", L"notepad.exe", (L"\"" + log_path_.wstring() + L"\"").c_str(), nullptr, SW_SHOWNORMAL);
+        if (!log_path_.empty())
+            ShellExecuteW(nullptr, L"open", L"notepad.exe", (L"\"" + log_path_.wstring() + L"\"").c_str(), nullptr,
+                          SW_SHOWNORMAL);
         break;
-    case kCmdRoleHost:
-        disconnect();
-        break;
-    case kCmdRoleClient:
-        pick_device();
-        break;
+    case kCmdRoleHost: disconnect(); break;
+    case kCmdRoleClient: pick_device(); break;
     case kCmdRestart:
         if (process_) {
             restart(L"");
@@ -1073,8 +1102,7 @@ void App::on_command(UINT id) {
             PostQuitMessage(0);
         }
         break;
-    default:
-        break;
+    default: break;
     }
 }
 
@@ -1087,7 +1115,8 @@ void App::change_config(std::string_view key, layout::ConfigValue value, const s
 }
 
 void App::restart(const std::wstring& why) {
-    notify(L"Restarting Sarke", why.empty() ? L"Back in a moment." : why + L" \u2014 back in a moment.", Toast::Kind::Info);
+    notify(L"Restarting Sarke", why.empty() ? L"Back in a moment." : why + L" \u2014 back in a moment.",
+           Toast::Kind::Info);
     stop_app(/*restart=*/true);
 }
 
@@ -1107,21 +1136,11 @@ LRESULT CALLBACK App::wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
 
 LRESULT App::handle_message(UINT msg, WPARAM wp, LPARAM lp) {
     switch (msg) {
-    case kMsgLines:
-        on_lines();
-        return 0;
-    case kMsgReaderDone:
-        on_reader_done();
-        return 0;
-    case kMsgDevices:
-        on_devices();
-        return 0;
-    case kMsgRemoteQuit:
-        on_command(kCmdQuit);
-        return 0;
-    case kMsgRemoteRestart:
-        on_command(kCmdRestart);
-        return 0;
+    case kMsgLines: on_lines(); return 0;
+    case kMsgReaderDone: on_reader_done(); return 0;
+    case kMsgDevices: on_devices(); return 0;
+    case kMsgRemoteQuit: on_command(kCmdQuit); return 0;
+    case kMsgRemoteRestart: on_command(kCmdRestart); return 0;
     case kMsgRemoteShow:  // a second launcher was started (Start menu, desktop): the PCs on the network
         pick_device(tray_corner());
         return 0;
@@ -1142,8 +1161,7 @@ LRESULT App::handle_message(UINT msg, WPARAM wp, LPARAM lp) {
             }
         }
         return 0;
-    case WM_QUERYENDSESSION:
-        return TRUE;
+    case WM_QUERYENDSESSION: return TRUE;
     case WM_ENDSESSION:
         if (wp && process_) {  // Windows is signing out: the app gets its own logoff event; wait for it
             WaitForSingleObject(process_, 5000);
@@ -1153,8 +1171,7 @@ LRESULT App::handle_message(UINT msg, WPARAM wp, LPARAM lp) {
         SetWindowLongPtrW(hwnd_, GWLP_USERDATA, 0);
         hwnd_ = nullptr;
         break;
-    default:
-        break;
+    default: break;
     }
     return DefWindowProcW(hwnd_, msg, wp, lp);
 }

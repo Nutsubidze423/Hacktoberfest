@@ -32,15 +32,15 @@ std::string utf8(const std::wstring& s) {
 
 const char* disp_change_name(LONG result) {
     switch (result) {
-        case DISP_CHANGE_SUCCESSFUL: return "DISP_CHANGE_SUCCESSFUL";
-        case DISP_CHANGE_RESTART: return "DISP_CHANGE_RESTART";
-        case DISP_CHANGE_FAILED: return "DISP_CHANGE_FAILED";
-        case DISP_CHANGE_BADMODE: return "DISP_CHANGE_BADMODE";
-        case DISP_CHANGE_NOTUPDATED: return "DISP_CHANGE_NOTUPDATED";
-        case DISP_CHANGE_BADFLAGS: return "DISP_CHANGE_BADFLAGS";
-        case DISP_CHANGE_BADPARAM: return "DISP_CHANGE_BADPARAM";
-        case DISP_CHANGE_BADDUALVIEW: return "DISP_CHANGE_BADDUALVIEW";
-        default: return "DISP_CHANGE_?";
+    case DISP_CHANGE_SUCCESSFUL: return "DISP_CHANGE_SUCCESSFUL";
+    case DISP_CHANGE_RESTART: return "DISP_CHANGE_RESTART";
+    case DISP_CHANGE_FAILED: return "DISP_CHANGE_FAILED";
+    case DISP_CHANGE_BADMODE: return "DISP_CHANGE_BADMODE";
+    case DISP_CHANGE_NOTUPDATED: return "DISP_CHANGE_NOTUPDATED";
+    case DISP_CHANGE_BADFLAGS: return "DISP_CHANGE_BADFLAGS";
+    case DISP_CHANGE_BADPARAM: return "DISP_CHANGE_BADPARAM";
+    case DISP_CHANGE_BADDUALVIEW: return "DISP_CHANGE_BADDUALVIEW";
+    default: return "DISP_CHANGE_?";
     }
 }
 
@@ -58,7 +58,8 @@ std::vector<AttachedMonitor> attached_monitors() {
             MONITORINFOEXW info{};
             info.cbSize = sizeof(info);
             if (GetMonitorInfoW(handle, &info)) {
-                reinterpret_cast<std::vector<AttachedMonitor>*>(param)->push_back({info.szDevice, info.rcMonitor, handle});
+                reinterpret_cast<std::vector<AttachedMonitor>*>(param)->push_back(
+                    {info.szDevice, info.rcMonitor, handle});
             }
             return TRUE;
         },
@@ -70,31 +71,35 @@ std::vector<AttachedMonitor> attached_monitors() {
 // forms that outer edge.
 POINT position_for(display::Side side, int width, int height, const std::vector<AttachedMonitor>& others) {
     if (others.empty()) return {0, 0};
-    const auto by = [](auto key) { return [key](const AttachedMonitor& a, const AttachedMonitor& b) { return key(a) < key(b); }; };
+    const auto by = [](auto key) {
+        return [key](const AttachedMonitor& a, const AttachedMonitor& b) { return key(a) < key(b); };
+    };
     switch (side) {
-        case display::Side::Left: {
-            const auto& m = *std::min_element(others.begin(), others.end(), by([](const auto& m) { return m.rect.left; }));
-            return {m.rect.left - width, m.rect.top};
-        }
-        case display::Side::Top: {
-            const auto& m = *std::min_element(others.begin(), others.end(), by([](const auto& m) { return m.rect.top; }));
-            return {m.rect.left, m.rect.top - height};
-        }
-        case display::Side::Bottom: {
-            const auto& m = *std::max_element(others.begin(), others.end(), by([](const auto& m) { return m.rect.bottom; }));
-            return {m.rect.left, m.rect.bottom};
-        }
-        case display::Side::Right:
-        default: {
-            const auto& m = *std::max_element(others.begin(), others.end(), by([](const auto& m) { return m.rect.right; }));
-            return {m.rect.right, m.rect.top};
-        }
+    case display::Side::Left: {
+        const auto& m = *std::min_element(others.begin(), others.end(), by([](const auto& m) { return m.rect.left; }));
+        return {m.rect.left - width, m.rect.top};
+    }
+    case display::Side::Top: {
+        const auto& m = *std::min_element(others.begin(), others.end(), by([](const auto& m) { return m.rect.top; }));
+        return {m.rect.left, m.rect.top - height};
+    }
+    case display::Side::Bottom: {
+        const auto& m =
+            *std::max_element(others.begin(), others.end(), by([](const auto& m) { return m.rect.bottom; }));
+        return {m.rect.left, m.rect.bottom};
+    }
+    case display::Side::Right:
+    default: {
+        const auto& m = *std::max_element(others.begin(), others.end(), by([](const auto& m) { return m.rect.right; }));
+        return {m.rect.right, m.rect.top};
+    }
     }
 }
 
 // Stages `dm` for `device` in the registry and applies all staged changes at once.
 bool apply(const std::wstring& device, DEVMODEW& dm, const char* what) {
-    const LONG staged = ChangeDisplaySettingsExW(device.c_str(), &dm, nullptr, CDS_UPDATEREGISTRY | CDS_NORESET, nullptr);
+    const LONG staged =
+        ChangeDisplaySettingsExW(device.c_str(), &dm, nullptr, CDS_UPDATEREGISTRY | CDS_NORESET, nullptr);
     if (staged != DISP_CHANGE_SUCCESSFUL) {
         log::warn("vdd: {} {}: {}", what, utf8(device), disp_change_name(staged));
         return false;
@@ -129,7 +134,8 @@ struct DpiScaleSet {
 // The active display source that is `device` (e.g. \\.\DISPLAY5).
 std::optional<DISPLAYCONFIG_PATH_SOURCE_INFO> source_of(const std::wstring& device) {
     UINT32 path_count = 0, mode_count = 0;
-    if (GetDisplayConfigBufferSizes(QDC_ONLY_ACTIVE_PATHS, &path_count, &mode_count) != ERROR_SUCCESS) return std::nullopt;
+    if (GetDisplayConfigBufferSizes(QDC_ONLY_ACTIVE_PATHS, &path_count, &mode_count) != ERROR_SUCCESS)
+        return std::nullopt;
     std::vector<DISPLAYCONFIG_PATH_INFO> paths(path_count);
     std::vector<DISPLAYCONFIG_MODE_INFO> modes(mode_count);
     if (QueryDisplayConfig(QDC_ONLY_ACTIVE_PATHS, &path_count, paths.data(), &mode_count, modes.data(), nullptr) !=
@@ -226,7 +232,8 @@ SIZE VirtualDisplay::best_mode(int width, int height) const {
         return 2'000'000'000LL + std::llabs(static_cast<long long>(m.cx) - width) +
                std::llabs(static_cast<long long>(m.cy) - height);
     };
-    return *std::min_element(modes.begin(), modes.end(), [&](const SIZE& a, const SIZE& b) { return rank(a) < rank(b); });
+    return *std::min_element(modes.begin(), modes.end(),
+                             [&](const SIZE& a, const SIZE& b) { return rank(a) < rank(b); });
 }
 
 bool VirtualDisplay::match_peer(int width, int height, display::Side side) {

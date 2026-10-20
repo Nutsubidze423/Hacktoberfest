@@ -64,7 +64,8 @@ struct FakeB {
         } else if (const auto* m = std::get_if<proto::MouseMove>(&msg)) {
             if (active) move(m->dx, m->dy);
         } else if (const auto* b = std::get_if<proto::MouseButtonEvent>(&msg)) {
-            kvm::log::info("[B] mouse_button {} {}", nlohmann::json(b->button).get<std::string>(), b->down ? "down" : "up");
+            kvm::log::info("[B] mouse_button {} {}", nlohmann::json(b->button).get<std::string>(),
+                           b->down ? "down" : "up");
         } else if (const auto* wh = std::get_if<proto::MouseWheel>(&msg)) {
             kvm::log::info("[B] mouse_wheel {} {}", wh->delta, wh->horizontal ? "horizontal" : "vertical");
         } else if (const auto* k = std::get_if<proto::Key>(&msg)) {
@@ -116,7 +117,8 @@ int wmain(int argc, wchar_t** argv) {
             kvm::log::open_file(argv[++i]);
         } else if (arg == L"--side" && i + 1 < argc) {
             side_arg.emplace();
-            for (const wchar_t c : std::wstring_view(argv[++i])) side_arg->push_back(c < 0x80 ? static_cast<char>(c) : '?');
+            for (const wchar_t c : std::wstring_view(argv[++i]))
+                side_arg->push_back(c < 0x80 ? static_cast<char>(c) : '?');
         }
     }
 
@@ -145,8 +147,8 @@ int wmain(int argc, wchar_t** argv) {
     if (!capture.start()) return 1;
     capture.set_client([&](const proto::Message& m) { return b.receive(m); });
 
-    kvm::log::info("kvm_local_test: simulated B ({}x{}) on the {} of A. Push the cursor against that edge.",
-                   b.w, b.h, display::to_string(*side));
+    kvm::log::info("kvm_local_test: simulated B ({}x{}) on the {} of A. Push the cursor against that edge.", b.w, b.h,
+                   display::to_string(*side));
     kvm::log::info("kvm_local_test: Ctrl+Alt+Shift+Q = emergency exit (ends the test), Ctrl+C = quit while on A.");
 
     while (g_running && !capture.disabled()) std::this_thread::sleep_for(std::chrono::milliseconds(100));

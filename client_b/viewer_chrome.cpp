@@ -50,8 +50,7 @@ void draw_caption_glyph(ui::Painter& p, StripButton button, const D2D1_RECT_F& r
         p.diagonal({gx, gy}, {gx + g, gy + g}, hair, fg);
         p.diagonal({gx + g, gy}, {gx, gy + g}, hair, fg);
         break;
-    default:
-        break;
+    default: break;
     }
 }
 
@@ -65,9 +64,10 @@ StripLayout layout_strip(float client_w, UINT dpi, const ui::TextStyles& text) {
     const float gap = P(vt::toggle_gap, dpi);
     const float top = std::floor((h - pill_h) / 2);
     // Both toggles as wide as their widest label, so "Fit" <-> "1:1" doesn't move anything.
-    const float toggle_w = std::round(std::max({text.measure(TextStyle::BodyStrong, L"HUD"),
-                                                text.measure(TextStyle::BodyStrong, L"Fit"),
-                                                text.measure(TextStyle::BodyStrong, L"1:1")})) + 2 * pad;
+    const float toggle_w =
+        std::round(std::max({text.measure(TextStyle::BodyStrong, L"HUD"), text.measure(TextStyle::BodyStrong, L"Fit"),
+                             text.measure(TextStyle::BodyStrong, L"1:1")})) +
+        2 * pad;
 
     StripLayout l;
     l.strip = {0, 0, client_w, h};
@@ -109,7 +109,8 @@ void draw_strip(ui::Painter& p, const StripLayout& l, const StripModel& m, UINT 
     p.logo({lx, ly, lx + logo, ly + logo});
     float x = lx + logo + P(ui::space::s8, dpi);
     const float name_top = std::floor((h - text.metrics(TextStyle::BodyStrong).line_px) / 2);
-    x += std::round(p.text(TextStyle::BodyStrong, ui::kAppName, x, name_top, l.hud.left - x, c.ink)) + P(ui::space::s12, dpi);
+    x += std::round(p.text(TextStyle::BodyStrong, ui::kAppName, x, name_top, l.hud.left - x, c.ink)) +
+         P(ui::space::s12, dpi);
 
     // Status pill: dot + state word.
     const float pill_h = P(vt::pill_h, dpi);
@@ -150,7 +151,9 @@ void draw_strip(ui::Painter& p, const StripLayout& l, const StripModel& m, UINT 
 
     // Caption buttons: hover fill tile (close: err with a white glyph), like Windows 11.
     for (const StripButton b : {StripButton::Minimize, StripButton::Maximize, StripButton::Close}) {
-        const D2D1_RECT_F& r = b == StripButton::Minimize ? l.minimize : b == StripButton::Maximize ? l.maximize : l.close;
+        const D2D1_RECT_F& r = b == StripButton::Minimize   ? l.minimize
+                               : b == StripButton::Maximize ? l.maximize
+                                                            : l.close;
         const bool hot = m.hover == b || m.pressed == b;
         const std::uint32_t bg = hot ? (b == StripButton::Close ? ui::kCloseHover : c.tile) : c.bg;
         if (hot) {

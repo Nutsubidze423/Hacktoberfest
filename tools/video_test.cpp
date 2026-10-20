@@ -110,7 +110,8 @@ void test_concurrent_senders(net::VideoServer& server) {
     bool intact = true;
     for (std::uint32_t i = 0; i < 2 * kPerThread; ++i) {
         const auto frame = b->recv_frame();
-        intact = intact && frame && frame->payload == make_payload(frame->header.seq, 100'000 + frame->header.seq * 997);
+        intact =
+            intact && frame && frame->payload == make_payload(frame->header.seq, 100'000 + frame->header.seq * 997);
     }
     t1.join();
     t2.join();
