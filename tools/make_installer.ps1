@@ -47,6 +47,10 @@ foreach ($test in 'protocol_test', 'queue_test', 'file_transfer_test', 'clipboar
 }
 Write-Host 'Tests passed.'
 
+# The driver package isn't in git: fetch the pinned, hash-checked copy (skipped when present).
+& powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'fetch_vdd.ps1')
+if ($LASTEXITCODE -ne 0) { throw 'fetch_vdd.ps1 failed - not building the installer' }
+
 & $iscc /Q "installer\sarke.iss"
 if ($LASTEXITCODE -ne 0) { throw 'Inno Setup failed' }
 $setup = Get-ChildItem (Join-Path $root 'dist') -Filter 'SarkeSetup-*.exe' | Sort-Object LastWriteTime -Descending | Select-Object -First 1

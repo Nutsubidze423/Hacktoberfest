@@ -38,8 +38,9 @@ and that PC stays fully usable with its own apps, mouse and keyboard.
 
 ## Install
 
-1. Download [`SarkeSetup-1.1.0.0.exe`](releases/SarkeSetup-1.1.0.0.exe) from the `releases` folder
-   and run it on both PCs. It installs Sarke, the virtual display driver and the firewall rules for
+1. Download `SarkeSetup-<version>.exe` from the
+   [latest release](https://github.com/Nutsubidze423/Hacktoberfest/releases/latest) (or the
+   [website](https://sarke-nine.vercel.app)) and run it on both PCs. It installs Sarke, the virtual display driver and the firewall rules for
    the local network.
 2. Start Sarke on both PCs. It runs in the system tray and shows the PCs running Sarke on the
    network.
@@ -94,7 +95,9 @@ build\x64-release\tools\sarke.exe
 The executables are statically linked: copying `sarke.exe`, `kvm_host.exe`, `kvm_client.exe`,
 `config.json` and `assets\fonts` to another PC is enough to run them there.
 
-To build the installer (needs [Inno Setup 6](https://jrsoftware.org/isinfo.php)):
+To build the installer (needs [Inno Setup 6](https://jrsoftware.org/isinfo.php); the script fetches
+the Virtual Display Driver with `tools\fetch_vdd.ps1`, pinned and hash-checked, since its binaries
+aren't kept in git). Releasing it is described in [docs/RELEASING.md](docs/RELEASING.md):
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File tools\make_installer.ps1
