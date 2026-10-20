@@ -2,8 +2,10 @@
 
 #include "window_mover.h"
 
+#include <format>
 #include <memory>
 #include <optional>
+#include <string>
 #include <vector>
 
 #include "kvm/log.h"
@@ -68,6 +70,20 @@ void wait_until_settled(HWND hwnd) {
     }
 }
 
+// Where the window is, for the log: its rect, maximized or not, and the monitor it is on.
+std::string describe(HWND hwnd) {
+    RECT r{};
+    GetWindowRect(hwnd, &r);
+    MONITORINFO info{};
+    info.cbSize = sizeof(info);
+    const HMONITOR m = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONULL);
+    const bool known = m && GetMonitorInfoW(m, &info);
+    return std::format("({}, {}) {}x{}{}, on monitor ({}, {}) {}x{}", r.left, r.top, r.right - r.left, r.bottom - r.top,
+                       IsZoomed(hwnd) ? " maximized" : "", known ? info.rcMonitor.left : 0,
+                       known ? info.rcMonitor.top : 0, known ? info.rcMonitor.right - info.rcMonitor.left : 0,
+                       known ? info.rcMonitor.bottom - info.rcMonitor.top : 0);
+}
+
 bool placement_matches(HWND hwnd, const WINDOWPLACEMENT& expected) {
     WINDOWPLACEMENT now{};
     now.length = sizeof(now);
@@ -99,25 +115,39 @@ WindowMover::Result WindowMover::send(HWND hwnd, const RECT& monitor) {
     }
 
     // Move first, so a monitor with a different DPI rescales the window, then maximize on it.
+    // Right after the VDD is attached, Windows may still be re-placing windows for the new display
+    // layout and put this one back on its old monitor, where SW_MAXIMIZE would then maximize it. So
+    // check where it is before and after maximizing, and try again a few times.
     const int width = monitor.right - monitor.left;
     const int height = monitor.bottom - monitor.top;
-    if (!SetWindowPos(hwnd, nullptr, monitor.left, monitor.top, width, height, SWP_NOZORDER | SWP_NOACTIVATE)) {
-        const DWORD error = GetLastError();
-        SetWindowPlacement(hwnd, &placement);
-        if (error == ERROR_ACCESS_DENIED) {
-            log::error("window_mover: access denied moving the window; run kvm_host as admin");
-            return Result::Elevated;
+    constexpr int kAttempts = 3;
+    for (int attempt = 1;; ++attempt) {
+        if (!SetWindowPos(hwnd, nullptr, monitor.left, monitor.top, width, height, SWP_NOZORDER | SWP_NOACTIVATE)) {
+            const DWORD error = GetLastError();
+            SetWindowPlacement(hwnd, &placement);
+            if (error == ERROR_ACCESS_DENIED) {
+                log::error("window_mover: access denied moving the window; run kvm_host as admin");
+                return Result::Elevated;
+            }
+            log::error("window_mover: SetWindowPos failed ({})", error);
+            return Result::Failed;
         }
-        log::error("window_mover: SetWindowPos failed ({})", error);
-        return Result::Failed;
-    }
-    wait_until_settled(hwnd);
-    ShowWindow(hwnd, SW_MAXIMIZE);
-
-    if (!on_monitor(hwnd, monitor) || !IsZoomed(hwnd)) {
-        log::error("window_mover: the window did not end up maximized on the target monitor");
-        SetWindowPlacement(hwnd, &placement);
-        return Result::Failed;
+        wait_until_settled(hwnd);
+        if (!on_monitor(hwnd, monitor)) {
+            log::warn("window_mover: attempt {}: moved back before maximizing, now at {}", attempt, describe(hwnd));
+        } else {
+            ShowWindow(hwnd, SW_MAXIMIZE);
+            if (on_monitor(hwnd, monitor) && IsZoomed(hwnd)) break;
+            log::warn("window_mover: attempt {}: maximized elsewhere, at {}", attempt, describe(hwnd));
+            ShowWindow(hwnd, SW_RESTORE);  // a maximized window can't be moved
+        }
+        if (attempt == kAttempts) {
+            log::error("window_mover: the window did not end up maximized on the target monitor ({}, {}) {}x{}",
+                       monitor.left, monitor.top, width, height);
+            SetWindowPlacement(hwnd, &placement);
+            return Result::Failed;
+        }
+        Sleep(300);  // let Windows finish the display change before the next try
     }
     hwnd_ = hwnd;
     saved_ = placement;
