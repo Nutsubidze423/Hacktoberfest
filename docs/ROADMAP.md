@@ -573,9 +573,10 @@ Attempts are rate-limited.
 
 ### Tasks
 
-- [ ] **P1.1 `docs/SECURITY.md`: threat model and design** (S), branch `phase1/threat-model`.
+- [x] **P1.1 `docs/SECURITY.md`: threat model and design** (S), branch `phase1/threat-model`.
   - The model and design above in full, plus test vectors for the code derivation.
   - **Done when:** you have reviewed it, and D6 and D7 are answered.
+  - **Result (2026-10-20):** written as [docs/SECURITY.md](SECURITY.md) and approved by Demetre (PR #3). GitHub private vulnerability reporting is on.
 
 - [ ] **P1.2 TLS transport** (M), branch `phase1/tls`.
   - **New dependency:** vcpkg `openssl` (Apache-2.0); why it is needed is in D6.
