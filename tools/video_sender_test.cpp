@@ -262,7 +262,9 @@ int main() {
         const size_t n = r.latency_us.size();
         const double early = average_ms(r.latency_us, 0, n / 2), late = average_ms(r.latency_us, n / 2, n);
         check(n >= 10 && seq_without_gaps(r), std::format("{} frames, seq without gaps", n));
-        check(late < early + 50.0, std::format("latency stays flat: {:.0f} ms early, {:.0f} ms late", early, late));
+        // Queued frames would add a send time per frame: over 1 s by the second half. Two send times
+        // of slack separates that from encode jitter on a busy CPU (+65 ms seen on a Celeron).
+        check(late < early + 200.0, std::format("latency stays flat: {:.0f} ms early, {:.0f} ms late", early, late));
     }
 
     kvm::log::info("3) channel closes after 5 frames");
