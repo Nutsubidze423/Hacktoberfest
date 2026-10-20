@@ -1,0 +1,94 @@
+# Builds Sarke and runs the headless tests on every push and pull request.
+# Same steps as on a dev PC: vcpkg at the manifest's baseline, the x64-release preset, ctest --preset unit.
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    env:
+      VCPKG_ROOT: ${{ runner.temp }}\vcpkg
+      # vcpkg's x-gha cache provider is gone (vcpkg 2025.06.13): keep built packages in a folder and
+      # let actions/cache carry it between runs.
+      VCPKG_BINARY_CACHE_DIR: ${{ runner.temp }}\vcpkg-binary-cache
+      VCPKG_BINARY_SOURCES: clear;files,${{ runner.temp }}\vcpkg-binary-cache,readwrite
+      VCPKG_DISABLE_METRICS: 1
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Runner image and Visual Studio
+        id: image
+        shell: pwsh
+        run: |
+          "version=$env:ImageVersion" >> $env:GITHUB_OUTPUT
+          "Runner image $env:ImageOS $env:ImageVersion"
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * `
+              -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if (-not $vs) { Write-Error 'no Visual Studio with the C++ x64 tools'; exit 1 }
+          "Visual Studio: $vs"
+          "VS_PATH=$vs" >> $env:GITHUB_ENV
+
+      # Packages are cached by everything that changes their ABI: the manifest (baseline, ports)
+      # and the runner image (compiler). A changed key rebuilds only what changed.
+      - name: Restore vcpkg packages
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.VCPKG_BINARY_CACHE_DIR }}
+          key: vcpkg-x64-windows-static-${{ steps.image.outputs.version }}-${{ hashFiles('vcpkg.json') }}
+          restore-keys: |
+            vcpkg-x64-windows-static-${{ steps.image.outputs.version }}-
+            vcpkg-x64-windows-static-
+
+      - name: vcpkg at the manifest's baseline
+        shell: pwsh
+        run: |
+          $baseline = (Get-Content vcpkg.json -Raw | ConvertFrom-Json).'builtin-baseline'
+          git clone --quiet https://github.com/microsoft/vcpkg.git $env:VCPKG_ROOT
+          git -C $env:VCPKG_ROOT checkout --quiet $baseline
+          & "$env:VCPKG_ROOT\bootstrap-vcpkg.bat" -disableMetrics
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          New-Item -ItemType Directory -Force $env:VCPKG_BINARY_CACHE_DIR | Out-Null
+
+      - name: Configure, build, unit tests
+        shell: cmd
+        run: |
+          call "%VS_PATH%\VC\Auxiliary\Build\vcvars64.bat" || exit /b 1
+          cmake --preset x64-release || exit /b 1
+          cmake --build --preset x64-release || exit /b 1
+          ctest --preset unit || exit /b 1
+
+      # Probe (P0.3): can a hosted runner run the hook / SendInput / clipboard tests? Never fails the
+      # build; if these pass reliably, the desktop label moves into the required step above.
+      - name: Desktop tests (probe, not required)
+        continue-on-error: true
+        timeout-minutes: 10
+        shell: cmd
+        run: |
+          call "%VS_PATH%\VC\Auxiliary\Build\vcvars64.bat" >nul || exit /b 1
+          ctest --test-dir build\x64-release -L desktop --output-on-failure
+
+      - name: Upload programs
+        uses: actions/upload-artifact@v4
+        with:
+          name: sarke-x64-release
+          path: |
+            build/x64-release/host_a/kvm_host.exe
+            build/x64-release/client_b/kvm_client.exe
+            build/x64-release/tools/sarke.exe
+            build/x64-release/tools/sarke_displays.exe
+            build/x64-release/tools/sarke_driver.exe
+            config.json
+          retention-days: 14
