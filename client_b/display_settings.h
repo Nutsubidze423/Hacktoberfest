@@ -29,7 +29,7 @@
 
 #include "app_logo.h"
 #include "display_layout.h"
-#include "ui_draw_tmp.h"
+#include "ui_draw.h"
 
 namespace kvm {
 

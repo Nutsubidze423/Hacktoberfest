@@ -8,7 +8,7 @@
 #include <type_traits>
 
 #include "kvm/log.h"
-#include "ui_tokens_tmp.h"
+#include "ui_tokens.h"
 
 #pragma comment(lib, "shell32.lib")
 

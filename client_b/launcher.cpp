@@ -28,7 +28,7 @@
 #include "kvm/protocol.h"
 #include "toast.h"
 #include "tray_icon.h"
-#include "ui_tokens_tmp.h"
+#include "ui_tokens.h"
 
 #pragma comment(lib, "shell32.lib")
 

@@ -20,7 +20,7 @@
 
 #include "app_logo.h"
 #include "jpeg_decoder.h"
-#include "ui_draw_tmp.h"
+#include "ui_draw.h"
 #include "viewer_chrome.h"
 #include "viewer_hud.h"
 #include "viewer_input.h"

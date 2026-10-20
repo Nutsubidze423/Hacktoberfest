@@ -1,10 +1,7 @@
 // Direct2D / DirectWrite helpers for Sarke's surfaces (docs/DESIGN.md section 2).
 //
-// TEMPORARY copy in Sandro's files: the real home is common/include/kvm/ui/draw.h +
-// common/src/ui_draw.cpp (Luka). Replace once that lands.
-//
 // Everything here runs on the UI thread. Render targets use 96 dpi, so 1 D2D unit = 1 pixel and
-// all sizes go through px() from ui_tokens_tmp.h. Colours come from pal() (dark / light theme).
+// all sizes go through px() from ui_tokens.h. Colours come from pal() (dark / light theme).
 #pragma once
 
 #include <d2d1.h>
@@ -16,7 +13,7 @@
 #include <string>
 #include <string_view>
 
-#include "ui_tokens_tmp.h"
+#include "ui_tokens.h"
 
 namespace kvm::ui {
 

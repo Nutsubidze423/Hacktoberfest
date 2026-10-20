@@ -6,7 +6,7 @@
 #include <cstdint>
 #include <string_view>
 
-#include "ui_draw_tmp.h"
+#include "ui_draw.h"
 
 namespace kvm::viewer {
 

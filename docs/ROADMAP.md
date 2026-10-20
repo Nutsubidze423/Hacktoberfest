@@ -254,7 +254,7 @@ Task-level links that matter:
 
 ### Tasks
 
-- [ ] **P0.1 Hygiene: `.mailmap` and renaming the `_tmp` UI files** (S), branch `phase0/hygiene`.
+- [x] **P0.1 Hygiene: `.mailmap` and renaming the `_tmp` UI files** (S), branch `phase0/hygiene`.
   - **Files:**
     - new `.mailmap` (maps `unknown <temomeshveliani777@gmail.com>` to Temo Meshveliani);
     - `git mv client_b/ui_draw_tmp.{h,cpp}` → `ui_draw.{h,cpp}`, and `ui_tokens_tmp.h` → `ui_tokens.h`;

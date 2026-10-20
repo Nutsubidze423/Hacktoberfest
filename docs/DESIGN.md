@@ -22,9 +22,9 @@ Viewer chrome, state screens, HUD (client B)	client_b/viewer_window.* (existing)
 Edge glow (both A and B)	common/include/kvm/ui/edge_glow.h, common/src/edge_glow.cpp	Demetre
 Preview tools	tools/ui_preview_picker.cpp (Temo), tools/ui_preview_viewer.cpp (Sandro), tools/ui_preview_glow.cpp (Demetre)	per owner
 
-If tokens/draw helpers do not exist yet when you start: create a temporary copy inside your own files (e.g. client_b/ui_tokens_tmp.h), tell the user it must be replaced once Luka's version lands, and continue.
+The tokens and draw helpers live in client_b/ui_tokens.h and client_b/ui_draw.*; every surface uses them.
 
-2. Design tokens (tokens.h; today client_b/ui_tokens_tmp.h + ui_draw_tmp.*)
+2. Design tokens (client_b/ui_tokens.h + client_b/ui_draw.*)
 2.1 Units
 Every size here is in dp (1 dp = 1/96 inch).
 Convert with int px(float dp, UINT dpi) { return (int)lround(dp * dpi / 96.0); }.

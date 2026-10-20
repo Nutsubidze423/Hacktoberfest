@@ -3,7 +3,6 @@
 // black / white / grey base, one blue for actions and links, solid rounded tiles, no borders or
 // glows. Dark and light themes; the app follows Windows' app mode like the site follows the system.
 //
-// TEMPORARY copy in Sandro's files: the real home is common/include/kvm/ui/tokens.h (Luka).
 // Every color/size used by Sarke's surfaces lives here; drawing code must not contain magic numbers.
 #pragma once
 
