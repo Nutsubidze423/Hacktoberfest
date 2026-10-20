@@ -174,6 +174,14 @@ true`); the name is only shown. A reply claiming a paired name with another ID i
 separate, unpaired PC. Discovery stays unauthenticated on purpose: it can only cause a TLS attempt,
 which then has to pass pinning.
 
+Implemented in P1.8:
+- the launcher keys every PC by the ID it claims, and offers pairing (`--pair-unknown`) only for a
+  row whose ID isn't paired;
+- a fake answer that claims a paired ID gets at most a TLS attempt that fails pinning, never a
+  pairing question;
+- `paired.json` is shared by kvm_host, kvm_client and the launcher. Every change re-reads it under a
+  named mutex, so no process writes back a stale list.
+
 ### 6.6 Paired-device store
 `paired.json` in the config folder: `[{device_id, name, paired_at, last_seen, auto_connect,
 permissions}]`. It holds public data only, so it isn't encrypted. Anyone who can write it already

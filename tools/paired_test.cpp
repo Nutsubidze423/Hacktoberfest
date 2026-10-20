@@ -4,7 +4,9 @@
 //   - add / find / all / set_auto_connect / touch / remove, and that each one survives a reload;
 //   - a second Store (another process) sees changes after reload();
 //   - an unparseable file means no PC is paired (fails closed), and the next save keeps it aside;
-//   - entries without a valid device_id are skipped.
+//   - entries without a valid device_id are skipped;
+//   - two Stores changing one file (kvm_host pairing, the launcher setting Auto) lose nothing, also
+//     when 8 threads add at once.
 //
 //   paired_test.exe   (exit code 0 = all passed)
 
@@ -14,6 +16,8 @@
 #include <format>
 #include <fstream>
 #include <string_view>
+#include <thread>
+#include <vector>
 
 #include "kvm/log.h"
 #include "kvm/paired.h"
@@ -87,6 +91,31 @@ int main() {
                          kvm::tls::to_hex(alice)));
     paired::Store partial(file);
     check(partial.all().size() == 1 && partial.find(alice), "entries without a valid device_id are skipped");
+
+    kvm::log::info("two processes change the same file");
+    {
+        const fs::path shared = dir / L"shared.json";
+        paired::Store host(shared), launcher(shared);  // both loaded while there is no file
+        check(host.add({.id = alice, .name = "alice-pc"}), "kvm_host pairs alice-pc");
+        check(launcher.add({.id = bob, .name = "bob-pc"}) && launcher.set_auto_connect(alice, true),
+              "the launcher, without a reload, pairs bob-pc and switches Auto on for alice-pc");
+        check(host.touch(alice, 77), "kvm_host stamps alice-pc's last seen");
+        paired::Store reader(shared);
+        const auto merged = reader.find(alice);
+        check(merged && merged->auto_connect && merged->last_seen == 77 && reader.find(bob),
+              "nothing is lost: both PCs, alice-pc's Auto and its last seen");
+
+        const fs::path busy = dir / L"busy.json";
+        std::vector<std::thread> writers;
+        for (std::uint8_t i = 0; i < 8; ++i) {
+            writers.emplace_back([&busy, i] {
+                paired::Store own(busy);
+                own.add({.id = make_id(static_cast<std::uint8_t>(100 + i)), .name = std::format("pc-{}", i)});
+            });
+        }
+        for (auto& t : writers) t.join();
+        check(paired::Store(busy).all().size() == 8, "8 Stores adding at once: all 8 PCs are saved");
+    }
 
     std::error_code ec;
     fs::remove_all(dir, ec);

@@ -33,6 +33,9 @@ public:
         std::wstring ip;  // empty while offline
         State state = State::Free;
         bool auto_connect = false;
+        // Paired with this PC (paired.json). An unpaired PC shows "Pair…" and has no Auto switch:
+        // clicking it pairs first (docs/SECURITY.md 6.3).
+        bool paired = true;
     };
     struct Actions {
         std::function<void(std::size_t row)> connect;      // a free row was clicked

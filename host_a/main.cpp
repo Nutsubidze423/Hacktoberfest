@@ -405,7 +405,7 @@ int wmain(int argc, wchar_t** argv) {
         } else {
             try {
                 const std::string name = make_hello(false).hostname;
-                discovery.emplace(name, cfg.control_port);
+                discovery.emplace(name, cfg.control_port, g_device_id);
                 kvm::log::info("discovery: the other PC can find '{}' on the local network (UDP {})", name,
                                kvm::discovery::kDiscoveryPort);
             } catch (const std::exception& e) {

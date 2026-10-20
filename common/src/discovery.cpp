@@ -17,6 +17,7 @@
 #include "kvm/log.h"
 #include "kvm/net.h"
 #include "kvm/protocol.h"
+#include "kvm/tls.h"
 #include "socket_util.h"
 
 namespace kvm::discovery {
@@ -79,8 +80,14 @@ void set_receive_timeout(SOCKET s, DWORD ms) {
 
 }  // namespace
 
-Responder::Responder(std::string name, std::uint16_t control_port, std::uint16_t port)
-    : name_(std::move(name)), control_port_(control_port) {
+std::optional<std::string> parse_device_id(std::string_view text) {
+    const auto id = tls::from_hex(text);
+    if (!id) return std::nullopt;
+    return tls::to_hex(*id);
+}
+
+Responder::Responder(std::string name, std::uint16_t control_port, std::string device_id, std::uint16_t port)
+    : name_(std::move(name)), control_port_(control_port), device_id_(std::move(device_id)) {
     net::ensure_winsock();
     sock_ = ::socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     if (sock_ == INVALID_SOCKET) {
@@ -132,7 +139,8 @@ void Responder::run() {
             {"name", name_},
             {"control_port", control_port_},
             {"protocol_version", proto::kProtocolVersion},
-            {"busy", busy_.load()}}.dump();
+            {"busy", busy_.load()},
+            {"device_id", device_id_}}.dump();
         sendto(sock_, answer.data(), static_cast<int>(answer.size()), 0, reinterpret_cast<const sockaddr*>(&from),
                from_len);
         const auto now = std::chrono::steady_clock::now();
@@ -202,7 +210,8 @@ std::vector<Host> find(std::chrono::milliseconds wait, std::uint16_t port) {
                .ip = ip_of(from),
                .control_port = j.value<std::uint16_t>("control_port", 0),
                .protocol_version = j.value("protocol_version", 0),
-               .busy = j.value("busy", false)};
+               .busy = j.value("busy", false),
+               .device_id = parse_device_id(j.value("device_id", std::string())).value_or(std::string())};
         if (h.control_port == 0) continue;
         if (std::none_of(hosts.begin(), hosts.end(), [&](const Host& x) { return x.ip == h.ip; })) {
             hosts.push_back(std::move(h));

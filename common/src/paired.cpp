@@ -6,10 +6,13 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstdint>
 #include <ctime>
+#include <cwctype>
 #include <format>
 #include <fstream>
 #include <system_error>
+#include <utility>
 
 #include "kvm/identity.h"
 #include "kvm/log.h"
@@ -45,6 +48,42 @@ std::optional<Device> from_json(const json& j) {
     if (j.contains("permissions") && j["permissions"].is_object()) d.permissions = j["permissions"];
     return d;
 }
+
+// The named mutex every process takes around read-modify-save of one paired.json. kvm_host,
+// kvm_client and the launcher run in the same session, so a Local\ name is enough.
+class FileLock {
+public:
+    explicit FileLock(const fs::path& file) {
+        // FNV-1a of the lower-case path: a mutex name can't hold the path itself (no backslashes).
+        std::wstring key = file.lexically_normal().wstring();
+        std::transform(key.begin(), key.end(), key.begin(),
+                       [](wchar_t c) { return static_cast<wchar_t>(towlower(c)); });
+        std::uint64_t hash = 14695981039346656037ull;
+        for (const wchar_t c : key) {
+            hash = (hash ^ static_cast<std::uint64_t>(c)) * 1099511628211ull;
+        }
+        const std::wstring name = std::format(L"Local\\Sarke-paired-{:016x}", hash);
+        mutex_ = CreateMutexW(nullptr, FALSE, name.c_str());
+        if (!mutex_) {
+            log::warn("paired: no lock for {} ({}); saving without it", utf8(file), GetLastError());
+            return;
+        }
+        // WAIT_ABANDONED: a process died holding it; the file is still whole (atomic saves).
+        const DWORD got = WaitForSingleObject(mutex_, 5000);
+        owned_ = got == WAIT_OBJECT_0 || got == WAIT_ABANDONED;
+        if (!owned_) log::warn("paired: {} stayed locked for 5 s; saving without the lock", utf8(file));
+    }
+    ~FileLock() {
+        if (owned_) ReleaseMutex(mutex_);
+        if (mutex_) CloseHandle(mutex_);
+    }
+    FileLock(const FileLock&) = delete;
+    FileLock& operator=(const FileLock&) = delete;
+
+private:
+    HANDLE mutex_ = nullptr;
+    bool owned_ = false;
+};
 
 std::string timestamp() {
     const std::time_t now = std::time(nullptr);
@@ -82,7 +121,7 @@ std::string Store::load_error() const {
 
 void Store::load_locked() {
     devices_.clear();
-    load_error_.clear();
+    const std::string before = std::exchange(load_error_, std::string());  // log a broken file once, not every reload
     keep_broken_ = false;
     std::error_code ec;
     if (!fs::exists(file_, ec)) return;
@@ -92,7 +131,7 @@ void Store::load_locked() {
         load_error_ =
             std::format("paired: {} doesn't parse; no PC is paired until it is fixed or replaced", utf8(file_));
         keep_broken_ = true;
-        log::error("{}", load_error_);
+        if (load_error_ != before) log::error("{}", load_error_);
         return;
     }
     for (const auto& entry : j) {
@@ -148,33 +187,45 @@ std::vector<Device> Store::all() const {
     return devices_;
 }
 
-bool Store::add(Device device) {
+template <class Change>
+bool Store::modify(Change&& change) {
     std::lock_guard lock(mutex_);
-    std::erase_if(devices_, [&](const Device& d) { return d.id == device.id; });
-    devices_.push_back(std::move(device));
+    const FileLock file_lock(file_);
+    load_locked();  // another process may have changed it since
+    if (!change(devices_)) return false;
     return save_locked();
+}
+
+bool Store::add(Device device) {
+    return modify([&](std::vector<Device>& devices) {
+        std::erase_if(devices, [&](const Device& d) { return d.id == device.id; });
+        devices.push_back(std::move(device));
+        return true;
+    });
 }
 
 bool Store::remove(const tls::DeviceId& id) {
-    std::lock_guard lock(mutex_);
-    if (std::erase_if(devices_, [&](const Device& d) { return d.id == id; }) == 0) return false;
-    return save_locked();
+    return modify([&](std::vector<Device>& devices) {
+        return std::erase_if(devices, [&](const Device& d) { return d.id == id; }) > 0;
+    });
 }
 
 bool Store::set_auto_connect(const tls::DeviceId& id, bool on) {
-    std::lock_guard lock(mutex_);
-    const auto it = std::find_if(devices_.begin(), devices_.end(), [&](const Device& d) { return d.id == id; });
-    if (it == devices_.end()) return false;
-    it->auto_connect = on;
-    return save_locked();
+    return modify([&](std::vector<Device>& devices) {
+        const auto it = std::find_if(devices.begin(), devices.end(), [&](const Device& d) { return d.id == id; });
+        if (it == devices.end()) return false;
+        it->auto_connect = on;
+        return true;
+    });
 }
 
 bool Store::touch(const tls::DeviceId& id, std::int64_t when) {
-    std::lock_guard lock(mutex_);
-    const auto it = std::find_if(devices_.begin(), devices_.end(), [&](const Device& d) { return d.id == id; });
-    if (it == devices_.end()) return false;
-    it->last_seen = when;
-    return save_locked();
+    return modify([&](std::vector<Device>& devices) {
+        const auto it = std::find_if(devices.begin(), devices.end(), [&](const Device& d) { return d.id == id; });
+        if (it == devices.end()) return false;
+        it->last_seen = when;
+        return true;
+    });
 }
 
 }  // namespace kvm::paired
