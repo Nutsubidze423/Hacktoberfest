@@ -46,6 +46,13 @@ std::wstring tenths_or_unknown(std::optional<double> v) {
     return v ? std::format(L"{:.1f}", *v) : std::wstring(ui::kUnknown);
 }
 
+// "H.264", or "JPEG 75" with the quality when it is known.
+std::wstring codec_text(const HudValues& v) {
+    if (v.codec == "h264") return L"H.264";
+    if (v.codec == "jpeg") return v.jpeg_quality ? std::format(L"JPEG {}", *v.jpeg_quality) : L"JPEG";
+    return ui::kUnknown;
+}
+
 std::wstring count_or_unknown(std::optional<std::uint64_t> v) {
     return v ? std::to_wstring(*v) : std::wstring(ui::kUnknown);
 }
@@ -79,7 +86,7 @@ void draw_hud(ui::Painter& p, const D2D1_RECT_F& r, const HudValues& v, UINT dpi
         {L"Present", tenths_or_unknown(v.present_ms), L"ms", c.ink},
         {L"Bitrate", tenths_or_unknown(v.mbps), L"Mbps", c.ink},
         {L"Resolution", res, nullptr, c.ink},
-        {L"Quality", int_or_unknown(v.jpeg_quality), nullptr, c.ink},
+        {L"Codec", codec_text(v), nullptr, c.ink},
         {L"Dropped", count_or_unknown(v.dropped), nullptr, c.ink},
         {L"Repeated", count_or_unknown(v.repeated), nullptr, c.ink},
     };

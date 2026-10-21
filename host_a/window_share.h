@@ -22,8 +22,10 @@
 #include <atomic>
 #include <memory>
 #include <optional>
+#include <string>
 
 #include "capture.h"
+#include "h264_sender.h"
 #include "kvm/dpi.h"
 #include "kvm/queue.h"
 #include "kvm/video.h"
@@ -42,6 +44,8 @@ public:
         display::Side side = display::Side::Right;  // where the VDD goes, config.json client_side
         int jpeg_quality = 75;
         int max_fps = 30;
+        std::string codec = "jpeg";  // "h264": encoded on the GPU (h264_sender.h); JPEG if it can't be
+        int h264_bitrate = 8'000'000;
     };
 
     // Moves `hwnd` onto the VDD and starts streaming it. Throws std::runtime_error with the reason
@@ -64,7 +68,9 @@ public:
     // False once the shared app closed its window or the VDD went away: time to end the share.
     bool alive() const { return !lost_ && IsWindow(hwnd_); }
 
-    std::uint64_t frames_sent() const { return sender_ ? sender_->frames_sent() : 0; }
+    std::uint64_t frames_sent() const { return h264_ ? h264_->frames_sent() : sender_ ? sender_->frames_sent() : 0; }
+    // "h264" or "jpeg": what the frames are sent as.
+    const char* codec() const { return h264_ ? "h264" : "jpeg"; }
 
 private:
     WindowShare() = default;
@@ -77,6 +83,7 @@ private:
     LatestSlot<CapturedFrame> frames_;
     std::unique_ptr<ScreenCapture> capture_;
     std::unique_ptr<VideoSender> sender_;
+    std::unique_ptr<H264Sender> h264_;
     std::atomic<bool> lost_ = false;
 };
 

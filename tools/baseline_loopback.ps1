@@ -1,16 +1,21 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# Loopback video baseline (roadmap P2.1, docs/PERF.md): the real kvm_host and kvm_client on 127.0.0.1
-# in desk mode, one content window at a time on the virtual display, kvm_client's --stats for each.
-# Both sides run on this one PC, so the numbers include both PCs' CPU work on one CPU.
+# Loopback video baseline (roadmap P2.1, docs/PERF.md): the real kvm_host and kvm_client on 127.0.0.1,
+# one content window at a time, kvm_client's --stats for each. Both sides run on this one PC, so the
+# numbers include both PCs' CPU work on one CPU.
+#   -Mode desk    desk mode: the window is moved onto the virtual display (JPEG, P2.1).
+#   -Mode viewer  the window viewer: the window is sent the way Ctrl+Alt+Shift+W sends it (the
+#                 "share <hwnd>" command on kvm_host's stdin, so an installed Sarke holding the hotkey
+#                 doesn't matter), as -Codec jpeg or h264 (kvm_host --codec, roadmap P2.4c).
 #
-#   powershell -ExecutionPolicy Bypass -File tools\baseline_loopback.ps1 [-Seconds 30]
+#   powershell -ExecutionPolicy Bypass -File tools\baseline_loopback.ps1 [-Seconds 30] [-Mode viewer -Codec h264]
 #
 # Needs: a build (cmake --build --preset x64-release), the Virtual Display Driver, Microsoft Edge, and
 # hands off the PC for about 3 minutes: it opens Notepad and two Edge windows (a throwaway profile)
 # and moves them onto the virtual display. Prints a docs/PERF.md row per content; the CSVs and logs
 # stay in %TEMP%\sarke_baseline.
-param([int]$Seconds = 30)
+param([int]$Seconds = 30, [ValidateSet('desk', 'viewer')][string]$Mode = 'desk',
+      [ValidateSet('jpeg', 'h264')][string]$Codec = 'jpeg')
 $ErrorActionPreference = 'Continue'  # native programs log to stderr; each step is checked
 $repo = Split-Path -Parent $PSScriptRoot
 $bin = Join-Path $repo 'build\x64-release'
@@ -76,7 +81,8 @@ function Wait-Log($file, $text, $timeout = 30) {
 }
 
 $c = Free-Port; $v = Free-Port; $f = Free-Port
-$ports = "`"control_port`": $c, `"video_port`": $v, `"file_port`": $f, `"desk`": true"
+$desk = if ($Mode -eq 'desk') { 'true' } else { 'false' }
+$ports = "`"control_port`": $c, `"video_port`": $v, `"file_port`": $f, `"desk`": $desk"
 Set-Content -Encoding ascii "$work\host.json" "{$ports}"
 Set-Content -Encoding ascii "$work\client.json" "{$ports, `"host_ip`": `"127.0.0.1`"}"
 $hostId = Device-Id "$bin\host_a\kvm_host.exe" "$work\host-data"
@@ -131,26 +137,43 @@ $index = 0
 foreach ($content in $contents) {
   $index++
   $tag = "run$index"
-  $hostP = Start-Process "$bin\host_a\kvm_host.exe" -ArgumentList "--config `"$work\host.json`" --no-kvm --no-clipboard --no-discovery --data-dir `"$work\host-data`" --pair-with $clientId --log `"$work\$tag-host.log`"" -PassThru -WindowStyle Hidden
+  # stdin is a pipe: kvm_host reads launcher commands from it ("share <hwnd>" below).
+  $psi = [System.Diagnostics.ProcessStartInfo]::new("$bin\host_a\kvm_host.exe", "--config `"$work\host.json`" --no-kvm --no-clipboard --no-discovery --codec $Codec --data-dir `"$work\host-data`" --pair-with $clientId --log `"$work\$tag-host.log`"")
+  $psi.UseShellExecute = $false; $psi.RedirectStandardInput = $true; $psi.CreateNoWindow = $true
+  $hostP = [System.Diagnostics.Process]::Start($psi)
   if (-not (Wait-Log "$work\$tag-host.log" 'listening on ports')) { throw "host didn't start" }
   $clientP = Start-Process "$bin\client_b\kvm_client.exe" -ArgumentList "--config `"$work\client.json`" --host 127.0.0.1 --no-kvm --no-clipboard --desk-no-vdd --data-dir `"$work\client-data`" --pair-with $hostId --stats `"$work\$tag.csv`" --log `"$work\$tag-client.log`"" -PassThru -WindowStyle Hidden
   if (-not (Wait-Log "$work\$tag-client.log" 'file channel connected')) { throw "client didn't connect" }
-  Start-Sleep -Seconds 4  # the host attaches the virtual display
 
-  $vdd = [W]::Monitors() | Where-Object { $real -notcontains $_.Split('|')[0] } | Select-Object -First 1
-  if (-not $vdd) { throw "no virtual display attached: $([W]::Monitors() -join '; ')" }
-  $m = $vdd.Split('|'); $vx = [int]$m[1]; $vy = [int]$m[2]
-  "[$tag] $($content.name): virtual display $vdd"
+  if ($Mode -eq 'desk') {
+    Start-Sleep -Seconds 4  # the host attaches the virtual display
+    $vdd = [W]::Monitors() | Where-Object { $real -notcontains $_.Split('|')[0] } | Select-Object -First 1
+    if (-not $vdd) { throw "no virtual display attached: $([W]::Monitors() -join '; ')" }
+    $m = $vdd.Split('|'); $vx = [int]$m[1]; $vy = [int]$m[2]
+    "[$tag] $($content.name): virtual display $vdd"
+  } else {
+    $vx = 0; $vy = 0
+    "[$tag] $($content.name): window viewer, $Codec"
+  }
 
   $app = & $content.start
   $hwnd = [IntPtr]::Zero
   for ($i = 0; $i -lt 40 -and $hwnd -eq [IntPtr]::Zero; $i++) { Start-Sleep -Milliseconds 250; $hwnd = [W]::WindowWithTitle($content.title) }
   if ($hwnd -eq [IntPtr]::Zero) { throw "no window titled $($content.title)" }
   [W]::SetWindowPos($hwnd, [IntPtr]::Zero, $vx + 40, $vy + 40, 1280, 800, 0x0040) | Out-Null  # SWP_SHOWWINDOW
+  if ($Mode -eq 'viewer') {
+    Start-Sleep -Seconds 1
+    $hostP.StandardInput.WriteLine("share $($hwnd.ToInt64().ToString('x'))"); $hostP.StandardInput.Flush()
+    if (-not (Wait-Log "$work\$tag-host.log" 'is on the other PC now' 10)) { throw "the window wasn't sent" }
+  }
   Start-Sleep -Seconds $Seconds
 
   # Back to the real monitor, then end everything (Edge and Notepad are this run's own windows).
-  [W]::SetWindowPos($hwnd, [IntPtr]::Zero, 40, 40, 1280, 800, 0x0040) | Out-Null
+  if ($Mode -eq 'viewer') {
+    $hostP.StandardInput.WriteLine("share $($hwnd.ToInt64().ToString('x'))"); $hostP.StandardInput.Flush()  # the window comes home
+  } else {
+    [W]::SetWindowPos($hwnd, [IntPtr]::Zero, 40, 40, 1280, 800, 0x0040) | Out-Null
+  }
   Start-Sleep -Seconds 2
   Stop-Process -Id $clientP.Id -ErrorAction SilentlyContinue
   Stop-Process -Id $hostP.Id -ErrorAction SilentlyContinue

@@ -7,6 +7,8 @@
 //   --no-desk       no desk mode (the host's screen as one more monitor); Ctrl+Alt+Shift+W uses the viewer
 //   --desk-no-vdd   desk mode, but only show the host's windows (one-PC tests: the host owns the VDD)
 //   --stats <file.csv>  one row per video frame shown on this PC (kvm/video_stats.h, docs/PERF.md)
+//   --codec h264  windows sent to the other PC's viewer go as H.264, encoded on the GPU (roadmap
+//                 P2.4c; the other PC needs this version to show them). JPEG without a hardware encoder.
 //   --pair-unknown  if the host's key isn't paired, start pairing (both users compare a code) instead of
 //                   refusing it: the launcher passes it when the user picked the host
 //   --data-dir <dir> --print-id --pair-with <device id> --recreate-identity: see kvm/trust.h
@@ -15,6 +17,7 @@
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <exception>
 #include <filesystem>
 #include <iostream>
@@ -291,6 +294,7 @@ int wmain(int argc, wchar_t** argv) {
     bool desk_enabled = true;
     bool desk_own_vdd = true;
     bool pair_unknown = false;
+    std::string codec = "jpeg";
     kvm::trust::Options trust_options;
     for (int i = 1; i < argc; ++i) {
         if (const int used = kvm::trust::parse_arg(trust_options, argc, argv, i)) {
@@ -314,6 +318,8 @@ int wmain(int argc, wchar_t** argv) {
             desk_own_vdd = false;  // e.g. host and client on one PC: only the host uses the VDD
         } else if (arg == L"--pair-unknown") {
             pair_unknown = true;
+        } else if (arg == L"--codec" && i + 1 < argc) {
+            codec = std::wstring_view(argv[++i]) == L"h264" ? "h264" : "jpeg";
         } else if (arg == L"--stats" && i + 1 < argc) {
             const std::filesystem::path csv = argv[++i];
             if (!kvm::video_stats().open_csv(csv)) kvm::log::warn("stats: can't write {}", csv.string());
@@ -407,6 +413,7 @@ int wmain(int argc, wchar_t** argv) {
         // goes to A's viewer and back.
         kvm::WindowLink windows({.jpeg_quality = cfg.jpeg_quality,
                                  .max_fps = cfg.max_fps,
+                                 .codec = codec,
                                  .peer_side = host_side,
                                  .desk = desk,
                                  .own_vdd = desk_own_vdd});
@@ -434,6 +441,15 @@ int wmain(int argc, wchar_t** argv) {
             ~PromptReset() { g_pairing_prompt = nullptr; }
         } prompt_reset;
         kvm::LauncherCommands commands([&](const std::string& line) {
+            if (line == "share" || line.starts_with("share ")) {  // Ctrl+Alt+Shift+W, see launcher_commands.h
+                const auto hwnd = line.size() > 6 ? std::strtoull(line.c_str() + 6, nullptr, 16) : 0;
+                if (hwnd) {
+                    windows.toggle(reinterpret_cast<HWND>(static_cast<std::uintptr_t>(hwnd)));
+                } else {
+                    windows.toggle();
+                }
+                return;
+            }
             kvm::handle_launcher_command(line, places, current_peer, pairing_prompt, *trust->paired);
         });
 

@@ -10,6 +10,8 @@
 //   --no-desk     no desk mode (the client's screen as one more monitor); Ctrl+Alt+Shift+W uses the viewer
 //   --no-discovery  don't answer other PCs looking for hosts (tests: no other PC can find this one)
 //   --stats <file.csv>  one row per video frame shown on this PC (kvm/video_stats.h, docs/PERF.md)
+//   --codec h264  windows sent to the other PC's viewer go as H.264, encoded on the GPU (roadmap
+//                 P2.4c; the other PC needs this version to show them). JPEG without a hardware encoder.
 //   --data-dir ... --recreate-identity: this PC's identity and paired PCs, see kvm/trust.h
 //   --test-video  send synthetic frames (codec "test", random bytes, default 250 KB at 30 fps) so
 //                 network throughput and video latency can be measured before capture/viewer exist
@@ -17,6 +19,8 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cstdint>
+#include <cstdlib>
 #include <exception>
 #include <filesystem>
 #include <memory>
@@ -65,6 +69,7 @@ struct Options {
     bool clipboard = true;
     bool desk = true;  // --no-desk, config "desk"
     bool discovery = true;  // --no-discovery
+    std::string codec = "jpeg";  // --codec
     kvm::trust::Options trust;
     bool test_video = false;
     int test_video_kb = 250;
@@ -355,6 +360,8 @@ Options parse_args(int argc, wchar_t** argv) {
             opt.desk = false;
         } else if (arg == L"--no-discovery") {
             opt.discovery = false;
+        } else if (arg == L"--codec" && has_value) {
+            opt.codec = std::wstring_view(argv[++i]) == L"h264" ? "h264" : "jpeg";
         } else if (arg == L"--stats" && has_value) {
             const std::filesystem::path csv = argv[++i];
             if (!kvm::video_stats().open_csv(csv)) kvm::log::warn("stats: can't write {}", csv.string());
@@ -437,6 +444,7 @@ int wmain(int argc, wchar_t** argv) {
         // show up in the viewer here.
         kvm::WindowLink windows({.jpeg_quality = cfg.jpeg_quality,
                                  .max_fps = cfg.max_fps,
+                                 .codec = opt.codec,
                                  .peer_side = side.value_or(kvm::display::Side::Right),
                                  .desk = desk});
         // Ctrl+Alt+Shift+Q also ends desk mode (the hooks that keep the cursor off the VDD are gone).
@@ -464,6 +472,15 @@ int wmain(int argc, wchar_t** argv) {
             ~PromptReset() { g_pairing_prompt = nullptr; }
         } prompt_reset;
         kvm::LauncherCommands commands([&](const std::string& line) {
+            if (line == "share" || line.starts_with("share ")) {  // Ctrl+Alt+Shift+W, see launcher_commands.h
+                const auto hwnd = line.size() > 6 ? std::strtoull(line.c_str() + 6, nullptr, 16) : 0;
+                if (hwnd) {
+                    windows.toggle(reinterpret_cast<HWND>(static_cast<std::uintptr_t>(hwnd)));
+                } else {
+                    windows.toggle();
+                }
+                return;
+            }
             kvm::handle_launcher_command(line, places, current_peer, pairing_prompt, *trust->paired);
         });
         VideoSlot video;

@@ -133,5 +133,5 @@ An `h264` payload is one H.264 access unit in Annex-B form: NAL units, each afte
 A frame that fails is dropped.
 
 A viewer skips any codec it doesn't show, so an older viewer stays blank on `h264` but doesn't
-break. No release sends `h264` yet. Once codecs are negotiated (roadmap P2.5), the owner will send it only
-to a viewer that said it can decode it.
+break. A window owner sends `h264` only when started with `--codec h264` (roadmap P2.4c). Once codecs
+are negotiated (P2.5), it will send it only to a viewer that said it can decode it.

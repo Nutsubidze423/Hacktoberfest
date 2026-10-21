@@ -13,7 +13,10 @@
 //     its keyframe flag, byte for byte;
 //   - decoded on the GPU again (a device of its own, like the viewer's), each decode() returns that
 //     access unit's picture, 1920x1080, and its luma matches the source above a PSNR floor (printed,
-//     with the time of a decode() call).
+//     with the time of a decode() call);
+//   - H264Sender (host_a/h264_sender.h, P2.4c): one captured frame and then nothing is sent again
+//     every 500 ms as new pictures, and a frame of another size starts a new stream with a keyframe;
+//     all of it decodes in order.
 //
 //   h264_test.exe                          (exit code 0 = all passed)
 //   h264_test.exe --write-sample <file>    writes tools/data/h264_sample.h264 for h264_decode_test
@@ -37,6 +40,7 @@
 
 #include "h264_decoder.h"
 #include "h264_encoder.h"
+#include "h264_sender.h"
 #include "kvm/annexb.h"
 #include "kvm/gpu_device.h"
 #include "kvm/log.h"
@@ -266,6 +270,79 @@ int write_sample(const char* path) {
     return file ? 0 : 1;
 }
 
+// A BGRA texture on `gpu` filled with one colour, as the capture would hand it over.
+kvm::GpuFrame solid_frame(kvm::GpuDevice& gpu, int width, int height, std::uint8_t shade) {
+    D3D11_TEXTURE2D_DESC d{};
+    d.Width = static_cast<UINT>(width);
+    d.Height = static_cast<UINT>(height);
+    d.MipLevels = 1;
+    d.ArraySize = 1;
+    d.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+    d.SampleDesc.Count = 1;
+    d.Usage = D3D11_USAGE_DEFAULT;
+    d.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+    const std::vector<std::uint8_t> px(static_cast<std::size_t>(width) * height * 4, shade);
+    const D3D11_SUBRESOURCE_DATA data{px.data(), static_cast<UINT>(width) * 4, 0};
+    kvm::GpuFrame f{.width = width, .height = height, .t_capture_us = kvm::steady_now_us()};
+    gpu.device()->CreateTexture2D(&d, &data, &f.texture);
+    return f;
+}
+
+// H264Sender: repeats of a still picture, and a new stream on a size change.
+void test_sender(Checks& check, const std::shared_ptr<kvm::GpuDevice>& gpu) {
+    std::mutex mutex;
+    std::vector<kvm::proto::FrameHeader> headers;
+    std::vector<std::vector<std::uint8_t>> units;
+    auto send = [&](const kvm::proto::FrameHeader& h, std::span<const std::uint8_t> p) {
+        std::lock_guard lock(mutex);
+        headers.push_back(h);
+        units.emplace_back(p.begin(), p.end());
+        return true;
+    };
+    std::string why;
+    auto sender = kvm::H264Sender::create(gpu, 640, 480, send, {.max_fps = 30}, why);
+    check(sender != nullptr, sender ? "H264Sender for 640x480" : why);
+    if (!sender) return;
+    sender->put(solid_frame(*gpu, 640, 480, 40));
+    std::this_thread::sleep_for(1300ms);  // one picture, then 500 ms and 1000 ms later the same again
+    std::size_t still = 0;
+    {
+        std::lock_guard lock(mutex);
+        still = headers.size();
+    }
+    // A new size: a new encoder, which takes a moment to start.
+    const auto resized_at = std::chrono::steady_clock::now();
+    sender->put(solid_frame(*gpu, 800, 600, 200));
+    double new_stream_ms = -1;
+    while (std::chrono::steady_clock::now() - resized_at < 3s && new_stream_ms < 0) {
+        std::this_thread::sleep_for(5ms);
+        std::lock_guard lock(mutex);
+        if (headers.size() > still) {
+            new_stream_ms =
+                std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - resized_at).count();
+        }
+    }
+    sender->stop();
+    kvm::log::info("       a new size to its first frame: {:.0f} ms", new_stream_ms);
+
+    std::lock_guard lock(mutex);
+    check(still == 3, std::format("a still picture: {} frames in 1.3 s (it, then again every 500 ms)", still));
+    bool in_order = !headers.empty() && headers.front().keyframe && headers.front().width == 640;
+    for (std::size_t i = 1; i < headers.size(); ++i) in_order = in_order && headers[i].seq == headers[i - 1].seq + 1;
+    check(in_order, "the first is a keyframe, seq has no gaps");
+    const bool resized = headers.size() > still && headers[still].keyframe && headers[still].width == 800 &&
+                         headers[still].height == 600;
+    check(resized, "a frame of another size starts a new stream: keyframe, 800x600");
+    auto decoder = kvm::H264Decoder::create(nullptr, why);
+    std::size_t decoded = 0;
+    for (std::size_t i = 0; decoder && i < units.size(); ++i) {
+        const auto picture = decoder->decode(units[i], headers[i].t_capture_us);
+        if (picture && picture->width == headers[i].width && picture->height == headers[i].height) ++decoded;
+    }
+    check(decoded == units.size() && !units.empty(),
+          std::format("{} of {} decode in order, at their size", decoded, units.size()));
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -390,6 +467,8 @@ int main(int argc, char** argv) {
     } else {
         check(false, "luma PSNR: no picture could be read back");
     }
+
+    test_sender(check, gpu);
 
     if (check.failed) {
         kvm::log::error("{} check(s) failed", check.failed);

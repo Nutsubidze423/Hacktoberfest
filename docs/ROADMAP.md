@@ -1055,7 +1055,7 @@ Attempts are rate-limited.
     - **Plan change: nothing sends `h264` yet.** The host's capture → encoder → channel path comes with P2.4, the first viewer able to show it, and P2.5 then decides when it may be sent.
     - **Tests share `kvm::test::listen_loopback`** ([tools/side_channel_util.h](../tools/side_channel_util.h)) instead of two copies.
 
-- [ ] **P2.4 Hardware decode and a D3D11 renderer on the viewer** (M → split into a/b/c), branch `phase2/decode`.
+- [x] **P2.4 Hardware decode and a D3D11 renderer on the viewer** (M → split into a/b/c), branch `phase2/decode`.
   - **Files:** new `client_b/h264_decoder.*` (MF DXVA decoder with D3D11 output), and [client_b/viewer_window.cpp](../client_b/viewer_window.cpp) moves from a D2D `HwndRenderTarget` to a flip-model swapchain:
     - `DXGI_SWAP_EFFECT_FLIP_DISCARD` and a waitable object;
     - NV12→RGB through the video processor or a shader;
@@ -1116,6 +1116,30 @@ Attempts are rate-limited.
       - decode + BGRA averages 1.6–2.4 ms and present 2.1–3.2 ms at 320×240.
     - **Checked by eye** in screenshots: H.264 and a JPEG, with the strip and the HUD.
     - `ctest --preset local` 39/39.
+    - **In CI too:** `viewer_h264_test`'s software half passes on GitHub's runner (WARP, software decode, `PrintWindow`). The GPU half skips itself there.
+  - **P2.4c result (2026-10-21):**
+    - **[host_a/h264_sender.h](../host_a/h264_sender.h):** the H.264 counterpart of `VideoSender`. The newest GPU capture goes to NV12, then to the encoder, then to the channel, at most `max_fps`.
+      - **A still window** is sent again every 500 ms as a new, almost empty picture. The same access unit twice would break the decoder.
+      - **A new size** starts a new encoder and stream, beginning with a keyframe.
+      - **Keyframes:** one every 2 s until keyframe requests exist (P2.5/P2.6), so a viewer that connects mid-stream shows a picture within that time.
+    - **`--codec h264`** on kvm_host and kvm_client: windows sent to the other PC's viewer go as H.264. Without a hardware encoder they go as JPEG, and the log says why. Desk mode stays JPEG (P2.7).
+    - **The HUD** shows the codec ("H.264", or "JPEG 75") in place of the JPEG quality.
+    - **Found and fixed: P2.4b's H.264 path wasn't in the apps.** Only `VideoReceiver` (tools and tests) had it. In the apps, WindowLink's `FrameRouter` reads the channel and had its own JPEG-only copy of the decode loop.
+      - Both now feed one [client_b/window_stream.h](../client_b/window_stream.h): the newest JPEG, or every H.264 frame in order.
+      - The first loopback run with `--codec h264` showed nothing, which is how this was found.
+    - **`share [<hwnd>]` launcher command:** the same as Ctrl+Alt+Shift+W, for scripts. The installed Sarke on this PC holds the hotkey, so `baseline_loopback.ps1 -Mode viewer` uses it.
+    - **Tests:**
+      - **`window_share_test`** (vdd): a real share of Paint with `codec = "h264"`. 99 of 99 frames pass the framing check and decode to 1920×1080; the first is a keyframe, `seq` has no gaps, and the window comes back to its place.
+      - **`h264_test`** (gpu), `H264Sender`, 3 runs:
+        - a still picture goes out as exactly 3 frames in 1.3 s;
+        - a frame of a new size starts a new stream in 381–395 ms, with a keyframe at the new size;
+        - all of it decodes in order.
+    - **Measured** ([PERF.md](PERF.md), loopback on this PC):
+      - H.264 uses 5–8× less bandwidth and decodes in 2–8 ms instead of 14–18;
+      - a document goes from 71 to 51 ms p50;
+      - scrolling and animation run at 14–16 fps against JPEG's 18–20. The one UHD 600 does both PCs' work, and the encoder is the bottleneck; the two-PC numbers are R18.
+    - `ctest --preset local` 39/39.
+    - **P2.4 is ticked:** the H.264 and JPEG HUD numbers are side by side in PERF.md.
 
 - [ ] **P2.5 Codec negotiation and fallback** (S), branch `phase2/negotiate`.
   - **Protocol:**

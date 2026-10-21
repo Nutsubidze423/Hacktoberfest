@@ -94,6 +94,10 @@ public:
     std::uint64_t skipped() const { return empty_; }
 
     const std::string& name() const { return name_; }  // e.g. "Intel® Quick Sync Video H.264 Encoder MFT"
+    int width() const { return options_.width; }
+    int height() const { return options_.height; }
+    // The encoder stopped working (logged); packets() is closed.
+    bool failed() const { return failed_; }
 
 private:
     H264Encoder() = default;

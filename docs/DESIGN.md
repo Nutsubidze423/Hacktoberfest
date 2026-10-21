@@ -168,7 +168,7 @@ FPS	displayed frames/s, 1 s window	< 24	< 12
 Latency	capture → display in ms using the clock offset; — until known	> 80	> 150
 Bitrate	video payload, 1 decimal, Mbps	—	—
 Resolution	{W}×{H}	—	—
-Quality	JPEG quality from config	—	—
+Codec	of the frames shown: "H.264", or "JPEG 75" with the quality from config	—	—
 Dropped	frames skipped since stream start	—	—
 Value color becomes warn/err per thresholds; otherwise ink. Updated at 4 Hz.
 5. Surface 3 — Edge glow (A and B) — Demetre

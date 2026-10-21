@@ -39,6 +39,7 @@
 #include <memory>
 #include <mutex>
 #include <stop_token>
+#include <string>
 #include <thread>
 
 #include "kvm/desk_region.h"
@@ -64,6 +65,7 @@ public:
     struct Options {
         int jpeg_quality = 75;
         int max_fps = 30;
+        std::string codec = "jpeg";  // or "h264" (--codec): windows sent to the viewer
         display::Side peer_side = display::Side::Right;  // where the VDD goes
         desk::Region* desk = nullptr;                    // desk mode; nullptr = off. Outlives the link.
         bool own_vdd = true;  // false: show the peer's windows but never attach this PC's VDD (--desk-no-vdd)
@@ -92,6 +94,8 @@ public:
 
     // Ctrl+Alt+Shift+W: send the foreground window over, or bring it back (see above).
     void toggle();
+    // The same for `window` instead of the one in front (the "share <hwnd>" launcher command).
+    void toggle(HWND window);
     // Ctrl+Alt+Shift+H: shows or hides the viewer's HUD.
     void toggle_hud();
 

@@ -714,6 +714,7 @@ void ViewerWindow::take_pending_frame() {
         frame_h_ = displayed_.height;
     }
     have_frame_ = true;
+    frame_codec_ = info.codec;
     last_frame_time_ = Clock::now();
     ++frames_shown_;
     if (last_seq_ && info.seq > *last_seq_ + 1) {
@@ -792,6 +793,7 @@ void ViewerWindow::on_hud_tick() {
         hud_.present_ms = s.present_ms;
         hud_.width = frame_w_;
         hud_.height = frame_h_;
+        hud_.codec = frame_codec_;
         hud_.dropped = dropped_;
         hud_.repeated = repeated_;
     } else {
@@ -802,6 +804,7 @@ void ViewerWindow::on_hud_tick() {
         hud_.present_ms.reset();
         hud_.width.reset();
         hud_.height.reset();
+        hud_.codec.clear();
         hud_.dropped.reset();
         hud_.repeated.reset();
     }
