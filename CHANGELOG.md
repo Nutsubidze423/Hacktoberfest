@@ -20,11 +20,14 @@ What changed for people who use Sarke, newest first. The plan ahead is in
     once, and the other PC is told.
   - When the other PC runs a different Sarke version (1.1, say), both PCs say so in a notification,
     and the list of PCs marks it "Needs a Sarke update" instead of failing quietly.
+  - A device on the network that opens connections and says nothing, or keeps failing to connect,
+    can no longer keep the paired PC out.
 - Sarke is open source under the Apache License 2.0; the installer ships `LICENSE`, `NOTICE` and
   the licenses of everything compiled in (`licenses\` in the install folder).
 - Installers are published as GitHub Releases (and on the website), no longer kept in the repository.
 - For developers: CI on every push, tests under ctest (`ctest --preset unit` / `local`),
-  warnings are errors, clang-format, the Virtual Display Driver fetched by `tools\fetch_vdd.ps1`.
+  warnings are errors, clang-format, the Virtual Display Driver fetched by `tools\fetch_vdd.ps1`,
+  a libFuzzer target for the network parsers (`x64-fuzz` preset).
 
 ## 1.1.0 (2026-10-18)
 

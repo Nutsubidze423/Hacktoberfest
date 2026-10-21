@@ -54,6 +54,8 @@ included ([installer/sarke.iss](../installer/sarke.iss)).
 - **Malware running as the same Windows user:** it can already read the screen and inject input.
 - **Traffic analysis:** sizes and timing of encrypted records reveal typing rhythm and screen activity.
 - **Denial of service on the LAN beyond the pre-auth limits (S9):** anyone on the network can jam it anyway.
+  With 4 addresses on the LAN, an attacker can hold all 4 handshake slots, 10 s at a time, until the
+  per-IP backoff (1 s doubling to 30 s after 2 failures) slows each address down.
 - **Physical access to an unlocked PC.**
 
 ## 4. Threats, today and after Phase 1
@@ -85,7 +87,7 @@ included ([installer/sarke.iss](../installer/sarke.iss)).
 | S6 | **Discovery is a hint.** A discovery reply can only cause a connection attempt; it can't grant trust. |
 | S7 | **The private key is protected at rest:** DPAPI, current user. |
 | S8 | **Unpair takes effect immediately:** the key is removed and any live session with it ends. |
-| S9 | **Pre-auth limits:** a 10 s handshake timeout, at most 4 pending handshakes, and per-IP backoff after a failed handshake. |
+| S9 | **Pre-auth limits:** a 10 s handshake timeout, at most 4 pending handshakes (2 per IP), and per-IP backoff after failed handshakes. |
 
 ## 6. Design
 
@@ -245,7 +247,7 @@ Implemented in P1.10:
 | S6 | launcher unit test: a reply with a paired name but another ID isn't auto-connected (P1.8) |
 | S7 | `identity_test`: round trip; a tampered blob fails cleanly. Manual: another Windows user can't decrypt it (P1.3) |
 | S8 | `loopback_test`: unpair mid-session closes all three channels (P1.9) |
-| S9 | `loopback_test`: a flood of half-open connections can't exhaust the slots, and the handshake times out (P1.12) |
+| S9 | `preauth_test`: a silent connection holds its slot only until the timeout; one address gets 2 of the 4 slots and the paired PC still gets in; after 2 failures an address waits; `stop()` ends running handshakes. `fuzz_protocol` (libFuzzer + ASan) on `proto::decode` and the frame header (P1.12) |
 
 ### Code mapping test vectors
 The mapping from 4 exporter bytes to the code shown:

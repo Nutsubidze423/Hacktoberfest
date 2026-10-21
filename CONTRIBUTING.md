@@ -56,6 +56,19 @@ exactly one group, or configure fails.
 `SARKE_STRICT_TIMING=1` (CI sets it) turns timing floors into hard checks. On a busy dev PC they
 only warn.
 
+**Fuzzing** ([tools/fuzz/](tools/fuzz/)): libFuzzer with AddressSanitizer, in its own preset so the
+normal build stays uninstrumented. From a Developer PowerShell (it puts the ASan runtime on PATH):
+
+```powershell
+cmake --preset x64-fuzz
+cmake --build --preset x64-fuzz
+build\x64-fuzz\tools\fuzz\fuzz_protocol.exe -max_total_time=600 tools\fuzz\corpus
+```
+
+`tools\fuzz\corpus` holds the seeds, and libFuzzer adds what it finds to the folder it is given: give
+it a copy when you don't want new files there. A `crash-*` file is a bug to fix; add the input to the
+seeds once it is fixed.
+
 **Two PCs on one machine:** the two programs only talk to a paired PC. Give the client its own
 identity folder, so it is a different "PC", and pair them once:
 

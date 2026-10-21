@@ -10,6 +10,8 @@
 #include <array>
 #include <condition_variable>
 #include <cstring>
+#include <format>
+#include <iterator>
 #include <mutex>
 #include <stdexcept>
 #include <string_view>
@@ -438,27 +440,135 @@ void Connection::handle_pong(const proto::Pong& pong) {
 // ---------------------------------------------------------------------------------------------
 // Server / connect
 
-Server::Server(std::uint16_t port) : listen_sock_(listen_on(port)) {}
+std::chrono::seconds handshake_backoff(int failures, const HandshakeLimits& limits) {
+    const int over = failures - limits.free_failures;
+    if (over <= 0) return std::chrono::seconds(0);
+    return std::min(std::chrono::seconds(1LL << std::min(over - 1, 20)), limits.max_backoff);
+}
+
+namespace {
+
+std::string ip_of(const std::string& peer) {
+    const auto colon = peer.rfind(':');
+    return colon == std::string::npos ? peer : peer.substr(0, colon);
+}
+
+// Waits up to `timeout` for a connection on the listening socket. False on timeout or when it closed.
+bool connection_waiting(SOCKET listening, std::chrono::milliseconds timeout) {
+    fd_set ready;
+    FD_ZERO(&ready);
+    FD_SET(listening, &ready);
+    timeval tv{0, static_cast<long>(std::chrono::duration_cast<std::chrono::microseconds>(timeout).count())};
+    return select(0, &ready, nullptr, nullptr, &tv) > 0;
+}
+
+constexpr auto kRefusalLogEvery = std::chrono::seconds(10);
+constexpr auto kForgetIpAfter = std::chrono::minutes(10);
+
+}  // namespace
+
+Server::Server(std::uint16_t port, HandshakeLimits limits) : listen_sock_(listen_on(port)), limits_(limits) {}
 
 Server::~Server() {
     stop();
+    std::list<Pending> running;
+    {
+        std::lock_guard lock(mutex_);
+        running.splice(running.end(), pending_);
+    }
+    running.clear();  // joins: cancel_ makes each give up within 200 ms (they still need mutex_ for that)
 }
 
 std::optional<Handshaken> Server::accept(const tls::Credentials& me, std::chrono::milliseconds handshake_timeout) {
     for (;;) {
+        {
+            std::lock_guard lock(mutex_);
+            reap_locked();
+            if (!ready_.empty()) {
+                Handshaken next = std::move(ready_.front());
+                ready_.pop_front();
+                return next;
+            }
+        }
+        const SOCKET listening = listen_sock_;
+        if (listening == INVALID_SOCKET) return std::nullopt;  // stop()
+        // In short slices: a handshake that finished meanwhile is returned above.
+        if (!connection_waiting(listening, std::chrono::milliseconds(100))) continue;
         std::string peer;
         const SOCKET s = accept_on(listen_sock_, peer);
-        if (s == INVALID_SOCKET) return std::nullopt;  // stop()
-        set_nodelay(s);
-        std::string why;
-        if (auto stream = tls::Stream::handshake(s, tls::Role::Server, me, handshake_timeout, why)) {
-            return Handshaken{std::move(stream), std::move(peer)};
+        if (s == INVALID_SOCKET) {
+            if (listen_sock_ == INVALID_SOCKET) return std::nullopt;
+            continue;
         }
-        log::warn("net: {}: {}", peer, why);  // the socket is closed; wait for the next client
+
+        std::lock_guard lock(mutex_);
+        const std::string ip = ip_of(peer);
+        const auto now = std::chrono::steady_clock::now();
+        PerIp& from = per_ip_[ip];
+        const auto refuse = [&](const std::string& why) {
+            closesocket(s);  // nothing read from it
+            if (now - from.last_refusal_log < kRefusalLogEvery) return;
+            from.last_refusal_log = now;
+            log::warn("net: {}: {} - closed", peer, why);
+        };
+        if (now < from.wait_until) {
+            const auto left = std::chrono::duration_cast<std::chrono::seconds>(from.wait_until - now).count() + 1;
+            refuse(std::format("{} failed handshakes in a row; it may try again in {} s", from.failures, left));
+            continue;
+        }
+        const auto running = std::count_if(pending_.begin(), pending_.end(), [](const Pending& p) { return !p.done; });
+        const auto from_ip =
+            std::count_if(pending_.begin(), pending_.end(), [&](const Pending& p) { return !p.done && p.ip == ip; });
+        if (from_ip >= limits_.max_pending_per_ip) {
+            refuse("a handshake from this address is still running");
+            continue;
+        }
+        if (running >= limits_.max_pending) {
+            refuse(std::format("{} handshakes are running already", running));
+            continue;
+        }
+        start_handshake(s, std::move(peer), me, handshake_timeout);
     }
 }
 
+void Server::start_handshake(SOCKET s, std::string peer, const tls::Credentials& me,
+                             std::chrono::milliseconds timeout) {
+    Pending& pending = pending_.emplace_back();
+    pending.ip = ip_of(peer);
+    // The thread needs mutex_ (held by the caller) before it touches `pending` or the lists.
+    pending.thread = std::jthread([this, &pending, s, peer = std::move(peer), &me, timeout] {
+        std::string why;
+        auto stream = tls::Stream::handshake(s, tls::Role::Server, me, timeout, why, &cancel_);
+        std::lock_guard lock(mutex_);
+        pending.done = true;
+        if (cancel_) return;  // stop(): nobody takes it
+        PerIp& from = per_ip_[pending.ip];
+        if (stream) {
+            from.failures = 0;
+            from.wait_until = {};
+            ready_.push_back(Handshaken{std::move(stream), peer});
+            return;
+        }
+        ++from.failures;
+        from.wait_until = std::chrono::steady_clock::now() + handshake_backoff(from.failures, limits_);
+        log::warn("net: {}: {}", peer, why);  // the socket is closed; wait for the next client
+    });
+}
+
+void Server::reap_locked() {
+    for (auto it = pending_.begin(); it != pending_.end();) {
+        it = it->done ? pending_.erase(it) : std::next(it);  // erase joins a thread that has finished
+    }
+    // An IP that has been quiet for a while starts over.
+    const auto now = std::chrono::steady_clock::now();
+    std::erase_if(per_ip_, [&](const auto& entry) {
+        const PerIp& p = entry.second;
+        return now - std::max(p.wait_until, p.last_refusal_log) > kForgetIpAfter && now > p.wait_until;
+    });
+}
+
 void Server::stop() {
+    cancel_ = true;
     close_listener(listen_sock_);
 }
 

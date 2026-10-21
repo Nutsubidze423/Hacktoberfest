@@ -45,6 +45,18 @@ add_subdirectory(host_a)
 add_subdirectory(client_b)
 add_subdirectory(tools)
 
+# libFuzzer targets (roadmap P1.12): only in the x64-fuzz preset. MSVC's /fsanitize=fuzzer,address;
+# they compile header-only code only, so nothing they link is left uninstrumented.
+option(SARKE_FUZZ "Build the libFuzzer targets in tools/fuzz" OFF)
+if(SARKE_FUZZ)
+  add_executable(fuzz_protocol tools/fuzz/fuzz_protocol.cpp)
+  target_include_directories(fuzz_protocol PRIVATE common/include)
+  target_link_libraries(fuzz_protocol PRIVATE nlohmann_json::nlohmann_json)
+  target_compile_options(fuzz_protocol PRIVATE /fsanitize=fuzzer /fsanitize=address /Zi)
+  target_link_options(fuzz_protocol PRIVATE /DEBUG /INCREMENTAL:NO)
+  set_target_properties(fuzz_protocol PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tools/fuzz)
+endif()
+
 # Icon and version of Sarke's executables (resources/sarke.rc; the version is in resources/version.h).
 function(sarke_resources target which)
   target_sources(${target} PRIVATE ${CMAKE_SOURCE_DIR}/resources/sarke.rc)

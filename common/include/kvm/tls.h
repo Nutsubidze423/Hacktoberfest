@@ -23,6 +23,7 @@
 #include <winsock2.h>
 
 #include <array>
+#include <atomic>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -81,8 +82,10 @@ public:
     // Runs the handshake within `timeout`. On failure returns nullptr, closes the socket and says
     // why in `error` (e.g. "the peer doesn't speak TLS", "no certificate from the peer"). A server
     // recognises an older Sarke's plaintext hello and says so (kOlderSarke, docs/SECURITY.md 6.7).
+    // `cancel` (optional): set from another thread, the handshake gives up within 200 ms.
     static std::unique_ptr<Stream> handshake(SOCKET socket, Role role, const Credentials& me,
-                                             std::chrono::milliseconds timeout, std::string& error);
+                                             std::chrono::milliseconds timeout, std::string& error,
+                                             const std::atomic<bool>* cancel = nullptr);
     ~Stream();
     Stream(const Stream&) = delete;
     Stream& operator=(const Stream&) = delete;

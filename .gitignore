@@ -31,3 +31,9 @@ CLAUDE.md
 # A device key must never be committed (Sarke keeps it in %LOCALAPPDATA%\Sarke anyway).
 identity.bin
 identity.bin.*
+
+# libFuzzer findings (tools/fuzz): kept out of the tree until the input becomes a seed
+crash-*
+leak-*
+timeout-*
+oom-*
