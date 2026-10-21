@@ -30,7 +30,7 @@ set(KVM_VDD_TESTS
     vdd_test window_mover_test window_share_test capture_test desk_test desk_hook_test remote_input_test)
 set(KVM_LOOPBACK_TESTS loopback_test)
 set(KVM_BENCH_TESTS jpeg_test)
-set(KVM_MANUAL_TESTS kvm_local_test viewer_test)
+set(KVM_MANUAL_TESTS kvm_local_test viewer_test network_category_test)
 
 # tls_test drives plain OpenSSL clients too (TLS 1.2, no certificate) to check what is refused.
 target_link_libraries(tls_test PRIVATE OpenSSL::SSL OpenSSL::Crypto)

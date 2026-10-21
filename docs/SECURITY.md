@@ -71,7 +71,7 @@ included ([installer/sarke.iss](../installer/sarke.iss)).
 | T9 | A4 or A2 sends a huge or malformed message | size limits (64 KB control, 32 MB frame) | the same limits, reachable only after authentication; decoder fuzzed (P1.12) |
 | T10 | A2 exhausts connections before authentication | possible | handshake timeout, a cap on pending handshakes, per-IP backoff (S9) |
 | T11 | Another user or a backup reads the private key | n/a | DPAPI, current user (S7) |
-| T12 | Public Wi-Fi: anyone on it can reach the ports | yes (`profile=any`) | firewall rules for Private (and Domain) networks only (P1.11) |
+| T12 | Public Wi-Fi: anyone on it can reach the ports | yes (`profile=any`) | firewall rules for Private (and Domain) networks only, port rules only (P1.11); the launcher says when the network is Public |
 
 ## 5. Required properties
 

@@ -847,6 +847,24 @@ Attempts are rate-limited.
     - `netsh advfirewall firewall show rule name=Sarke` shows only the Private/Domain port rules;
     - the tasks are unchecked by default;
     - uninstall removes the rules.
+  - **Result (2026-10-21), code done; the manual checks above are still open:**
+    - **[installer/sarke.iss](../installer/sarke.iss):**
+      - the TCP 50500–50502 and UDP 50503 rules are `profile=private,domain`, still `remoteip=localsubnet`;
+      - the two program rules are gone;
+      - `autostart` and `defender` are unchecked by default, and the Defender text says that an exclusion also stops scanning there;
+      - a reinstall or an upgrade from 1.1 first deletes every "Sarke" rule, so 1.1's any-profile and program rules go too.
+    - **Version 1.2.0** in `resources/version.h`. `tools\make_installer.ps1` builds `SarkeSetup-1.2.0.0.exe` (10.7 MB), and its test step passes.
+    - **The launcher at start** asks Windows for the connected networks ([client_b/network_category.h](../client_b/network_category.h), `INetworkListManager`). For a Public one it shows "“NAME” is a Public network", with the Settings path to make it Private.
+      - `network_category_test` (manual) on Demetre's PC prints `KATO: Public`. That network needs switching to Private for Sarke to work after this release.
+    - **Open question for the Sandbox run:** without a rule for the programs, Windows may show its "allow this app?" prompt when `kvm_host` first listens.
+      - If it does, clicking Allow with "Public" ticked would open the app on Public networks again.
+      - Check it in the Sandbox. If the prompt shows, add `profile=public` *block* rules for `kvm_host.exe` and `kvm_client.exe`: a rule exists, so there's no prompt, and Public stays closed.
+    - **Docs:** SECURITY.md T12. The README's install and troubleshooting text describes the released 1.1; it changes with the release (P1.14), together with the ports note from P1.7.
+    - **Still to run (needs admin, Windows Sandbox):**
+      - `netsh advfirewall firewall show rule name=Sarke` shows only the two port rules (Private, Domain);
+      - the tasks are unchecked;
+      - no firewall prompt on first start;
+      - uninstall removes the rules.
 
 - [ ] **P1.12 Pre-auth limits and decoder fuzzing** (M), branch `phase1/hardening`.
   - Handshake timeout, at most 4 pending handshakes, backoff per IP.
