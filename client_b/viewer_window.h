@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// Viewer window on B (docs/DESIGN.md section 4): Direct2D renderer, custom title strip,
-// connection state screens, HUD. Shows A's streamed window with its aspect ratio preserved.
+// Viewer window on B (docs/DESIGN.md section 4): custom title strip, connection state screens, HUD.
+// Shows A's streamed window with its aspect ratio preserved. Drawn with Direct2D on a D3D11
+// flip-model swapchain (swapchain_target.h), on the GPU when there is one, else on WARP.
 //
 // Threads: create() and the message loop run on the UI thread. The "thread-safe" methods below
 // may be called from the network / video threads; they only store data and invalidate.
@@ -9,19 +10,24 @@
 
 #include <windows.h>
 
-#include <d2d1.h>
+#include <d2d1_1.h>
+#include <d3d11.h>
+#include <wrl/client.h>
 
 #include <array>
 #include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <string>
 
 #include "app_logo.h"
 #include "jpeg_decoder.h"
+#include "kvm/gpu_device.h"
+#include "swapchain_target.h"
 #include "ui_draw.h"
 #include "viewer_chrome.h"
 #include "viewer_hud.h"
@@ -43,6 +49,7 @@ struct FrameInfo {
     std::size_t bytes = 0;
     std::int64_t decode_us = 0;
     std::int64_t decoded_at_us = 0;
+    std::string codec = "jpeg";
 };
 
 class ViewerWindow {
@@ -55,7 +62,8 @@ public:
 
     // Creates the window (client 960x600 dp). A hidden viewer (visible = false) appears by itself
     // when a stream starts. Closing it gives the stream back (stream_stop, see set_close_handler).
-    bool create(bool visible = true);
+    // use_gpu = false draws on WARP and decodes H.264 in software, as on a PC without a GPU (tests).
+    bool create(bool visible = true, bool use_gpu = true);
     HWND hwnd() const { return hwnd_; }
 
     // --- Thread-safe ---------------------------------------------------------------------
@@ -71,6 +79,13 @@ public:
     // Swaps `frame` with the pending one; on return `frame` is a spare buffer to decode into.
     // An unpainted pending frame is dropped, so the window always shows the newest frame.
     void present(BgraImage& frame, const FrameInfo& info);
+    // The same for a picture already on the GPU: a BGRA texture of gpu()'s device (shader resource),
+    // `width` x `height` of it shown. The window keeps a reference until a newer picture replaces it.
+    void present_texture(Microsoft::WRL::ComPtr<ID3D11Texture2D> bgra, int width, int height, const FrameInfo& info);
+    // The device the window draws with: decode onto it for present_texture(). Replaced (a new
+    // pointer) when the old one is lost; check has_video() before decoding on it. nullptr only if
+    // there is no D3D11 device at all.
+    std::shared_ptr<GpuDevice> gpu();
     void count_payload_bytes(std::size_t bytes) { payload_bytes_ += bytes; }
 
     // --- UI thread -----------------------------------------------------------------------
@@ -98,6 +113,9 @@ public:
     // Restores (if minimized) and activates the window.
     void bring_to_front();
 
+    // Where the picture was last drawn (client px), or nullopt without one. For tests.
+    std::optional<RECT> picture_rect() const;
+
 private:
     enum class View { Waiting, Connecting, Linked, Streaming, Stalled, Lost };
     using Clock = std::chrono::steady_clock;
@@ -110,6 +128,7 @@ private:
     void draw_state_block(ui::Painter& p, View view, const D2D1_RECT_F& content);
     void draw_stalled(ui::Painter& p, const D2D1_RECT_F& content);
     bool ensure_render_target();
+    void drop_render_target();
     void take_pending_frame();
     void on_hud_tick();
     void on_blink_tick();
@@ -140,19 +159,29 @@ private:
         std::optional<std::uint64_t> stream_hwnd;  // the owner's window while a stream_start is active
         std::uint64_t generation = 0;  // bumped when a stream ends; the UI resets per-stream state
         BgraImage pending;
+        Microsoft::WRL::ComPtr<ID3D11Texture2D> pending_texture;  // instead of `pending`
+        int pending_w = 0;
+        int pending_h = 0;
         FrameInfo pending_info;
         bool has_pending = false;
+        std::shared_ptr<GpuDevice> gpu;  // made by gpu() on first use
+        bool use_gpu = true;
     } shared_;
     std::atomic<std::uint64_t> payload_bytes_{0};
 
     // UI thread only.
     ui::TextStyles text_;
-    ui::ComPtr<ID2D1HwndRenderTarget> rt_;
+    std::unique_ptr<SwapchainTarget> target_;
+    ID2D1DeviceContext* rt_ = nullptr;  // target_'s, between begin_draw() and end_draw()
     ui::ComPtr<ID2D1SolidColorBrush> brush_;
-    ui::ComPtr<ID2D1Bitmap> bitmap_;
+    ui::ComPtr<ID2D1Bitmap> bitmap_;  // displayed_ (memory) uploaded
     bool bitmap_dirty_ = false;
 
     BgraImage displayed_;
+    Microsoft::WRL::ComPtr<ID3D11Texture2D> displayed_texture_;  // or this (a decoded H.264 picture)
+    ui::ComPtr<ID2D1Bitmap1> texture_bitmap_;
+    int frame_w_ = 0;  // the displayed picture's size, from either
+    int frame_h_ = 0;
     bool have_frame_ = false;
     std::uint64_t seen_generation_ = 0;
     bool stream_sized_ = false;  // window already resized for this stream

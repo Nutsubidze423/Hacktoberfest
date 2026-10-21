@@ -24,6 +24,13 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t* data, std::size_t size
         end = nal.offset + nal.size;
     }
 
+    // Access units are back to back, inside the stream.
+    std::size_t next = 0;
+    for (const auto& [first, second] : kvm::annexb::access_units(au)) {
+        if (first < next || second < first || second > size) std::abort();
+        next = second;
+    }
+
     // An access unit that passes is a keyframe or not, never both.
     const bool as_keyframe = kvm::annexb::check(au, true).empty();
     const bool as_picture = kvm::annexb::check(au, false).empty();

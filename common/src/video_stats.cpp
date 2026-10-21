@@ -40,12 +40,20 @@ VideoStats::~VideoStats() {
 
 bool VideoStats::open_csv(const std::filesystem::path& path) {
     std::lock_guard lock(mutex_);
+    if (csv_.is_open()) csv_.close();
+    csv_.clear();
     csv_.open(path, std::ios::trunc);
     if (!csv_) return false;
     csv_start_us_ = steady_now_us();
     csv_ << "t_ms,layer,stream,seq,codec,bytes,width,height,latency_ms,decode_ms,present_ms,gap,repeat\n";
     csv_.flush();
     return static_cast<bool>(csv_);
+}
+
+void VideoStats::flush() {
+    std::lock_guard lock(mutex_);
+    if (csv_.is_open()) csv_.flush();
+    csv_unflushed_ = 0;
 }
 
 void VideoStats::received(std::string_view layer, std::size_t bytes) {

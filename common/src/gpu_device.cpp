@@ -22,14 +22,26 @@ std::string narrow(const wchar_t* s) {
 }  // namespace
 
 std::shared_ptr<GpuDevice> GpuDevice::create() {
+    // VIDEO_SUPPORT: the video processor (NV12) and Media Foundation's codecs need it; BGRA_SUPPORT:
+    // WGC hands out BGRA textures, and Direct2D draws on them.
+    auto gpu = make(D3D_DRIVER_TYPE_HARDWARE, D3D11_CREATE_DEVICE_BGRA_SUPPORT | D3D11_CREATE_DEVICE_VIDEO_SUPPORT);
+    if (gpu) gpu->has_video_ = true;
+    return gpu;
+}
+
+std::shared_ptr<GpuDevice> GpuDevice::create_software() {
+    return make(D3D_DRIVER_TYPE_WARP, D3D11_CREATE_DEVICE_BGRA_SUPPORT);
+}
+
+std::shared_ptr<GpuDevice> GpuDevice::make(D3D_DRIVER_TYPE type, UINT flags) {
     auto gpu = std::shared_ptr<GpuDevice>(new GpuDevice());
-    // VIDEO_SUPPORT: the video processor (NV12) and Media Foundation's encoders need it; BGRA_SUPPORT:
-    // WGC hands out BGRA textures.
-    const HRESULT hr = D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr,
-                                         D3D11_CREATE_DEVICE_BGRA_SUPPORT | D3D11_CREATE_DEVICE_VIDEO_SUPPORT, nullptr,
-                                         0, D3D11_SDK_VERSION, &gpu->device_, nullptr, &gpu->context_);
+    const HRESULT hr = D3D11CreateDevice(nullptr, type, nullptr, flags, nullptr, 0, D3D11_SDK_VERSION, &gpu->device_,
+                                         nullptr, &gpu->context_);
     if (FAILED(hr)) {
-        log::warn("gpu: no hardware D3D11 device with video support (0x{:08X})", static_cast<std::uint32_t>(hr));
+        log::warn(
+            "gpu: no {} (0x{:08X})",
+            type == D3D_DRIVER_TYPE_WARP ? "software (WARP) D3D11 device" : "hardware D3D11 device with video support",
+            static_cast<std::uint32_t>(hr));
         return nullptr;
     }
     if (FAILED(gpu->device_.As(&gpu->multithread_))) {

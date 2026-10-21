@@ -90,12 +90,13 @@ RECT fit_rect(int image_w, int image_h, const RECT& area) {
 }
 
 ViewerWindow::~ViewerWindow() {
+    target_.reset();  // the swapchain goes before its window
     if (hwnd_) {
         DestroyWindow(hwnd_);
     }
 }
 
-bool ViewerWindow::create(bool visible) {
+bool ViewerWindow::create(bool visible, bool use_gpu) {
     try {
         ui::Graphics::get();
     } catch (const std::exception& e) {
@@ -116,6 +117,11 @@ bool ViewerWindow::create(bool visible) {
     footer_ = std::format(L"{}{}{}{}{}{}{}%", std::wstring_view(name, name_len), ui::kSeparator, primary.rect.width(),
                           ui::kTimes, primary.rect.height(), ui::kSeparator, std::lround(primary.scale * 100));
     reduced_motion_ = reduced_motion();
+
+    {
+        std::lock_guard lock(mutex_);
+        shared_.use_gpu = use_gpu;
+    }
 
     const UINT system_dpi = GetDpiForSystem();
     const HWND hwnd = CreateWindowExW(0, kClassName, ui::kAppName, WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT,
@@ -243,9 +249,40 @@ void ViewerWindow::give_back_stream() {
 void ViewerWindow::present(BgraImage& frame, const FrameInfo& info) {
     std::lock_guard lock(mutex_);
     std::swap(shared_.pending, frame);
+    shared_.pending_texture.Reset();
     shared_.pending_info = info;
     shared_.has_pending = true;
     if (hwnd_) InvalidateRect(hwnd_, nullptr, FALSE);  // safe from any thread
+}
+
+void ViewerWindow::present_texture(Microsoft::WRL::ComPtr<ID3D11Texture2D> bgra, int width, int height,
+                                   const FrameInfo& info) {
+    std::lock_guard lock(mutex_);
+    shared_.pending_texture = std::move(bgra);
+    shared_.pending_w = width;
+    shared_.pending_h = height;
+    shared_.pending_info = info;
+    shared_.has_pending = true;
+    if (hwnd_) InvalidateRect(hwnd_, nullptr, FALSE);
+}
+
+std::shared_ptr<GpuDevice> ViewerWindow::gpu() {
+    std::lock_guard lock(mutex_);
+    // Made on first use (a viewer that is never shown needs none): the GPU if it can do video, so
+    // H.264 decodes onto it, else WARP. The window draws either way.
+    if (!shared_.gpu) {
+        if (shared_.use_gpu) shared_.gpu = GpuDevice::create();
+        if (!shared_.gpu) shared_.gpu = GpuDevice::create_software();
+        if (!shared_.gpu) log::error("viewer: no D3D11 device to draw with");
+    }
+    return shared_.gpu;
+}
+
+std::optional<RECT> ViewerWindow::picture_rect() const {
+    const D2D1_RECT_F& r = image_rect_;
+    if (!have_frame_ || r.right <= r.left || r.bottom <= r.top) return std::nullopt;
+    return RECT{static_cast<LONG>(r.left), static_cast<LONG>(r.top), static_cast<LONG>(r.right),
+                static_cast<LONG>(r.bottom)};
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -349,8 +386,8 @@ LRESULT ViewerWindow::handle_message(UINT msg, WPARAM wp, LPARAM lp) {
         return 0;
     case WM_ERASEBKGND: return 1;
     case WM_SIZE:
-        if (rt_) {
-            rt_->Resize(D2D1::SizeU(LOWORD(lp), HIWORD(lp)));
+        if (target_) {
+            target_->resize(LOWORD(lp), HIWORD(lp));
         }
         InvalidateRect(hwnd, nullptr, FALSE);
         return 0;
@@ -596,35 +633,55 @@ void ViewerWindow::resize_for_stream(int width, int height) {
 }
 
 bool ViewerWindow::ensure_render_target() {
-    if (rt_) {
+    if (target_) {
         return true;
     }
-    RECT rc;
-    GetClientRect(hwnd_, &rc);
-    // 96 dpi: one D2D unit is one physical pixel; everything is scaled with px().
-    const auto props = D2D1::RenderTargetProperties(D2D1_RENDER_TARGET_TYPE_DEFAULT, D2D1::PixelFormat(), 96.0f, 96.0f);
-    const auto hwnd_props = D2D1::HwndRenderTargetProperties(
-        hwnd_, D2D1::SizeU(static_cast<UINT32>(rc.right), static_cast<UINT32>(rc.bottom)));
-    if (FAILED(ui::Graphics::get().d2d()->CreateHwndRenderTarget(props, hwnd_props, &rt_))) {
-        log::error("viewer: CreateHwndRenderTarget failed");
+    std::string why;
+    target_ = SwapchainTarget::create(hwnd_, gpu(), why);
+    if (!target_) {
+        log::error("viewer: {}", why);
         return false;
     }
-    rt_->SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_CLEARTYPE);  // opaque target
-    rt_->CreateSolidColorBrush(ui::to_color(pal().ink), &brush_);
     bitmap_.Reset();
     bitmap_dirty_ = true;
+    texture_bitmap_ = displayed_texture_ ? target_->wrap(displayed_texture_.Get()) : nullptr;
     return true;
+}
+
+// The device was lost: everything made on it goes, and a lost GPU is replaced by a new device
+// (the decoder follows gpu() and starts again at a keyframe).
+void ViewerWindow::drop_render_target() {
+    const auto lost = target_ ? target_->gpu() : nullptr;
+    target_.reset();
+    brush_.Reset();
+    bitmap_.Reset();
+    texture_bitmap_.Reset();
+    displayed_texture_.Reset();
+    if (lost && FAILED(lost->device()->GetDeviceRemovedReason())) {
+        std::lock_guard lock(mutex_);
+        shared_.gpu.reset();              // gpu() makes a new one
+        shared_.pending_texture.Reset();  // on the lost device
+    }
+    InvalidateRect(hwnd_, nullptr, FALSE);
 }
 
 void ViewerWindow::take_pending_frame() {
     FrameInfo info;
     bool got = false;
     std::uint64_t generation = 0;
+    Microsoft::WRL::ComPtr<ID3D11Texture2D> texture;
+    int texture_w = 0, texture_h = 0;
     {
         std::lock_guard lock(mutex_);
         generation = shared_.generation;
         if (shared_.has_pending) {
-            std::swap(shared_.pending, displayed_);  // the old displayed buffer becomes the next spare
+            if (shared_.pending_texture) {
+                texture = std::move(shared_.pending_texture);
+                texture_w = shared_.pending_w;
+                texture_h = shared_.pending_h;
+            } else {
+                std::swap(shared_.pending, displayed_);  // the old displayed buffer becomes the next spare
+            }
             info = shared_.pending_info;
             shared_.has_pending = false;
             got = true;
@@ -644,7 +701,18 @@ void ViewerWindow::take_pending_frame() {
         return;
     }
 
-    bitmap_dirty_ = true;
+    if (texture) {
+        displayed_texture_ = std::move(texture);
+        texture_bitmap_ = target_ ? target_->wrap(displayed_texture_.Get()) : nullptr;
+        frame_w_ = texture_w;
+        frame_h_ = texture_h;
+    } else {
+        displayed_texture_.Reset();
+        texture_bitmap_.Reset();
+        bitmap_dirty_ = true;
+        frame_w_ = displayed_.width;
+        frame_h_ = displayed_.height;
+    }
     have_frame_ = true;
     last_frame_time_ = Clock::now();
     ++frames_shown_;
@@ -656,7 +724,7 @@ void ViewerWindow::take_pending_frame() {
     to_report_ = info;
     if (!stream_sized_) {
         stream_sized_ = true;
-        resize_for_stream(displayed_.width, displayed_.height);
+        resize_for_stream(frame_w_, frame_h_);
     }
 }
 
@@ -722,8 +790,8 @@ void ViewerWindow::on_hud_tick() {
         hud_.latency_p95_ms = whole_ms(s.latency_p95_ms);
         hud_.decode_ms = s.decode_ms;
         hud_.present_ms = s.present_ms;
-        hud_.width = displayed_.width;
-        hud_.height = displayed_.height;
+        hud_.width = frame_w_;
+        hud_.height = frame_h_;
         hud_.dropped = dropped_;
         hud_.repeated = repeated_;
     } else {
@@ -763,9 +831,13 @@ void ViewerWindow::render() {
     const bool streaming = view == View::Streaming || view == View::Stalled;
     const std::wstring title = streaming ? stream_title : std::wstring();
 
-    rt_->BeginDraw();
-    rt_->SetTransform(D2D1::Matrix3x2F::Identity());
-    ui::Painter p(rt_.Get(), brush_.Get(), text_);
+    rt_ = target_->begin_draw();
+    if (!rt_) {
+        drop_render_target();
+        return;
+    }
+    if (!brush_) rt_->CreateSolidColorBrush(ui::to_color(pal().ink), &brush_);
+    ui::Painter p(rt_, brush_.Get(), text_);
     const ui::Palette& c = pal();
     p.fill({0, 0, w, h}, c.bg);
 
@@ -812,22 +884,21 @@ void ViewerWindow::render() {
     strip.pressed = pressed_;
     viewer::draw_strip(p, layout, strip, dpi_);
 
-    if (rt_->EndDraw() == D2DERR_RECREATE_TARGET) {
-        rt_.Reset();
-        brush_.Reset();
-        bitmap_.Reset();
-        InvalidateRect(hwnd_, nullptr, FALSE);
+    const bool shown = target_->end_draw();
+    rt_ = nullptr;
+    if (!shown) {
+        drop_render_target();
     } else if (to_report_) {
-        // On screen now (EndDraw has presented): capture -> here, and decoded -> here.
+        // On screen now (presented): capture -> here, and decoded -> here.
         const std::int64_t now = steady_now_us();
         const FrameInfo& f = *to_report_;
         video_stats().shown(
             {.layer = "window",
              .seq = f.seq,
-             .codec = "jpeg",
+             .codec = f.codec,
              .bytes = f.bytes,
-             .width = displayed_.width,
-             .height = displayed_.height,
+             .width = frame_w_,
+             .height = frame_h_,
              .latency_us = f.t_capture_local_us ? std::optional(now - *f.t_capture_local_us) : std::nullopt,
              .decode_us = f.decode_us,
              .present_us = f.decoded_at_us ? now - f.decoded_at_us : 0});
@@ -847,10 +918,10 @@ void ViewerWindow::draw_content(ui::Painter& p, View view, const D2D1_RECT_F& co
         draw_state_block(p, view, content);
         return;
     }
-    if (!displayed_.empty()) {
-        const auto fw = static_cast<UINT32>(displayed_.width);
-        const auto fh = static_cast<UINT32>(displayed_.height);
-        if (bitmap_dirty_ || !bitmap_) {
+    if (have_frame_ && frame_w_ > 0 && frame_h_ > 0) {
+        const auto fw = static_cast<UINT32>(frame_w_);
+        const auto fh = static_cast<UINT32>(frame_h_);
+        if (!displayed_texture_ && !displayed_.empty() && (bitmap_dirty_ || !bitmap_)) {
             const auto size = bitmap_ ? bitmap_->GetPixelSize() : D2D1_SIZE_U{};
             if (!bitmap_ || size.width != fw || size.height != fh) {
                 bitmap_.Reset();
@@ -873,16 +944,20 @@ void ViewerWindow::draw_content(ui::Painter& p, View view, const D2D1_RECT_F& co
         } else {
             const RECT area{0, static_cast<LONG>(content.top), static_cast<LONG>(content.right),
                             static_cast<LONG>(content.bottom)};
-            dst = to_rect_f(fit_rect(displayed_.width, displayed_.height, area));
+            dst = to_rect_f(fit_rect(frame_w_, frame_h_, area));
         }
         image_rect_ = dst;
         const bool exact =
             dst.right - dst.left == static_cast<float>(fw) && dst.bottom - dst.top == static_cast<float>(fh);
-        if (bitmap_) {
+        // A decoded H.264 picture is a texture, maybe larger than what is shown (1088 rows for 1080).
+        ID2D1Bitmap* const picture = displayed_texture_ ? texture_bitmap_.Get() : bitmap_.Get();
+        const D2D1_RECT_F source{0, 0, static_cast<float>(fw), static_cast<float>(fh)};
+        if (picture) {
             rt_->PushAxisAlignedClip(content, D2D1_ANTIALIAS_MODE_ALIASED);
             rt_->DrawBitmap(
-                bitmap_.Get(), dst, 1.0f,
-                exact ? D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR : D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
+                picture, dst, 1.0f,
+                exact ? D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR : D2D1_BITMAP_INTERPOLATION_MODE_LINEAR,
+                &source);
             rt_->PopAxisAlignedClip();
         }
     }

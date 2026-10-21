@@ -13,10 +13,14 @@
 // Destroying the receiver close()s the channel — the only way to wake recv_frame() — and joins its
 // threads, so `video` can be destroyed right after. The receiver lives as long as the channel.
 //
-// Threads: the read thread is the channel's only recv_frame() caller and puts frames into a
-// LatestSlot; the decode thread decodes the newest one and presents it. A slow decoder drops old
-// frames instead of queueing them. Frames whose codec is not "jpeg" (e.g. kvm_host --test-video)
-// count toward the HUD's MBPS but are not shown.
+// Threads: the read thread is the channel's only recv_frame() caller.
+//   - "jpeg" frames go into a LatestSlot; the decode thread decodes the newest one and presents
+//     it. A slow decoder drops old frames instead of queueing them.
+//   - "h264" frames go into a short queue; the H.264 thread decodes every one in order (a picture
+//     refers to the one before it) on the viewer's GPU (h264_decoder.h), and shows the newest
+//     picture. After a gap in `seq` (the queue overflowed, or the sender dropped one) or a frame that
+//     fails the framing check (kvm/annexb.h), it waits for the next keyframe.
+//   - Other codecs (e.g. kvm_host --test-video) count toward the HUD's MBPS but are not shown.
 #pragma once
 
 #include <atomic>
@@ -51,6 +55,9 @@ public:
 private:
     void read_loop();
     void decode_loop();
+    void h264_loop();
+
+    static constexpr std::size_t kH264Queue = 30;  // a second at 30 fps; beyond that, wait for a keyframe
 
     net::FrameChannel& channel_;
     ViewerWindow& viewer_;
@@ -58,10 +65,12 @@ private:
     std::atomic<bool> has_clock_offset_{false};
     std::atomic<bool> running_{true};
     LatestSlot<net::Frame> latest_;
+    BlockingQueue<net::Frame> h264_{kH264Queue};
 
     // Declared last: joined first on destruction, while everything above is still alive.
     std::jthread read_thread_;
     std::jthread decode_thread_;
+    std::jthread h264_thread_;
 };
 
 }  // namespace kvm

@@ -130,7 +130,7 @@ Up/Down move selection (clamped, no wrap), PageUp/PageDown ±8, Home/End, Enter 
 
 4. Surface 2 — Viewer window (both PCs) — Sandro
 4.1 Renderer
-The whole client area is rendered by one ID2D1HwndRenderTarget (dpi 96). Each decoded BGRA frame is uploaded with ID2D1Bitmap::CopyFromMemory into a persistent bitmap (recreated only on size change). No GDI in the window.
+The whole client area is drawn by one Direct2D device context (dpi 96) on a D3D11 flip-model swapchain (DXGI_SWAP_EFFECT_FLIP_DISCARD, a frame-latency waitable object, latency 1), on the GPU or on WARP without one (client_b/swapchain_target.h). A decoded JPEG frame is uploaded with ID2D1Bitmap::CopyFromMemory into a persistent bitmap (recreated only on size change); a decoded H.264 picture is already a BGRA texture on the same device and is drawn as is. No GDI in the window.
 Interpolation: if the drawn image size equals the frame size → NEAREST_NEIGHBOR (pixel-exact). Otherwise → LINEAR.
 
 4.2 Frame chrome (custom title strip)

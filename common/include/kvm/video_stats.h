@@ -56,8 +56,11 @@ class VideoStats {
 public:
     ~VideoStats();
 
-    // From now on, writes one row per frame shown to `path`, after a header. False if it can't open it.
+    // From now on, writes one row per frame shown to `path` (instead of an earlier file), after a
+    // header. False if it can't open it.
     bool open_csv(const std::filesystem::path& path);
+    // Writes out the rows so far (they are written in batches).
+    void flush();
     void received(std::string_view layer, std::size_t bytes);
     void shown(const ShownFrame& frame);
     // Over the last `window`, for one layer ("" = all of them).
