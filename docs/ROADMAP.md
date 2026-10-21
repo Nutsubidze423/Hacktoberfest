@@ -1086,12 +1086,13 @@ Attempts are rate-limited.
     - **`h264_decode_test`** (unit, so CI runs it): decodes [tools/data/h264_sample.h264](../tools/data/h264_sample.h264) in software.
       - The sample is 1,034 bytes: 10 pictures of 320×240, written by `h264_test --write-sample`.
       - 10 of 10 pictures, 320×240, the quadrants' colours exact (worst 0 levels off; tolerance 6), in 300 runs.
+      - **It passes in CI too:** GitHub's Windows runners have Media Foundation's H.264 decoder. That answers P2.3's open question for decoding; the encoder in CI stays open, since `h264_test` needs a hardware one.
     - **Rule:** the viewer decodes every `h264` frame, in order, because a picture refers to the one before it. It drops pictures, not frames. CONTRIBUTING.md says so.
     - **Two encoder (P2.3b) bugs found by running `h264_test` many times:**
       - **`flush()` could return before the last packet was in `packets()`.** The packet was counted out before it was queued. It showed in one `ctest --preset local` run (59 of 60) and in 1 of 12 runs with a busy CPU core. The packet is now queued first: 0 losses in the next 50 runs (40 with a busy core).
       - **`request_keyframe()` went to whichever picture was fed next.** That could be an older picture still waiting. It now goes to the next picture given to `encode()`, or to the newer one if that is dropped. In 30 runs the requested picture was the IDR every time.
     - **With a busy CPU core** (a second program spinning on this 2-core Celeron) the encoder drops up to 4 of 60 pictures while busy. That is by design: the newest wins. Once in 20 runs that broke `h264_test`'s limit of 3, which is meant for an idle PC.
-    - `ctest --preset local` 37/37.
+    - `ctest --preset local` 37/37; 38/38 with P2.1 and P2.2 merged into the stack.
 
 - [ ] **P2.5 Codec negotiation and fallback** (S), branch `phase2/negotiate`.
   - **Protocol:**
