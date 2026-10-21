@@ -56,10 +56,10 @@
     },
     {
       "name": "local",
-      "displayName": "Everything that runs on one PC (unit + loopback + desktop + vdd); hands off the mouse",
+      "displayName": "Everything that runs on one PC (unit + loopback + desktop + vdd + gpu); hands off the mouse",
       "configurePreset": "x64-release",
       "output": { "outputOnFailure": true },
-      "filter": { "include": { "label": "^(unit|loopback|desktop|vdd)$" } },
+      "filter": { "include": { "label": "^(unit|loopback|desktop|vdd|gpu)$" } },
       "execution": { "noTestsAction": "error" }
     }
   ]

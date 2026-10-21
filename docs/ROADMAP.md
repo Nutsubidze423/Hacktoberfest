@@ -1010,6 +1010,15 @@ Attempts are rate-limited.
     - CBR/VBR through `ICodecAPI`.
   - **P2.3c** (S): `codec:"h264"` in `FrameHeader`, with an Annex-B payload.
   - **Tests:** `tools/h264_test.cpp`, label `gpu`: GPU encode → MF decode → PSNR above a threshold, plus the time per frame. Whether it runs in CI with the software MFT is checked here.
+  - **P2.3a result (2026-10-21):**
+    - **[host_a/gpu_device.h](../host_a/gpu_device.h):** one hardware D3D11 device with video support, multithread-protected (`ID3D10Multithread`), and a `GpuDevice::Lock` around the immediate context.
+    - **`ScreenCapture`** can capture on it (`for_window` / `for_monitor` take a `GpuDevice`). `start_gpu()` hands over a GPU copy of each WGC texture instead of CPU pixels.
+    - **[host_a/nv12_converter.h](../host_a/nv12_converter.h):** BGRA → NV12 with `ID3D11VideoProcessor`; BT.709 is set on both sides (full-range RGB in, limited-range YCbCr out).
+    - **Tests** (new label `gpu`: in `ctest --preset local`, not in CI):
+      - `nv12_test`: red, green, blue, white and gray land on the BT.709 limited-range Y/Cb/Cr within ±1; 101×51 becomes 100×50; 1080p takes 7.0 ms per conversion on the UHD 600 ([PERF.md](PERF.md));
+      - `capture_test` (vdd): a real capture of the VDD on the GPU, 12 of 12 frames turned into 1920×1080 NV12;
+      - `ctest --preset local` 34/34.
+    - **Still open:** a texture is allocated per captured frame; re-using a few saves the allocation, to measure in P2.3b.
 
 - [ ] **P2.4 Hardware decode and a D3D11 renderer on the viewer** (M), branch `phase2/decode`.
   - **Files:** new `client_b/h264_decoder.*` (MF DXVA decoder with D3D11 output), and [client_b/viewer_window.cpp](../client_b/viewer_window.cpp) moves from a D2D `HwndRenderTarget` to a flip-model swapchain:

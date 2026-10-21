@@ -29,11 +29,13 @@
 #include <vector>
 
 #include "capture.h"
+#include "gpu_device.h"
 #include "jpeg_encoder.h"
 #include "kvm/config.h"
 #include "kvm/dpi.h"
 #include "kvm/log.h"
 #include "kvm/net.h"
+#include "nv12_converter.h"
 #include "virtual_display.h"
 #include "window_mover.h"
 #include "window_picker.h"
@@ -232,6 +234,40 @@ int wmain(int argc, wchar_t** argv) {
         const double avg = std::accumulate(encode_ms.begin(), encode_ms.end(), 0.0) /
                            static_cast<double>(std::max<size_t>(1, encode_ms.size()));
         kvm::log::info("JPEG quality {}: {:.2f} ms per frame on average", jpeg.quality(), avg);
+    }
+
+    // The same monitor with the frames left on the GPU and turned into NV12 there (roadmap P2.3a).
+    if (auto gpu = kvm::GpuDevice::create()) {
+        kvm::Nv12Converter nv12(gpu);
+        std::atomic<int> gpu_frames = 0, converted = 0;
+        std::atomic<int> nv12_w = 0, nv12_h = 0;
+        std::unique_ptr<kvm::ScreenCapture> on_gpu;
+        try {
+            on_gpu = kvm::ScreenCapture::for_monitor(where->monitor, true, gpu);
+            on_gpu->start_gpu([&](kvm::GpuFrame&& f) {  // one callback at a time
+                ++gpu_frames;
+                if (nv12.convert(f.texture.Get(), f.width, f.height)) {
+                    ++converted;
+                    nv12_w = nv12.width();
+                    nv12_h = nv12.height();
+                }
+            });
+        } catch (const std::exception& e) {
+            kvm::log::error("{}", e.what());
+        }
+        // WGC sends a frame when something changes: move the cursor over the monitor.
+        const int cx = (where->rect.left + where->rect.right) / 2, cy = (where->rect.top + where->rect.bottom) / 2;
+        for (int i = 0; i < 100 && gpu_frames < 10; ++i) {
+            SetCursorPos(cx + static_cast<int>(60 * std::cos(i * 0.3)), cy + static_cast<int>(60 * std::sin(i * 0.3)));
+            std::this_thread::sleep_for(std::chrono::milliseconds(30));
+        }
+        SetCursorPos(cursor_before.x, cursor_before.y);
+        if (on_gpu) on_gpu->stop();
+        check(gpu_frames > 0 && converted == gpu_frames && nv12_w == (vdd_w & ~1) && nv12_h == (vdd_h & ~1),
+              std::format("on the GPU ({}): {} frames captured, {} turned into {}x{} NV12", gpu->adapter_name(),
+                          gpu_frames.load(), converted.load(), nv12_w.load(), nv12_h.load()));
+    } else {
+        kvm::log::warn("no hardware GPU with video support: the GPU path isn't checked");
     }
 
     // Back to how A looked before the test.

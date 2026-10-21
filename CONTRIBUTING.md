@@ -39,7 +39,7 @@ C++ tools, CMake, Ninja, vcpkg). Then, in a *Developer PowerShell for VS 2022*:
 cmake --preset x64-release
 cmake --build --preset x64-release
 ctest --preset ci       # unit + loopback (the real kvm_host + kvm_client on 127.0.0.1), what CI runs
-ctest --preset local    # + desktop and vdd tests: hands off the mouse for about three minutes
+ctest --preset local    # + desktop, vdd and gpu tests: hands off the mouse for about three minutes
 ```
 
 **Test labels** ([tools/CMakeLists.txt](tools/CMakeLists.txt)): every `tools/*_test.cpp` must be in
@@ -51,6 +51,7 @@ exactly one group, or configure fails.
 | `loopback` | the real programs on 127.0.0.1, on ports Windows picks. [tools/loopback_test.cpp](tools/loopback_test.cpp) is where two-PC paths get tested on one PC |
 | `desktop` | an unlocked session: hooks, `SendInput`, the clipboard, OLE drag and drop |
 | `vdd` | the Virtual Display Driver installed; a fixture opens Paint |
+| `gpu` | a GPU with a D3D11 video processor / hardware codecs; CI runners have none, so only `local` runs it |
 | `bench` | nothing; it prints timings |
 
 `SARKE_STRICT_TIMING=1` (CI sets it) turns timing floors into hard checks. On a busy dev PC they
