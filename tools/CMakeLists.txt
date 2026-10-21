@@ -25,7 +25,7 @@ endforeach()
 set(KVM_UNIT_TESTS
     protocol_test queue_test layout_sync_test display_layout_test launcher_test dpi_test video_test
     video_sender_test file_transfer_test net_listen_test tls_test identity_test paired_test discovery_test
-    preauth_test video_stats_test annexb_test h264_decode_test)
+    preauth_test video_stats_test annexb_test h264_decode_test viewer_h264_test)
 set(KVM_DESKTOP_TESTS
     win32_input_test input_capture_test input_inject_test kvm_link_test clipboard_test file_drop_test
     file_drag_test)
@@ -49,6 +49,7 @@ set(desk_test_ARGS --auto --title Paint --settle 3)
 set(remote_input_test_ARGS --title Paint)
 # A stream Sarke's encoder made (h264_test --write-sample), decoded in software.
 set(h264_decode_test_ARGS ${CMAKE_CURRENT_SOURCE_DIR}/data/h264_sample.h264)
+set(viewer_h264_test_ARGS ${CMAKE_CURRENT_SOURCE_DIR}/data/h264_sample.h264)
 
 set(kvm_known_tests ${KVM_UNIT_TESTS} ${KVM_DESKTOP_TESTS} ${KVM_VDD_TESTS} ${KVM_LOOPBACK_TESTS} ${KVM_GPU_TESTS}
     ${KVM_BENCH_TESTS}

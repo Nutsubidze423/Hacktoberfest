@@ -15,6 +15,7 @@
 #include <cstdint>
 #include <span>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace kvm::annexb {
@@ -53,6 +54,32 @@ inline std::vector<Nal> split(std::span<const std::uint8_t> au) {
     }
     if (open) close(start, au.size());
     return nals;
+}
+
+// A stream of access units (e.g. an .h264 file) cut into them, each a byte range [first, second).
+// One starts at an access unit delimiter, SPS, PPS or SEI that follows a picture, and at a slice
+// that starts a new picture (first_mb_in_slice 0: the bit after the NAL header is 1).
+inline std::vector<std::pair<std::size_t, std::size_t>> access_units(std::span<const std::uint8_t> stream) {
+    std::vector<std::pair<std::size_t, std::size_t>> units;
+    const auto nals = split(stream);
+    std::size_t begin = 0;
+    bool has_picture = false;
+    for (const Nal& nal : nals) {
+        const bool slice = nal.type == kSlice || nal.type == kIdrSlice;
+        const bool new_picture = slice && nal.size > 1 && (stream[nal.offset + 1] & 0x80) != 0;
+        const bool header = nal.type == 6 || nal.type == kSps || nal.type == kPps || nal.type == 9;
+        if (has_picture && (header || new_picture)) {
+            // The start code (3 or 4 bytes) belongs to the next access unit.
+            std::size_t start = nal.offset - 3;
+            if (start > begin && stream[start - 1] == 0) --start;
+            units.emplace_back(begin, start);
+            begin = start;
+            has_picture = false;
+        }
+        if (slice) has_picture = true;
+    }
+    if (has_picture) units.emplace_back(begin, stream.size());
+    return units;
 }
 
 // Why `au` is not one well-formed access unit whose frame header says `keyframe`, or "" if it is:

@@ -1093,6 +1093,29 @@ Attempts are rate-limited.
       - **`request_keyframe()` went to whichever picture was fed next.** That could be an older picture still waiting. It now goes to the next picture given to `encode()`, or to the newer one if that is dropped. In 30 runs the requested picture was the IDR every time.
     - **With a busy CPU core** (a second program spinning on this 2-core Celeron) the encoder drops up to 4 of 60 pictures while busy. That is by design: the newest wins. Once in 20 runs that broke `h264_test`'s limit of 3, which is meant for an idle PC.
     - `ctest --preset local` 37/37; 38/38 with P2.1 and P2.2 merged into the stack.
+  - **P2.4b result (2026-10-21):**
+    - **[client_b/swapchain_target.h](../client_b/swapchain_target.h):** the viewer draws on a D3D11 swapchain.
+      - Flip model (`FLIP_DISCARD`), with a frame-latency waitable object and a latency of 1: a frame is drawn only when it can be shown next.
+      - Presented with interval 0.
+      - Direct2D draws on the back buffer, so the strip, state screens and HUD code is unchanged.
+      - Device loss is handled: the window makes a new target, and the decoder follows to a new device.
+    - **The device** is the GPU when it has video support, else WARP. It is made on first use, so a hidden viewer that never shows anything makes none.
+    - **H.264 in the viewer** ([video_receiver.h](../client_b/video_receiver.h)):
+      - `h264` frames go into a short queue (30) instead of the newest-frame slot. A thread of their own decodes every one in order on the viewer's device, and shows only the newest picture.
+      - After a gap in `seq`, or a frame that fails the framing check, nothing is shown until the next keyframe.
+      - Pictures are converted to BGRA ([picture_converter.h](../client_b/picture_converter.h)):
+        - on the GPU, by the video processor into a ring of three textures, which Direct2D draws directly;
+        - after a software decode, on the CPU.
+      - JPEG keeps its path: decoded on the CPU, uploaded into a bitmap on the same device.
+    - **`kvm/annexb.h` `access_units()`** cuts a stream into access units (delimiters, parameter sets, `first_mb_in_slice`). It has tests and is fuzzed: `fuzz_annexb`, 5 minutes, 668,928 inputs, no crash or ASan report.
+    - **`viewer_h264_test`** (unit): a ViewerWindow and VideoReceiver in one process, fed the sample over a TLS video channel on 127.0.0.1. It sends four rounds of 10 frames; in the third, one frame is lost. It runs the GPU path (DXVA and the video processor) and the software path (WARP, software decode, CPU conversion). 13 runs here, all passing:
+      - nothing is shown between the lost frame and the next keyframe;
+      - from the first picture on, every frame is shown, `h264` at 320×240;
+      - the first picture appears 3–7 frames in on the GPU and 0–6 in software. The decoder starts while the first frames arrive, and of those only the newest is shown;
+      - the window shows the red, green, blue and gray quadrants within 16 levels, read back with `PrintWindow`;
+      - decode + BGRA averages 1.6–2.4 ms and present 2.1–3.2 ms at 320×240.
+    - **Checked by eye** in screenshots: H.264 and a JPEG, with the strip and the HUD.
+    - `ctest --preset local` 39/39.
 
 - [ ] **P2.5 Codec negotiation and fallback** (S), branch `phase2/negotiate`.
   - **Protocol:**

@@ -34,6 +34,12 @@ public:
     // The default adapter's hardware device, with video and BGRA support. nullptr (logged) when there
     // is no hardware device with video support.
     static std::shared_ptr<GpuDevice> create();
+    // Windows' software rasterizer (WARP), with BGRA support and no video support: what the viewer
+    // draws with on a PC without a usable GPU (and on CI runners).
+    static std::shared_ptr<GpuDevice> create_software();
+
+    // False for create_software(): no video processor, no hardware decode or encode.
+    bool has_video() const { return has_video_; }
 
     ID3D11Device* device() const { return device_.Get(); }
     ID3D11DeviceContext* context() const { return context_.Get(); }
@@ -52,10 +58,13 @@ public:
     };
 
 private:
+    static std::shared_ptr<GpuDevice> make(D3D_DRIVER_TYPE type, UINT flags);
+
     Microsoft::WRL::ComPtr<ID3D11Device> device_;
     Microsoft::WRL::ComPtr<ID3D11DeviceContext> context_;
     Microsoft::WRL::ComPtr<ID3D10Multithread> multithread_;
     std::string adapter_name_;
+    bool has_video_ = false;
 };
 
 }  // namespace kvm

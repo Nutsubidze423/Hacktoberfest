@@ -38,15 +38,12 @@ void check(bool ok, const std::string& what) {
 
 constexpr int kWidth = 320, kHeight = 240, kPictures = 10, kTolerance = 6;
 
-// The access units of an Annex-B stream whose pictures are one slice each: each ends with its slice.
+// The stream's access units, each copied out.
 std::vector<std::vector<std::uint8_t>> access_units(const std::vector<std::uint8_t>& stream) {
     std::vector<std::vector<std::uint8_t>> out;
-    std::size_t begin = 0;
-    for (const auto& nal : kvm::annexb::split(stream)) {
-        if (nal.type != kvm::annexb::kSlice && nal.type != kvm::annexb::kIdrSlice) continue;
-        const auto end = static_cast<std::ptrdiff_t>(nal.offset + nal.size);
-        out.emplace_back(stream.begin() + static_cast<std::ptrdiff_t>(begin), stream.begin() + end);
-        begin = nal.offset + nal.size;
+    for (const auto& [first, second] : kvm::annexb::access_units(stream)) {
+        out.emplace_back(stream.begin() + static_cast<std::ptrdiff_t>(first),
+                         stream.begin() + static_cast<std::ptrdiff_t>(second));
     }
     return out;
 }

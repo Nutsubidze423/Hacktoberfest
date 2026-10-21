@@ -68,6 +68,27 @@ void test_split() {
     check(tail.size() == 1 && tail[0].size == 0, "split: a start code at the very end is an empty NAL unit");
 }
 
+void test_access_units() {
+    // Encoder output without delimiters: a keyframe, then two one-slice pictures.
+    const Bytes stream = [] {
+        Bytes s = au({kSps, kPps, kIdr});
+        for (const auto& p : {au({kP}), au({kP})}) s.insert(s.end(), p.begin(), p.end());
+        return s;
+    }();
+    const auto units = annexb::access_units(stream);
+    bool each_checks = units.size() == 3;
+    for (std::size_t i = 0; each_checks && i < units.size(); ++i) {
+        const std::span<const std::uint8_t> unit(stream.data() + units[i].first, units[i].second - units[i].first);
+        each_checks = annexb::check(unit, i == 0).empty() && (i == 0 || units[i].first == units[i - 1].second);
+    }
+    check(each_checks && units.back().second == stream.size(),
+          "access_units: keyframe + 2 pictures, back to back, each passes check()");
+    // A picture in two slices (the second's first_mb_in_slice isn't 0) stays one access unit.
+    const Bytes second_slice = {0x41, 0x40, 0x11};  // first bit after the header 0: not a new picture
+    const auto two = annexb::access_units(au({kAud, kP, second_slice, kAud, kP}));
+    check(two.size() == 2, "access_units: a delimiter starts one; a picture's second slice doesn't");
+}
+
 void test_accepted() {
     check(annexb::check(au({kAud, kSps, kPps, kSei, kIdr}), true).empty(),
           "a keyframe: AUD, SPS, PPS, SEI, IDR picture");
@@ -108,6 +129,7 @@ void test_refused() {
 
 int main() {
     test_split();
+    test_access_units();
     test_accepted();
     test_refused();
     std::printf("\n%s\n", g_failures == 0 ? "all passed" : "FAILED");
