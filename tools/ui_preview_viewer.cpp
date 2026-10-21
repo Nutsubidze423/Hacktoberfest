@@ -198,7 +198,13 @@ private:
             const auto capture =
                 kvm::steady_now_us() - std::chrono::duration_cast<std::chrono::microseconds>(kFakeLatency).count();
             viewer_.count_payload_bytes(kFakePayloadBytes);
-            viewer_.present(frame, {.seq = seq_, .t_capture_local_us = capture});
+            // Fake decode figures too (FAKE, like everything here): 9 ms to decode, finished 2 ms ago.
+            const auto now = kvm::steady_now_us();
+            viewer_.present(frame, {.seq = seq_,
+                                    .t_capture_local_us = capture,
+                                    .bytes = kFakePayloadBytes,
+                                    .decode_us = 9000,
+                                    .decoded_at_us = now - 2000});
 
             next += std::chrono::microseconds(1'000'000 / kFps);
             std::this_thread::sleep_until(next);
