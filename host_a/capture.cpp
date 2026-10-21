@@ -23,6 +23,7 @@
 #include <cstring>
 #include <format>
 #include <mutex>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -114,6 +115,7 @@ void try_disable_border(const wgc::GraphicsCaptureSession& session) {
 struct ScreenCapture::Impl {
     wgc::GraphicsCaptureItem item{nullptr};
     bool capture_cursor = false;
+    std::shared_ptr<GpuDevice> gpu;  // shared with the converter and encoder; else a device of its own
 
     winrt::com_ptr<ID3D11Device> d3d_device;
     winrt::com_ptr<ID3D11DeviceContext> context;
@@ -128,6 +130,7 @@ struct ScreenCapture::Impl {
     wgc::Direct3D11CaptureFramePool::FrameArrived_revoker frame_arrived;
     wgc::GraphicsCaptureItem::Closed_revoker closed;
     FrameCallback on_frame;
+    GpuFrameCallback on_gpu_frame;
     ClosedCallback on_closed;
 
     // Serializes the WGC callbacks with each other and with stop(); the D3D11 immediate context is
@@ -139,6 +142,8 @@ struct ScreenCapture::Impl {
     void handle_frame();
     void handle_closed();
     void copy_to_cpu(const winrt::com_ptr<ID3D11Texture2D>& texture, int width, int height, CapturedFrame& out);
+    GpuFrame copy_on_gpu(const winrt::com_ptr<ID3D11Texture2D>& texture, int width, int height);
+    void begin(ClosedCallback when_closed);
 };
 
 void ScreenCapture::Impl::handle_frame() {
@@ -159,6 +164,12 @@ void ScreenCapture::Impl::handle_frame() {
             return;
         }
 
+        if (on_gpu_frame) {
+            GpuFrame out = copy_on_gpu(to_texture(frame.Surface()), size.Width, size.Height);
+            out.t_capture_us = arrived_us;
+            on_gpu_frame(std::move(out));
+            return;
+        }
         CapturedFrame out;
         out.t_capture_us = arrived_us;
         copy_to_cpu(to_texture(frame.Surface()), size.Width, size.Height, out);
@@ -191,6 +202,9 @@ void ScreenCapture::Impl::copy_to_cpu(const winrt::com_ptr<ID3D11Texture2D>& tex
         staging_desc = s;
     }
 
+    // A shared device's immediate context is used by other threads too.
+    std::optional<GpuDevice::Lock> gpu_lock;
+    if (gpu) gpu_lock.emplace(*gpu);
     context->CopyResource(staging.get(), texture.get());
     D3D11_MAPPED_SUBRESOURCE mapped{};
     winrt::check_hresult(context->Map(staging.get(), 0, D3D11_MAP_READ, 0, &mapped));
@@ -207,6 +221,30 @@ void ScreenCapture::Impl::copy_to_cpu(const winrt::com_ptr<ID3D11Texture2D>& tex
                     src + static_cast<size_t>(mapped.RowPitch) * y, row_bytes);
     }
     context->Unmap(staging.get(), 0);
+}
+
+GpuFrame ScreenCapture::Impl::copy_on_gpu(const winrt::com_ptr<ID3D11Texture2D>& texture, int width, int height) {
+    D3D11_TEXTURE2D_DESC desc{};
+    texture->GetDesc(&desc);
+    GpuFrame out;
+    out.width = std::min(width, static_cast<int>(desc.Width));
+    out.height = std::min(height, static_cast<int>(desc.Height));
+    // A texture per frame: whoever takes it (the converter, an encoder still busy) keeps it as long
+    // as it needs. Re-using a few would save the allocation; measure first (roadmap P2.3).
+    D3D11_TEXTURE2D_DESC copy{};
+    copy.Width = static_cast<UINT>(out.width);
+    copy.Height = static_cast<UINT>(out.height);
+    copy.MipLevels = 1;
+    copy.ArraySize = 1;
+    copy.Format = desc.Format;
+    copy.SampleDesc.Count = 1;
+    copy.Usage = D3D11_USAGE_DEFAULT;
+    copy.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET;
+    winrt::check_hresult(gpu->device()->CreateTexture2D(&copy, nullptr, &out.texture));
+    const D3D11_BOX box{0, 0, 0, copy.Width, copy.Height, 1};
+    const GpuDevice::Lock lock(*gpu);
+    context->CopySubresourceRegion(out.texture.Get(), 0, 0, 0, 0, texture.get(), 0, &box);
+    return out;
 }
 
 void ScreenCapture::Impl::handle_closed() {
@@ -234,11 +272,13 @@ bool ScreenCapture::is_supported() {
     }
 }
 
-std::unique_ptr<ScreenCapture> ScreenCapture::for_window(HWND hwnd, bool capture_cursor) {
+std::unique_ptr<ScreenCapture> ScreenCapture::for_window(HWND hwnd, bool capture_cursor,
+                                                         std::shared_ptr<GpuDevice> gpu) {
     if (!IsWindow(hwnd)) throw std::runtime_error("capture: not a window (closed?)");
     ensure_mta();
     auto impl = std::make_unique<Impl>();
     impl->capture_cursor = capture_cursor;
+    impl->gpu = std::move(gpu);
     try {
         const auto interop = winrt::get_activation_factory<wgc::GraphicsCaptureItem, IGraphicsCaptureItemInterop>();
         winrt::check_hresult(
@@ -249,11 +289,13 @@ std::unique_ptr<ScreenCapture> ScreenCapture::for_window(HWND hwnd, bool capture
     return std::unique_ptr<ScreenCapture>(new ScreenCapture(std::move(impl)));
 }
 
-std::unique_ptr<ScreenCapture> ScreenCapture::for_monitor(HMONITOR monitor, bool capture_cursor) {
+std::unique_ptr<ScreenCapture> ScreenCapture::for_monitor(HMONITOR monitor, bool capture_cursor,
+                                                          std::shared_ptr<GpuDevice> gpu) {
     if (!monitor) throw std::runtime_error("capture: null monitor");
     ensure_mta();
     auto impl = std::make_unique<Impl>();
     impl->capture_cursor = capture_cursor;
+    impl->gpu = std::move(gpu);
     try {
         const auto interop = winrt::get_activation_factory<wgc::GraphicsCaptureItem, IGraphicsCaptureItemInterop>();
         winrt::check_hresult(interop->CreateForMonitor(monitor, winrt::guid_of<wgc::IGraphicsCaptureItem>(),
@@ -273,10 +315,30 @@ void ScreenCapture::start(FrameCallback on_frame, ClosedCallback on_closed) {
     std::lock_guard lock(s.mutex);
     if (s.started) throw std::runtime_error("capture: already started");
     s.on_frame = std::move(on_frame);
-    s.on_closed = std::move(on_closed);
+    s.begin(std::move(on_closed));
+}
+
+void ScreenCapture::start_gpu(GpuFrameCallback on_frame, ClosedCallback on_closed) {
+    auto& s = *impl_;
+    std::lock_guard lock(s.mutex);
+    if (s.started) throw std::runtime_error("capture: already started");
+    if (!s.gpu) throw std::runtime_error("capture: start_gpu needs a GpuDevice");
+    s.on_gpu_frame = std::move(on_frame);
+    s.begin(std::move(on_closed));
+}
+
+// Under `mutex`.
+void ScreenCapture::Impl::begin(ClosedCallback when_closed) {
+    auto& s = *this;
+    s.on_closed = std::move(when_closed);
     try {
-        s.d3d_device = create_d3d_device();
-        s.d3d_device->GetImmediateContext(s.context.put());
+        if (s.gpu) {
+            s.d3d_device.copy_from(s.gpu->device());
+            s.context.copy_from(s.gpu->context());
+        } else {
+            s.d3d_device = create_d3d_device();
+            s.d3d_device->GetImmediateContext(s.context.put());
+        }
         s.device = to_winrt_device(s.d3d_device);
 
         s.pool_size = s.item.Size();

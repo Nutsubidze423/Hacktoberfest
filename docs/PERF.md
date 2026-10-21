@@ -48,6 +48,19 @@ the encrypting and the decrypting. Runs alternated, with nothing else building.
 - Over a real network each PC does only half of the TLS work, and Wi-Fi bandwidth is the limit
   long before this is.
 
+## BGRA to NV12 on the GPU (roadmap P2.3a)
+
+**What:** `nv12_test` (label `gpu`) converts a 1920×1080 BGRA texture to NV12 with the D3D11 video
+processor ([host_a/nv12_converter.h](../host_a/nv12_converter.h)), 60 times, then waits for the GPU:
+the average per conversion, including the copy into the processor's input texture.
+
+| Date | Machine | 1920×1080 BGRA → NV12 |
+|---|---|---|
+| 2026-10-21 | Celeron laptop (UHD 600) | 7.0 ms |
+
+The same frame takes 17–27 ms to JPEG-encode on this CPU (above), and NV12 is only the input of
+the hardware H.264 encoder (P2.3b), whose time is still to measure.
+
 ## JPEG encode (hackathon baseline, for roadmap Phase 2)
 
 | Date | Machine | Frame | Result | Source |

@@ -17,6 +17,8 @@ endforeach()
 #   vdd      desktop + the Virtual Display Driver installed. Some share a Paint window that the
 #            paint_window fixture opens and closes (test_window.ps1).
 #   loopback the real kvm_host + kvm_client on 127.0.0.1 (free ports, no hooks, no discovery). Runs in CI.
+#   gpu      a GPU with a D3D11 video processor / Media Foundation hardware codecs. CI runners have
+#            none, so only ctest --preset local runs them.
 #   bench    prints timings and passes unless it fails to run (jpeg_test).
 #   manual   hands-on tools, not registered: run them by hand.
 # Presets: `ctest --preset ci` (unit + loopback) and `ctest --preset local` (+ desktop + vdd, at the PC).
@@ -30,6 +32,7 @@ set(KVM_DESKTOP_TESTS
 set(KVM_VDD_TESTS
     vdd_test window_mover_test window_share_test capture_test desk_test desk_hook_test remote_input_test)
 set(KVM_LOOPBACK_TESTS loopback_test wire_test)
+set(KVM_GPU_TESTS nv12_test)
 set(KVM_BENCH_TESTS jpeg_test)
 set(KVM_MANUAL_TESTS kvm_local_test viewer_test network_category_test)
 
@@ -45,7 +48,8 @@ set(capture_test_ARGS --title Paint)
 set(desk_test_ARGS --auto --title Paint --settle 3)
 set(remote_input_test_ARGS --title Paint)
 
-set(kvm_known_tests ${KVM_UNIT_TESTS} ${KVM_DESKTOP_TESTS} ${KVM_VDD_TESTS} ${KVM_LOOPBACK_TESTS} ${KVM_BENCH_TESTS}
+set(kvm_known_tests ${KVM_UNIT_TESTS} ${KVM_DESKTOP_TESTS} ${KVM_VDD_TESTS} ${KVM_LOOPBACK_TESTS} ${KVM_GPU_TESTS}
+    ${KVM_BENCH_TESTS}
     ${KVM_MANUAL_TESTS})
 foreach(tool_source IN LISTS TOOL_SOURCES)
   get_filename_component(tool_name ${tool_source} NAME_WE)
@@ -65,6 +69,7 @@ kvm_add_tests(unit 120 ${KVM_UNIT_TESTS})
 kvm_add_tests(desktop 120 ${KVM_DESKTOP_TESTS})
 kvm_add_tests(vdd 300 ${KVM_VDD_TESTS})
 kvm_add_tests(loopback 120 ${KVM_LOOPBACK_TESTS})
+kvm_add_tests(gpu 120 ${KVM_GPU_TESTS})
 kvm_add_tests(bench 300 ${KVM_BENCH_TESTS})
 
 # One mouse, one keyboard, one clipboard and one VDD: these never run in parallel with each other.
