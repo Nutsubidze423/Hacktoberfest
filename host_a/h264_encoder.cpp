@@ -166,8 +166,11 @@ std::unique_ptr<H264Encoder> H264Encoder::create(std::shared_ptr<GpuDevice> gpu,
     enc->transform_->ProcessMessage(MFT_MESSAGE_NOTIFY_START_OF_STREAM, 0);
     // The stream starts with a keyframe anyway; forcing one before the first picture is not needed.
     enc->thread_ = std::thread([e = enc.get()] { e->event_loop(); });
-    log::info("h264: {} on {}, {}x{} at {} fps, {:.1f} Mbit/s", enc->name_, enc->gpu_->adapter_name(), w, h,
-              options.fps, options.bitrate / 1e6);
+    // S_OK only: Intel's encoder answers S_FALSE, and indeed ignores a new value while running.
+    enc->bitrate_modifiable_ = enc->codec_ && enc->codec_->IsModifiable(&CODECAPI_AVEncCommonMeanBitRate) == S_OK;
+    log::info("h264: {} on {}, {}x{} at {} fps, {:.1f} Mbit/s{}", enc->name_, enc->gpu_->adapter_name(), w, h,
+              options.fps, options.bitrate / 1e6,
+              enc->bitrate_modifiable_ ? "" : " (a new bitrate needs a new encoder)");
     return enc;
 }
 

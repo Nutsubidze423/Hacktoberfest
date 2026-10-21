@@ -7,11 +7,13 @@
 //   - "h264" frames go into a short queue; a thread of their own decodes every one in order (a
 //     picture refers to the one before it) on the viewer's GPU (h264_decoder.h), and shows the newest
 //     picture. After a gap in `seq` (the queue overflowed, or the sender dropped one) or a frame that
-//     fails the framing check (kvm/annexb.h), it waits for the next keyframe, and asks the owner
-//     for one (request_keyframe, at most every 500 ms).
+//     fails the framing check (kvm/annexb.h) or the decoder, it waits for the next keyframe, and asks
+//     the owner for one (Feedback::keyframe, at most every 500 ms). Once a second while it shows H.264,
+//     it reports the latency and fps to the owner (Feedback::stats), which adapts its bitrate.
 //   - Other codecs (e.g. kvm_host --test-video) count toward the HUD's MBPS but are not shown.
 //
-//   kvm::WindowStream stream(viewer, [&] { send(proto::VideoKeyframe{}); });
+//   kvm::WindowStream stream(viewer, {.keyframe = [&] { send(proto::VideoKeyframe{}); },
+//                                     .stats = [&](int ms, int fps) { send(proto::VideoStats{ms, fps}); }});
 //   while (auto frame = channel.recv_frame()) stream.push(std::move(*frame));   // one thread
 //   stream.set_clock_offset_us(stats.clock_offset_us);                         // any thread
 //   stream.prepare("h264");                                                    // proto::VideoConfig
@@ -35,8 +37,13 @@ namespace kvm {
 
 class WindowStream {
 public:
-    // request_keyframe: called (on the H.264 thread) when the decoder needs a keyframe; may be empty.
-    explicit WindowStream(ViewerWindow& viewer, std::function<void()> request_keyframe = {});
+    // What goes back to the window owner, called on the H.264 thread. Either may be empty.
+    struct Feedback {
+        std::function<void()> keyframe;                        // the decoder needs a keyframe
+        std::function<void(int latency_ms, int fps)> stats;  // once a second while H.264 is shown
+    };
+
+    explicit WindowStream(ViewerWindow& viewer, Feedback feedback = {});
     ~WindowStream();
     WindowStream(const WindowStream&) = delete;
     WindowStream& operator=(const WindowStream&) = delete;
@@ -63,11 +70,12 @@ private:
     std::optional<std::int64_t> local_time(std::int64_t t_capture_us) const;
 
     static constexpr auto kKeyframeRequestGap = std::chrono::milliseconds(500);
+    static constexpr auto kStatsEvery = std::chrono::seconds(1);
 
     static constexpr std::size_t kH264Queue = 30;  // a second at 30 fps; beyond that, wait for a keyframe
 
     ViewerWindow& viewer_;
-    std::function<void()> request_keyframe_;
+    Feedback feedback_;
     std::atomic<bool> prepare_h264_{false};
     std::atomic<std::int64_t> clock_offset_us_{0};
     std::atomic<bool> has_clock_offset_{false};

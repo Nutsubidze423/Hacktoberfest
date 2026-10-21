@@ -253,6 +253,14 @@ struct VideoKeyframe {
     static constexpr std::string_view kType = "video_keyframe";
 };
 
+// Viewer -> window owner, once a second while H.264 frames are shown (roadmap P2.6): how they arrive,
+// so the owner can lower its bitrate when they come later and later (kvm/bitrate_control.h).
+struct VideoStats {
+    static constexpr std::string_view kType = "video_stats";
+    int latency_ms = -1;  // capture on the owner -> on screen here, p50 of the last second; -1 unknown
+    int fps = 0;  // frames shown in the last second
+};
+
 // Pairing (docs/SECURITY.md 6.3): the only messages accepted from a PC whose key isn't paired yet.
 // The PC whose user picked the other one sends pair_request. Each side shows the code derived from
 // its own TLS session and sends pair_confirm with its user's answer. Each stores the other only when
@@ -334,6 +342,7 @@ inline void to_json(nlohmann::json& j, const VideoKeyframe&) {
     j = nlohmann::json::object();
 }
 inline void from_json(const nlohmann::json&, VideoKeyframe&) {}
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(VideoStats, latency_ms, fps)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(PairRequest, name)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(PairConfirm, ok)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(PairResult, ok, reason)
@@ -344,7 +353,7 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(FrameHeader, seq, t_capture_us, 
 using Message =
     std::variant<Hello, FocusEnter, FocusLeave, MouseMove, MouseButtonEvent, MouseWheel, Key, StreamStart, StreamStop,
                  RemoteMouseMove, Clipboard, Ping, Pong, DeskMove, DeskCursor, DeskLayout, Layout, Identify,
-                 PairRequest, PairConfirm, PairResult, Unpaired, VideoConfig, VideoKeyframe>;
+                 PairRequest, PairConfirm, PairResult, Unpaired, VideoConfig, VideoKeyframe, VideoStats>;
 
 // Serializes a message struct (including FrameHeader) to JSON with its "type" field set.
 template <class M>

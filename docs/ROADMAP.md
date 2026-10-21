@@ -1172,11 +1172,44 @@ Attempts are rate-limited.
       - the shared window streamed as H.264.
     - `ctest --preset local` 40/40.
 
-- [ ] **P2.6 Keyframes, resizes and bitrate adaptation** (M), branch `phase2/adapt`.
+- [x] **P2.6 Keyframes, resizes and bitrate adaptation** (M), branch `phase2/adapt`.
   - **Keyframes:** a keyframe on stream start, on a decoder error and on request.
   - **Resizing:** re-initialise the encoder, or scale into a fixed size; decided by measurement.
   - **Bitrate:** adapted from `VideoSender` back-pressure plus a new `video_stats` message from the viewer.
   - **Tests:** extend `video_sender_test`'s fake channel with a bandwidth cap. When the cap drops, the bitrate follows within N s and no corrupt frames are shown.
+  - **P2.6 result (2026-10-21):**
+    - **Keyframes:**
+      - on stream start (a new encoder begins with one);
+      - on request: P2.5's `video_keyframe`, now also sent after a decoder error;
+      - when the sender skips (below);
+      - as a safety net, every 10 s (was 2 s until requests existed).
+    - **Resizing: re-initialise.**
+      - A new size starts a new encoder and stream in ~390 ms (measured in P2.4c).
+      - The window viewer captures the virtual display, whose size only changes with its mode, so this is rare. Scaling every frame into a fixed size would cost on every frame instead.
+    - **Bitrate** ([kvm/bitrate_control.h](../common/include/kvm/bitrate_control.h), used by [h264_sender.h](../host_a/h264_sender.h)). The controller watches three signs:
+      - **how long encoded pictures wait to be sent.** It counts from its second tick in a row; one tick alone is a keyframe's burst.
+      - **the viewer's latency,** from a new `video_stats` message (viewer → owner, once a second while H.264 is shown), against its lowest of the last 10 s;
+      - **what the link carried while send was busy.**
+
+      It reacts like this:
+      - **Down:** ×0.7 per 500 ms, or straight to 80% of the measured link speed.
+      - **Up:** ×1.15 per tick after 1.5 s of calm, never above the configured bitrate or below 1 Mbit/s.
+    - **Found: Intel's encoder can't change its bitrate while running.**
+      - It accepts the new value and keeps encoding at the old one: 5.3–5.6 Mbit/s after being set to 1.
+      - `ICodecAPI::IsModifiable` says `S_FALSE` for the bitrate, buffer size and QP.
+      - So `H264Encoder::bitrate_modifiable()` decides: encoders that can, change in place. Elsewhere a new encoder at the new bitrate is made on a thread of its own while the old one goes on, then takes over with a keyframe.
+      - Steps up wait 1 s between switches; steps down go as soon as the last switch is done. A switch made for a wish that has since reversed is thrown away.
+    - **A picture that waited over 1 s isn't sent,** nor anything after it until a keyframe. The gap in `seq` makes the viewer wait for that keyframe, so no broken picture is shown and the delay doesn't pile up.
+    - **Tests:**
+      - **`bitrate_test`** (unit): 13 checks of the rule;
+      - **`h264_test`** (gpu), a link of 20 → 1.5 → 20 Mbit/s, 3 runs:
+        - under 1.5 Mbit/s 1.5–2.0 s after it slows; back to 5 Mbit/s 5.5–10 s after it recovers;
+        - on the slow link, 0.93–0.99 Mbit/s out with capture → sent p95 0.6–1.0 s;
+        - every frame a viewer would show decodes ([PERF.md](PERF.md)).
+      - **Noise-like content** doesn't fit a 1.5 Mbit/s link even at the minimum: only skipping bounds the delay there. Frame rate as a second lever is left for later, if two-PC tests show it is needed.
+      - **The test is on the GPU encoder** (`h264_test`), not `video_sender_test`: JPEG's `VideoSender` already sends only the newest frame, so a slow link lowers its frame rate by itself.
+    - `ctest --preset local` 41/41; `fuzz_protocol` with a `video_stats` seed, 1 minute: clean.
+    - **Seen once:** right after a build, the encoder dropped 38 of 60 pictures in `h264_test`'s first part. The next runs passed; probably Windows Defender scanning the new executables.
 
 - [ ] **P2.7 Desk mode on H.264** (L → prototype first).
   - **Recommendation:** one H.264 stream of the **whole VDD monitor**, plus window rects, z-order and corner radius in `desk_layout`.

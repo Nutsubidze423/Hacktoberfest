@@ -128,6 +128,23 @@ the encrypting and the decrypting. Runs alternated, with nothing else building.
   - two PCs, on Wi-Fi and a hotspot;
   - whether two pictures in flight in the encoder (instead of one) keep up with motion (P2.6).
 
+## H.264 bitrate on a link that slows down (roadmap P2.6)
+
+**How it's measured:** `h264_test` (label `gpu`), `H264Sender` sending moving 1280×720 content at 30 fps
+and 6 Mbit/s through a fake channel. Each frame takes as long as it would on the wire at the cap:
+20 Mbit/s for 4 s, then 1.5 Mbit/s for 6 s, then 20 again for 14 s. Three runs.
+
+| Date | Machine | Under 1.5 Mbit/s after the link slows | Back to 5 Mbit/s after it recovers | Last 3 s at 1.5 Mbit/s: out / capture→sent p95 | Pictures not sent (late) | Frames a viewer shows that don't decode |
+|---|---|---|---|---|---|---|
+| 2026-10-21 | Celeron laptop (UHD 600) | 1.5–2.0 s, in one step to 1.1 Mbit/s | 5.5–10 s | 0.93–0.99 Mbit/s / 593–994 ms | 35–72 of ~650 | 0 |
+
+**What it means:**
+- **Intel's encoder can't change its bitrate while running.** It accepts a new value and keeps the old one: 5.3–5.6 Mbit/s out after being set to 1. It also reports the setting as not modifiable (`S_FALSE`).
+- So a change means a new encoder, made while the old one goes on. It takes 0.4–1 s to start here, and its stream begins with a keyframe.
+- **Down is fast:** while send is busy, bytes sent ÷ time in send is the link's speed, and the bitrate goes straight to 80% of it.
+- **Up is slow on purpose:** ×1.15 per 500 ms after 1.5 s without a sign of a full link.
+- **Noise-like content** (every pixel new every frame) doesn't fit 1.5 Mbit/s even at the 1 Mbit/s minimum. There only skipping to a keyframe keeps the delay bounded: p95 1.1–1.6 s in earlier runs with such content.
+
 ## BGRA to NV12 on the GPU (roadmap P2.3a)
 
 **What:** `nv12_test` (label `gpu`) converts a 1920×1080 BGRA texture to NV12 with the D3D11 video

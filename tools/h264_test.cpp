@@ -16,7 +16,10 @@
 //     with the time of a decode() call);
 //   - H264Sender (host_a/h264_sender.h, P2.4c): one captured frame and then nothing is sent again
 //     every 500 ms as new pictures, and a frame of another size starts a new stream with a keyframe;
-//     all of it decodes in order.
+//     all of it decodes in order;
+//   - its bitrate follows the link (P2.6): through a channel that takes 20 Mbit/s, then 1.5, then 20
+//     again, the bitrate goes under 1.5 Mbit/s within a few seconds and comes back up, the delay stays
+//     bounded, and every frame the viewer would show decodes (none after a gap until a keyframe).
 //
 //   h264_test.exe                          (exit code 0 = all passed)
 //   h264_test.exe --write-sample <file>    writes tools/data/h264_sample.h264 for h264_decode_test
@@ -26,6 +29,8 @@
 #include <wrl/client.h>
 
 #include <algorithm>
+#include <array>
+#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
@@ -33,7 +38,9 @@
 #include <fstream>
 #include <functional>
 #include <map>
+#include <optional>
 #include <set>
+#include <span>
 #include <string_view>
 #include <thread>
 #include <vector>
@@ -343,6 +350,139 @@ void test_sender(Checks& check, const std::shared_ptr<kvm::GpuDevice>& gpu) {
           std::format("{} of {} decode in order, at their size", decoded, units.size()));
 }
 
+// Bitrate adaptation: a channel whose send blocks as long as the frame takes at `cap` Mbit/s.
+void test_adaptation(Checks& check, const std::shared_ptr<kvm::GpuDevice>& gpu) {
+    constexpr int kW = 1280, kH = 720;
+    constexpr double kFast = 20.0, kSlow = 1.5;  // Mbit/s
+    constexpr auto kPhaseA = 4s, kPhaseB = 6s, kPhaseC = 14s;
+    std::atomic<double> cap{kFast};
+    struct Sent {
+        kvm::proto::FrameHeader header;
+        std::vector<std::uint8_t> unit;
+        std::int64_t at_us = 0;
+    };
+    std::mutex mutex;
+    std::vector<Sent> sent;
+    auto send = [&](const kvm::proto::FrameHeader& h, std::span<const std::uint8_t> p) {
+        // bits / (Mbit/s) = microseconds on the wire
+        std::this_thread::sleep_for(std::chrono::microseconds(static_cast<std::int64_t>(p.size() * 8 / cap.load())));
+        std::lock_guard lock(mutex);
+        sent.push_back({h, {p.begin(), p.end()}, kvm::steady_now_us()});
+        return true;
+    };
+    std::string why;
+    auto sender = kvm::H264Sender::create(gpu, kW, kH, send, {.max_fps = 30, .bitrate = 6'000'000}, why);
+    check(sender != nullptr, sender ? "H264Sender at 6 Mbit/s for 1280x720" : why);
+    if (!sender) return;
+
+    // Moving content like a window's (a gradient that shifts and a block that moves), so the encoder
+    // spends what it is allowed. (Noise-like content can't get under a slow link even at the minimum
+    // bitrate; there only skipping to a keyframe keeps the delay bounded.)
+    D3D11_TEXTURE2D_DESC d{};
+    d.Width = kW;
+    d.Height = kH;
+    d.MipLevels = 1;
+    d.ArraySize = 1;
+    d.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+    d.SampleDesc.Count = 1;
+    d.Usage = D3D11_USAGE_DEFAULT;
+    d.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+    std::array<ComPtr<ID3D11Texture2D>, 3> textures;
+    for (auto& t : textures) gpu->device()->CreateTexture2D(&d, nullptr, &t);
+    std::vector<std::uint8_t> px(static_cast<std::size_t>(kW) * kH * 4);
+
+    struct Sample {
+        double t_s;
+        int bitrate;
+    };
+    std::vector<Sample> bitrates;
+    const auto started = std::chrono::steady_clock::now();
+    const std::int64_t started_us = kvm::steady_now_us();
+    const auto slow_at = started + kPhaseA, fast_at = slow_at + kPhaseB, end_at = fast_at + kPhaseC;
+    auto next = started;
+    for (int i = 0; std::chrono::steady_clock::now() < end_at; ++i) {
+        const auto now = std::chrono::steady_clock::now();
+        cap = now >= slow_at && now < fast_at ? kSlow : kFast;
+        for (int y = 0; y < kH; ++y) {
+            for (int x = 0; x < kW; ++x) {
+                std::uint8_t* q = &px[(static_cast<std::size_t>(y) * kW + x) * 4];
+                const bool block = std::abs(x - (i * 13) % kW) < 60 && std::abs(y - (i * 7) % kH) < 60;
+                q[0] = block ? 250 : static_cast<std::uint8_t>(x / 5 + i);
+                q[1] = block ? 90 : static_cast<std::uint8_t>(y / 3 + i * 2);
+                q[2] = block ? 40 : static_cast<std::uint8_t>((x + y) / 8 + i * 3);
+                q[3] = 255;
+            }
+        }
+        ID3D11Texture2D* texture = textures[static_cast<std::size_t>(i) % textures.size()].Get();
+        {
+            const kvm::GpuDevice::Lock lock(*gpu);
+            gpu->context()->UpdateSubresource(texture, 0, nullptr, px.data(), kW * 4, 0);
+        }
+        sender->put({.texture = texture, .width = kW, .height = kH, .t_capture_us = kvm::steady_now_us()});
+        bitrates.push_back({std::chrono::duration<double>(now - started).count(), sender->bitrate()});
+        next += std::chrono::microseconds(1'000'000 / 30);
+        std::this_thread::sleep_until(next);
+    }
+    sender->stop();
+
+    const double a_end = std::chrono::duration<double>(kPhaseA).count(),
+                 b_end = a_end + std::chrono::duration<double>(kPhaseB).count();
+    const auto first = [&](double from, auto pred) -> std::optional<double> {
+        for (const auto& b : bitrates) {
+            if (b.t_s >= from && pred(b.bitrate)) return b.t_s - from;
+        }
+        return std::nullopt;
+    };
+    int lowest = 6'000'000;
+    for (const auto& b : bitrates) lowest = std::min(lowest, b.bitrate);
+    const auto down = first(a_end, [&](int b) { return b <= kSlow * 1e6; });
+    const auto up = first(b_end, [&](int b) { return b >= 5'000'000; });
+    kvm::log::info(
+        "       bitrate: under {:.1f} Mbit/s {:.1f} s after the link slowed, back to 5 Mbit/s {:.1f} s after "
+        "it recovered, lowest {:.1f} Mbit/s, {} pictures not sent (late)",
+        kSlow, down.value_or(-1), up.value_or(-1), lowest / 1e6, sender->frames_skipped());
+    check(down && *down <= 4.0, "the link slows to 1.5 Mbit/s: the bitrate follows within 4 s");
+    check(up.has_value(), "the link is fast again: the bitrate comes back up to 5 Mbit/s and more");
+
+    std::lock_guard lock(mutex);
+    // The delay in the last 3 s of the slow phase: capture -> sent.
+    std::vector<double> delay_ms;
+    double slow_bytes = 0;
+    for (const auto& f : sent) {
+        const double at = static_cast<double>(f.at_us - started_us) / 1e6;  // s since the start
+        if (at >= b_end - 3 && at < b_end) {
+            delay_ms.push_back(static_cast<double>(f.at_us - f.header.t_capture_us) / 1000.0);
+            slow_bytes += static_cast<double>(f.unit.size());
+        }
+    }
+    std::sort(delay_ms.begin(), delay_ms.end());
+    const double p95 = delay_ms.empty() ? 1e9 : delay_ms[delay_ms.size() * 95 / 100];
+    kvm::log::info("       the last 3 s at 1.5 Mbit/s: {} frames, {:.2f} Mbit/s out, capture -> sent p95 {:.0f} ms",
+                   delay_ms.size(), slow_bytes * 8 / 3 / 1e6, p95);
+    check(!delay_ms.empty() && p95 < 1500, "on the slow link the delay stays bounded (p95 under 1.5 s)");
+
+    // What a viewer would show: in order, and after a gap nothing until a keyframe.
+    auto decoder = kvm::H264Decoder::create(nullptr, why);
+    std::size_t shown = 0, refused = 0, gaps = 0;
+    std::optional<std::uint32_t> last_seq;
+    bool waiting = false;
+    for (const auto& f : sent) {
+        if (last_seq && f.header.seq != *last_seq + 1) {
+            ++gaps;
+            waiting = true;
+        }
+        last_seq = f.header.seq;
+        if (waiting && !f.header.keyframe) continue;
+        waiting = false;
+        const auto errors = decoder ? decoder->errors() : 0;
+        const auto picture = decoder ? decoder->decode(f.unit, f.header.t_capture_us) : std::nullopt;
+        if (!decoder || decoder->errors() > errors) ++refused;
+        if (picture) ++shown;
+    }
+    kvm::log::info("       {} frames sent, {} gaps (skipped to a keyframe), {} shown", sent.size(), gaps, shown);
+    check(refused == 0 && shown > 0, std::format("every frame a viewer would show decodes ({} refused)", refused));
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -469,6 +609,7 @@ int main(int argc, char** argv) {
     }
 
     test_sender(check, gpu);
+    test_adaptation(check, gpu);
 
     if (check.failed) {
         kvm::log::error("{} check(s) failed", check.failed);

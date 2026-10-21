@@ -75,8 +75,12 @@ public:
     // The next picture given to encode() becomes a keyframe (IDR). If that one is dropped while the
     // encoder is busy, the newer picture that replaces it does.
     void request_keyframe() { keyframe_requested_ = true; }
-    // Changes the bitrate from the next picture on.
+    // Changes the bitrate from the next picture on, where the encoder allows it while running
+    // (bitrate_modifiable()). Intel's Quick Sync encoder doesn't: it accepts the value and keeps
+    // its old bitrate (measured, roadmap P2.6); a new encoder is the way to change it there.
     void set_bitrate(int bits_per_second);
+    bool bitrate_modifiable() const { return bitrate_modifiable_; }
+    int bitrate() const { return options_.bitrate; }
     // Waits up to `timeout` until every queued picture has come out: its packet is in packets() then.
     bool flush(std::chrono::milliseconds timeout);
 
@@ -118,6 +122,7 @@ private:
     Microsoft::WRL::ComPtr<IMFDXGIDeviceManager> manager_;
     Microsoft::WRL::ComPtr<IMFActivate> activate_;
     bool started_mf_ = false;
+    bool bitrate_modifiable_ = false;  // ICodecAPI::IsModifiable(mean bitrate) said S_OK
     bool provides_samples_ = true;
     std::uint32_t output_size_ = 0;
     std::atomic<std::int64_t> time_base_us_{-1};  // the first picture's capture time: sample times start at 0

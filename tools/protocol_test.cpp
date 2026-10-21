@@ -62,6 +62,7 @@ int main() {
     round_trip(proto::Hello{.hostname = "laptop-b", .video_decode = {"h264", "jpeg"}, .video_encode = {"jpeg"}});
     round_trip(proto::VideoConfig{.codec = "h264", .width = 1920, .height = 1080});
     round_trip(proto::VideoKeyframe{});
+    round_trip(proto::VideoStats{.latency_ms = 85, .fps = 30});
     const auto old_hello = proto::decode(nlohmann::json::parse(R"({"type":"hello","hostname":"old"})"));
     check(old_hello && std::get<proto::Hello>(*old_hello).video_decode.empty() &&
               std::get<proto::Hello>(*old_hello).video_encode.empty(),

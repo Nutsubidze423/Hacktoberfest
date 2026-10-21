@@ -9,8 +9,8 @@
 namespace kvm {
 
 FrameRouter::FrameRouter(net::FrameChannel& channel, ViewerWindow& viewer, DeskView* desk,
-                         std::function<void()> request_keyframe)
-    : channel_(channel), viewer_(viewer), desk_(desk), window_(viewer, std::move(request_keyframe)) {
+                         WindowStream::Feedback feedback)
+    : channel_(channel), viewer_(viewer), desk_(desk), window_(viewer, std::move(feedback)) {
     read_thread_ = std::jthread([this] { read_loop(); });
 }
 
