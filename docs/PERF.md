@@ -54,3 +54,40 @@ the encrypting and the decrypting. Runs alternated, with nothing else building.
 |---|---|---|---|---|
 | 2026-10-20 | Celeron laptop | synthetic 1920×1080, quality 75 | avg 21.5 ms, p95 35.0 ms, 515 KB | `jpeg_test` (`bench` label) |
 | 2026-10-17 | Temo's laptop | 1080p window | 4.2–5.3 ms | hackathon commit messages, not re-measured |
+
+## Hardware codecs (roadmap P2.2)
+
+**How:** `mft_probe --markdown` ([tools/mft_probe.cpp](../tools/mft_probe.cpp)) lists:
+- every H.264 / HEVC / AV1 encoder and decoder that Media Foundation offers (`MFTEnumEx`), and
+  what each takes;
+- what the GPU itself decodes (`ID3D11VideoDevice` decode profiles, which Microsoft's decoder MFT
+  uses through DXVA when it gets a D3D11 device).
+
+Identical entries (one per graphics adapter, and a virtual display adds some) are listed once.
+
+**Celeron laptop (Intel UHD Graphics 600), 2026-10-21:**
+
+| Codec | Kind | Name | Hardware | Vendor | D3D11 | Async | Low latency | Raw formats | 4:4:4 format |
+|---|---|---|---|---|---|---|---|---|---|
+| H.264 | encoder | Intel® Quick Sync Video H.264 Encoder MFT | yes | Intel | yes | yes | yes | NV12 ARGB32 | - |
+| H.264 | encoder | H264 Encoder MFT | no | - | no | no | yes | IYUV YV12 NV12 YUY2 | - |
+| H.264 | decoder | Microsoft H264 Video Decoder MFT | no | - | yes | no | yes | NV12 YV12 IYUV I420 YUY2 | - |
+| HEVC | encoder | Intel® Hardware H265 Encoder MFT | yes | Intel | yes | yes | yes | NV12 ARGB32 P010 | - |
+
+| GPU | Decodes in hardware (D3D11 video) |
+|---|---|
+| Intel(R) UHD Graphics 600 | H.264, HEVC Main, HEVC Main10, VP9 |
+
+**What it means for Phase 2:**
+- **H.264 encode in hardware:** Intel Quick Sync, async, on D3D11 textures, with low-latency mode.
+  That is what P2.3 needs for zero-copy encode from WGC.
+- **H.264 decode in hardware:** the GPU decodes H.264 (and HEVC, VP9). Microsoft's H.264 decoder
+  MFT works on D3D11, so P2.4 can decode on the GPU. This answers the open question about this
+  laptop: it can be the weak PC in the demo with H.264.
+- **HEVC:** encoded in hardware, and the GPU decodes it. But there is no HEVC decoder MFT: Windows
+  needs the "HEVC Video Extensions" from the Store for that. HEVC (P2.10) can't be assumed on an
+  ordinary PC.
+- **AV1:** neither encode nor decode here.
+- **4:4:4:** no encoder lists a 4:4:4 input (AYUV, Y410, Y416). ARGB32 input is converted to
+  4:2:0 by the encoder, so P2.10's 4:4:4 isn't on this PC's table.
+- **Still to probe:** the two demo PCs.

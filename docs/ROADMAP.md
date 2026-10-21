@@ -968,6 +968,15 @@ Attempts are rate-limited.
     - low-latency support;
     - 4:4:4 support.
   - **Done when:** results for both demo PCs and this PC (UHD 600) are in PERF.md. They decide which codecs P2.3 and P2.10 target.
+  - **Result (2026-10-21), this PC done; the two demo PCs are still to probe:**
+    - **`tools/mft_probe.cpp`:**
+      - lists every H.264 / HEVC / AV1 encoder and decoder MFT: hardware or not, vendor, D3D11 awareness, async, low-latency mode, raw formats, and whether a 4:4:4 format is listed;
+      - also lists the GPU's own decode profiles (`ID3D11VideoDevice`), because hardware decoding goes through Microsoft's decoder MFT plus DXVA, not a vendor MFT;
+      - `--markdown` prints the PERF.md table.
+    - **This PC** ([PERF.md](PERF.md) "Hardware codecs"):
+      - H.264 is encoded in hardware (Quick Sync: async, D3D11, low latency) and decoded on the GPU. P2.3 and P2.4 can target it, and the risk "whether this PC's UHD 600 decodes H.264 in hardware" is answered: yes.
+      - HEVC is encoded in hardware and the GPU decodes it, but without a decoder MFT (that needs the Store's HEVC Video Extensions).
+      - No AV1. No 4:4:4 input on any encoder.
 
 - [ ] **P2.3 H.264 encoder on the GPU, zero-copy from WGC** (L → split into a/b/c).
   - **P2.3a** (M): one shared D3D11 device for capture and encode (`ID3D10Multithread` protection). BGRA → NV12 on the GPU with `ID3D11VideoProcessor`.
@@ -1040,7 +1049,7 @@ Attempts are rate-limited.
 |---|---|
 | Async MFT complexity and vendor quirks (Intel/AMD/NVIDIA) | P2.2 probe; test on at least two GPU vendors. |
 | Text sharpness at 4:2:0 | Measure with Photoshop's UI; try a higher bitrate first, then 4:4:4 (P2.10). |
-| Whether this PC's UHD 600 decodes H.264 in hardware | P2.2 finds out. If not, the weak-laptop demo needs a different laptop or the JPEG path. |
+| Whether this PC's UHD 600 decodes H.264 in hardware | **Answered by P2.2: yes** (D3D11 decode profiles: H.264, HEVC Main/Main10, VP9). |
 | Colour range (BT.709 limited vs full) mismatches | Set it explicitly on both sides. |
 | Desk mode DComp approach | P2.7a prototype before any commitment. |
 
