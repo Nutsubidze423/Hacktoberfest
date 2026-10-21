@@ -11,12 +11,12 @@
 #include "jpeg_decoder.h"
 #include "kvm/annexb.h"
 #include "kvm/log.h"
+#include "kvm/video_stats.h"
 #include "picture_converter.h"
 
 namespace kvm {
 
-WindowStream::WindowStream(ViewerWindow& viewer, std::function<void()> request_keyframe)
-    : viewer_(viewer), request_keyframe_(std::move(request_keyframe)) {
+WindowStream::WindowStream(ViewerWindow& viewer, Feedback feedback) : viewer_(viewer), feedback_(std::move(feedback)) {
     jpeg_thread_ = std::jthread([this] { jpeg_loop(); });
     h264_thread_ = std::jthread([this] { h264_loop(); });
 }
@@ -108,13 +108,24 @@ void WindowStream::h264_loop() {
     // Waiting for a keyframe: ask the owner for one, now and then.
     const auto ask_for_keyframe = [&] {
         const auto now = std::chrono::steady_clock::now();
-        if (!request_keyframe_ || now - last_request < kKeyframeRequestGap) return;
+        if (!feedback_.keyframe || now - last_request < kKeyframeRequestGap) return;
         last_request = now;
-        request_keyframe_();
+        feedback_.keyframe();
+    };
+    // How the frames arrive, for the owner's bitrate: once a second while some are shown.
+    auto next_stats = std::chrono::steady_clock::now() + kStatsEvery;
+    const auto report = [&] {
+        const auto now = std::chrono::steady_clock::now();
+        if (!feedback_.stats || now < next_stats) return;
+        next_stats = now + kStatsEvery;
+        const StatsSummary s = video_stats().summary("window");
+        if (s.frames == 0 || !s.latency_p50_ms || decoded == 0) return;
+        feedback_.stats(static_cast<int>(*s.latency_p50_ms), static_cast<int>(s.fps + 0.5));
     };
 
     for (;;) {
         auto frame = h264_.pop_for(std::chrono::milliseconds(100));
+        report();
         if (!frame) {
             if (h264_.closed()) break;
             if (prepare_h264_.exchange(false)) ensure_decoder();  // proto::VideoConfig: be ready
@@ -148,7 +159,13 @@ void WindowStream::h264_loop() {
         need_keyframe = false;
 
         const std::int64_t started = steady_now_us();
+        const auto errors = decoder->errors();
         auto picture = decoder->decode(frame->payload, h.t_capture_us);
+        if (decoder->errors() > errors) {  // the decoder refused it: what follows can't be trusted
+            need_keyframe = true;
+            ask_for_keyframe();
+            continue;
+        }
         if (!picture) continue;
         ++decoded;
         if (h264_.size() > 0) continue;  // more are waiting: show the newest picture, not this one

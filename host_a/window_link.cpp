@@ -172,8 +172,13 @@ void WindowLink::set_video(std::shared_ptr<net::FrameChannel> channel) {
         old_router = std::move(router_);
         old_video = std::exchange(video_, std::move(channel));
         if (video_ && viewer) {
-            router_ = std::make_unique<FrameRouter>(*video_, *viewer, desk_view_.get(),
-                                                    [this] { send(proto::VideoKeyframe{}); });
+            router_ = std::make_unique<FrameRouter>(
+                *video_, *viewer, desk_view_.get(),
+                WindowStream::Feedback{.keyframe = [this] { send(proto::VideoKeyframe{}); },
+                                       .stats =
+                                           [this](int latency_ms, int fps) {
+                                               if (peer_knows_codecs_) send(proto::VideoStats{latency_ms, fps});
+                                           }});
         }
     }
     old_router.reset();  // closes the old channel and joins its reader, outside the lock
@@ -256,6 +261,10 @@ bool WindowLink::handle(const proto::Message& msg) {
     std::lock_guard lock(mutex_);
     if (std::holds_alternative<proto::VideoKeyframe>(msg)) {
         if (share_) share_->request_keyframe();  // our window, shown over there: its decoder needs one
+        return true;
+    }
+    if (const auto* stats = std::get_if<proto::VideoStats>(&msg)) {
+        if (share_ && stats->latency_ms >= 0) share_->on_viewer_stats(stats->latency_ms);  // its bitrate
         return true;
     }
     // The peer's input on one of our windows: the viewer's (window stream) or its desk overlay's.

@@ -75,6 +75,10 @@ public:
     void request_keyframe() {
         if (h264_) h264_->request_keyframe();
     }
+    // How the frames arrive at the viewer (proto::VideoStats): H.264 adapts its bitrate to it.
+    void on_viewer_stats(int latency_ms) {
+        if (h264_) h264_->on_viewer_stats(latency_ms);
+    }
 
 private:
     WindowShare() = default;
