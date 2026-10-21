@@ -6,6 +6,7 @@
 //   --no-clipboard  don't share copied text/images with the host
 //   --no-desk       no desk mode (the host's screen as one more monitor); Ctrl+Alt+Shift+W uses the viewer
 //   --desk-no-vdd   desk mode, but only show the host's windows (one-PC tests: the host owns the VDD)
+//   --stats <file.csv>  one row per video frame shown on this PC (kvm/video_stats.h, docs/PERF.md)
 //   --pair-unknown  if the host's key isn't paired, start pairing (both users compare a code) instead of
 //                   refusing it: the launcher passes it when the user picked the host
 //   --data-dir <dir> --print-id --pair-with <device id> --recreate-identity: see kvm/trust.h
@@ -43,6 +44,7 @@
 #include "kvm/net.h"
 #include "kvm/protocol.h"
 #include "kvm/video.h"
+#include "kvm/video_stats.h"
 #include "virtual_display.h"
 #include "window_link.h"
 
@@ -226,6 +228,7 @@ SessionEnd run_session(kvm::net::Connection& conn, const kvm::Config& cfg, kvm::
             kvm::log::info("link: rtt {:.2f} ms, clock offset {:.1f} ms", stats.rtt_us / 1000.0,
                            stats.clock_offset_us / 1000.0);
             if (stats.rtt_us >= 0) windows.set_rtt_ms(static_cast<int>(stats.rtt_us / 1000), stats.clock_offset_us);
+            if (const std::string line = kvm::video_stats().log_line(); !line.empty()) kvm::log::info("{}", line);
             next_stats += kStatsInterval;
         }
     }
@@ -311,6 +314,9 @@ int wmain(int argc, wchar_t** argv) {
             desk_own_vdd = false;  // e.g. host and client on one PC: only the host uses the VDD
         } else if (arg == L"--pair-unknown") {
             pair_unknown = true;
+        } else if (arg == L"--stats" && i + 1 < argc) {
+            const std::filesystem::path csv = argv[++i];
+            if (!kvm::video_stats().open_csv(csv)) kvm::log::warn("stats: can't write {}", csv.string());
         }
     }
 
@@ -434,6 +440,7 @@ int wmain(int argc, wchar_t** argv) {
         kvm::Hotkeys hotkeys;
         hotkeys.add('F', [&] { files.show_catcher_at_cursor(); });
         hotkeys.add('W', [&] { windows.toggle(); });
+        hotkeys.add('H', [&] { windows.toggle_hud(); });
         if (hotkeys.start()) {
             kvm::log::info("Ctrl+Alt+Shift+F: drop files on the box at the cursor to send them to the other PC");
             kvm::log::info("Ctrl+Alt+Shift+W: send the window in front to the other PC, press again to bring it back");

@@ -15,7 +15,7 @@ using ui::pal;
 using ui::px;
 using ui::TextStyle;
 
-constexpr int kRows = 7;
+constexpr int kRows = 11;
 
 struct Row {
     const wchar_t* label;
@@ -42,6 +42,14 @@ std::wstring int_or_unknown(std::optional<int> v) {
     return v ? std::to_wstring(*v) : std::wstring(ui::kUnknown);
 }
 
+std::wstring tenths_or_unknown(std::optional<double> v) {
+    return v ? std::format(L"{:.1f}", *v) : std::wstring(ui::kUnknown);
+}
+
+std::wstring count_or_unknown(std::optional<std::uint64_t> v) {
+    return v ? std::to_wstring(*v) : std::wstring(ui::kUnknown);
+}
+
 }  // namespace
 
 D2D1_RECT_F hud_rect(float client_w, float content_top, UINT dpi) {
@@ -59,15 +67,21 @@ void draw_hud(ui::Painter& p, const D2D1_RECT_F& r, const HudValues& v, UINT dpi
 
     const std::wstring res =
         v.width && v.height ? std::format(L"{}{}{}", *v.width, ui::kTimes, *v.height) : std::wstring(ui::kUnknown);
-    // The website's feature list: "RTT, FPS, latency, bitrate, resolution and dropped frames".
+    // The website's feature list: "RTT, FPS, latency, bitrate, resolution and dropped frames"; decode,
+    // present and repeats for the measurements in docs/PERF.md (roadmap P2.1).
     const Row rows[kRows] = {
         {L"RTT", int_or_unknown(v.rtt_ms), L"ms", above(v.rtt_ms, vt::rtt_warn_ms, vt::rtt_err_ms)},
         {L"FPS", int_or_unknown(v.fps), nullptr, below(v.fps, vt::fps_warn, vt::fps_err)},
-        {L"Latency", int_or_unknown(v.latency_ms), L"ms", above(v.latency_ms, vt::lat_warn_ms, vt::lat_err_ms)},
-        {L"Bitrate", v.mbps ? std::format(L"{:.1f}", *v.mbps) : std::wstring(ui::kUnknown), L"Mbps", c.ink},
+        {L"Latency p50", int_or_unknown(v.latency_ms), L"ms", above(v.latency_ms, vt::lat_warn_ms, vt::lat_err_ms)},
+        {L"Latency p95", int_or_unknown(v.latency_p95_ms), L"ms",
+         above(v.latency_p95_ms, vt::lat_warn_ms, vt::lat_err_ms)},
+        {L"Decode", tenths_or_unknown(v.decode_ms), L"ms", c.ink},
+        {L"Present", tenths_or_unknown(v.present_ms), L"ms", c.ink},
+        {L"Bitrate", tenths_or_unknown(v.mbps), L"Mbps", c.ink},
         {L"Resolution", res, nullptr, c.ink},
         {L"Quality", int_or_unknown(v.jpeg_quality), nullptr, c.ink},
-        {L"Dropped", v.dropped ? std::to_wstring(*v.dropped) : std::wstring(ui::kUnknown), nullptr, c.ink},
+        {L"Dropped", count_or_unknown(v.dropped), nullptr, c.ink},
+        {L"Repeated", count_or_unknown(v.repeated), nullptr, c.ink},
     };
 
     const auto pad_h = static_cast<float>(px(vt::hud_pad_h, dpi));

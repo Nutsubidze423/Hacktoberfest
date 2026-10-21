@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <map>
 #include <set>
 #include <string>
 #include <vector>
@@ -189,7 +190,7 @@ void DeskShare::run(std::stop_token stop) {
     const auto min_interval =
         options_.max_fps > 0 ? std::chrono::duration_cast<Clock::duration>(std::chrono::seconds(1)) / options_.max_fps
                              : Clock::duration::zero();
-    std::uint32_t seq = 0;
+    std::map<std::uint64_t, std::uint32_t> seq;  // per window: each is a stream, numbered without gaps
     auto period_start = Clock::now();
     std::uint64_t period_frames = 0, period_bytes = 0, period_pixels = 0;
     double period_encode_ms = 0;
@@ -203,7 +204,7 @@ void DeskShare::run(std::stop_token stop) {
         } else {
             alpha.clear();
         }
-        proto::FrameHeader header{.seq = seq++,
+        proto::FrameHeader header{.seq = seq[w.id]++,
                                   .t_capture_us = t_capture_us,
                                   .width = width,
                                   .height = height,
