@@ -22,7 +22,10 @@
 #include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <deque>
 #include <functional>
+#include <list>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -127,25 +130,63 @@ private:
     std::jthread ping_thread_;
 };
 
+// Connections that haven't finished the TLS handshake (docs/SECURITY.md S9): a peer that connects
+// and sends nothing, or keeps connecting, must not keep the paired PC out.
+struct HandshakeLimits {
+    int max_pending = 4;         // handshakes running at once
+    // Of those, from one IP. 2, not 1: a TLS 1.3 client is done a moment before the server, so its
+    // next connection may arrive while the server still counts the last one as running.
+    int max_pending_per_ip = 2;
+    // Failed handshakes an IP may have before it has to wait between tries: 1 s, doubling up to
+    // max_backoff. A good handshake from it starts over.
+    int free_failures = 2;
+    std::chrono::seconds max_backoff{30};
+};
+
+// How long an IP waits after `failures` failed handshakes in a row (0 = it may try at once).
+std::chrono::seconds handshake_backoff(int failures, const HandshakeLimits& limits);
+
 class Server {
 public:
     // Listens on 0.0.0.0:port. Throws std::runtime_error if the port cannot be bound.
-    explicit Server(std::uint16_t port);
-    ~Server();
+    explicit Server(std::uint16_t port, HandshakeLimits limits = {});
+    ~Server();  // stops, and waits for the handshakes still running (they give up within 200 ms)
 
     Server(const Server&) = delete;
     Server& operator=(const Server&) = delete;
 
-    // Blocks until a client connects and completes the TLS handshake. A client whose handshake fails
-    // (not TLS, no certificate, too slow) is logged and skipped. nullopt after stop().
+    // Blocks until a client has completed the TLS handshake. Each handshake runs on its own thread,
+    // within the limits; a connection over them is closed at once, and a client whose handshake
+    // fails (not TLS, no certificate, too slow) is logged and skipped. `me` must outlive the Server.
+    // nullopt after stop().
     std::optional<Handshaken> accept(const tls::Credentials& me,
                                      std::chrono::milliseconds handshake_timeout = kHandshakeTimeout);
 
-    // Unblocks accept() from any thread (e.g. a Ctrl+C handler). Idempotent.
+    // Unblocks accept() from any thread (e.g. a Ctrl+C handler) and cancels running handshakes.
+    // Idempotent.
     void stop();
 
 private:
+    struct Pending {
+        std::string ip;
+        bool done = false;
+        std::jthread thread;
+    };
+    struct PerIp {
+        int failures = 0;  // failed handshakes in a row
+        std::chrono::steady_clock::time_point wait_until{};
+        std::chrono::steady_clock::time_point last_refusal_log{};
+    };
+    void start_handshake(SOCKET s, std::string peer, const tls::Credentials& me, std::chrono::milliseconds timeout);
+    void reap_locked();  // joins finished handshake threads
+
     std::atomic<SOCKET> listen_sock_{INVALID_SOCKET};
+    const HandshakeLimits limits_;
+    std::atomic<bool> cancel_{false};
+    std::mutex mutex_;
+    std::deque<Handshaken> ready_;
+    std::list<Pending> pending_;
+    std::map<std::string, PerIp> per_ip_;
 };
 
 // ---- side channels: video (50501) and files (50502), docs/SECURITY.md 6.4 ---------------------

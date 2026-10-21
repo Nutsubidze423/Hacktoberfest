@@ -75,9 +75,10 @@ int accept_any(int, X509_STORE_CTX*) {
 enum class Wait { Ready, Timeout, Aborted, Error };
 
 // Waits until `s` is readable / writable, in short slices so abort() is noticed promptly.
-Wait wait_socket(SOCKET s, bool for_write, Clock::time_point deadline, const std::atomic<bool>& aborted) {
+Wait wait_socket(SOCKET s, bool for_write, Clock::time_point deadline, const std::atomic<bool>& aborted,
+                 const std::atomic<bool>* cancel = nullptr) {
     for (;;) {
-        if (aborted) return Wait::Aborted;
+        if (aborted || (cancel && *cancel)) return Wait::Aborted;
         const auto now = Clock::now();
         if (now >= deadline) return Wait::Timeout;
         const auto slice = std::min<Clock::duration>(deadline - now, 200ms);
@@ -266,7 +267,8 @@ Stream::Stream(std::unique_ptr<Impl> impl) : impl_(std::move(impl)) {}
 Stream::~Stream() = default;
 
 std::unique_ptr<Stream> Stream::handshake(SOCKET socket, Role role, const Credentials& me,
-                                          std::chrono::milliseconds timeout, std::string& error) {
+                                          std::chrono::milliseconds timeout, std::string& error,
+                                          const std::atomic<bool>* cancel) {
     auto impl = std::make_unique<Impl>();
     impl->sock = socket;  // closed by ~Impl on every failure below
     const auto fail = [&](std::string why) -> std::unique_ptr<Stream> {
@@ -282,8 +284,9 @@ std::unique_ptr<Stream> Stream::handshake(SOCKET socket, Role role, const Creden
     // plaintext hello, [u32 big-endian length]{"type":"hello",...}: name that, rather than an OpenSSL
     // error, so the user learns which PC to update (docs/SECURITY.md 6.7). Nothing is consumed.
     if (role == Role::Server) {
-        const Wait w = wait_socket(socket, false, deadline, impl->aborted);
+        const Wait w = wait_socket(socket, false, deadline, impl->aborted, cancel);
         if (w == Wait::Timeout) return fail(std::format("tls: no handshake within {} ms", timeout.count()));
+        if (w == Wait::Aborted) return fail("tls: handshake cancelled");
         if (w != Wait::Ready) return fail("tls: socket error during the handshake");
         unsigned char first[5] = {};
         const int got = recv(socket, reinterpret_cast<char*>(first), static_cast<int>(sizeof(first)), MSG_PEEK);
@@ -328,10 +331,11 @@ std::unique_ptr<Stream> Stream::handshake(SOCKET socket, Role role, const Creden
         if (r == 1) break;
         const int e = SSL_get_error(impl->ssl.get(), r);
         if (e == SSL_ERROR_WANT_READ || e == SSL_ERROR_WANT_WRITE) {
-            const Wait w = wait_socket(socket, e == SSL_ERROR_WANT_WRITE, deadline, impl->aborted);
+            const Wait w = wait_socket(socket, e == SSL_ERROR_WANT_WRITE, deadline, impl->aborted, cancel);
             if (w == Wait::Timeout) {
                 return fail(std::format("tls: no handshake within {} ms", timeout.count()));
             }
+            if (w == Wait::Aborted) return fail("tls: handshake cancelled");
             if (w != Wait::Ready) return fail("tls: socket error during the handshake");
             continue;
         }

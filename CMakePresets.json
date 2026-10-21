@@ -24,11 +24,18 @@
       "displayName": "x64 Release",
       "inherits": "base",
       "cacheVariables": { "CMAKE_BUILD_TYPE": "RelWithDebInfo" }
+    },
+    {
+      "name": "x64-fuzz",
+      "displayName": "x64 libFuzzer targets (tools/fuzz)",
+      "inherits": "base",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "RelWithDebInfo", "SARKE_FUZZ": "ON" }
     }
   ],
   "buildPresets": [
     { "name": "x64-debug", "configurePreset": "x64-debug" },
-    { "name": "x64-release", "configurePreset": "x64-release" }
+    { "name": "x64-release", "configurePreset": "x64-release" },
+    { "name": "x64-fuzz", "configurePreset": "x64-fuzz", "targets": ["fuzz_protocol"] }
   ],
   "testPresets": [
     {

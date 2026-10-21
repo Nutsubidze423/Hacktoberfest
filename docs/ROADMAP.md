@@ -866,10 +866,32 @@ Attempts are rate-limited.
       - no firewall prompt on first start;
       - uninstall removes the rules.
 
-- [ ] **P1.12 Pre-auth limits and decoder fuzzing** (M), branch `phase1/hardening`.
+- [x] **P1.12 Pre-auth limits and decoder fuzzing** (M), branch `phase1/hardening`.
   - Handshake timeout, at most 4 pending handshakes, backoff per IP.
   - A libFuzzer target for `proto::decode` and the frame-header parser (MSVC `/fsanitize=fuzzer,address`), run for a fixed time in CI or locally.
   - **Done when:** the fuzzer runs N minutes without crashing (record N); a flood test can't exhaust handshake slots.
+  - **Result (2026-10-21):**
+    - **`net::Server`** (all three ports):
+      - each TLS handshake runs on its own thread;
+      - at most 4 at once, at most 2 per IP; a connection over the limit is closed at once, with nothing read;
+      - after 2 failed handshakes in a row an IP waits 1 s, doubling to 30 s (`handshake_backoff`), and a good one resets it;
+      - refusals are logged at most every 10 s per IP;
+      - `stop()` cancels running handshakes through a new `cancel` flag on `tls::Stream::handshake` (within 200 ms), not by aborting their sockets, whose handles could already be reused.
+    - **Plan change: 2 per IP, not 1.** A TLS 1.3 client is done a moment before the server, so a client that opens a second connection to the same port right away was refused while the server still counted the first. `loopback_test` step 4 caught it.
+    - **`preauth_test`** (new, unit), with 127.0.0.x as other PCs:
+      - a silent connection holds its slot until the timeout;
+      - one address gets 2 slots, and the paired PC still gets in;
+      - a 5th address is refused while 4 handshakes run;
+      - after 3 failures an address waits, and may try again after the wait;
+      - `stop()` ends a running 10 s handshake in 110 ms.
+    - **Fuzzing:**
+      - `tools/fuzz/fuzz_protocol.cpp` (libFuzzer + ASan, MSVC `/fsanitize=fuzzer,address`, preset `x64-fuzz`) feeds JSON to `proto::decode`, also the pairing messages an unpaired key may send;
+      - what decodes must encode and decode to the same type again;
+      - it also reads `FrameHeader` the way the video channel does;
+      - seeds in `tools/fuzz/corpus`.
+      - **N = 30 minutes** on the Celeron laptop: 1,479,773 inputs, no crash or ASan report, 3,459 new corpus units.
+    - `ctest --preset ci` 16/16, 3 runs in a row.
+    - **Not covered by the fuzzer:** `safe_destination` and the file channel's parser live in `kvm_common` with OpenSSL, which the fuzz build doesn't instrument. `file_transfer_test`'s hostile-peer paths test them.
 
 - [ ] **P1.13 Code signing in the build** (S, after D3), branch `phase1/signing`.
   - D3 = SignPath Foundation. Demetre applies at signpath.org; the project qualifies once P0.8 adds the Apache-2.0 LICENSE.
