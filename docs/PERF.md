@@ -61,6 +61,27 @@ the average per conversion, including the copy into the processor's input textur
 The same frame takes 17–27 ms to JPEG-encode on this CPU (above), and NV12 is only the input of
 the hardware H.264 encoder (P2.3b), whose time is still to measure.
 
+## H.264 encode on the GPU (roadmap P2.3b)
+
+**What:** `h264_test` (label `gpu`):
+- **Input:** 60 moving 1920×1080 pictures at 30 fps (a gradient and a moving block) go BGRA → NV12
+  ([nv12_converter.h](../host_a/nv12_converter.h)), into a copy, and into the hardware encoder
+  ([h264_encoder.h](../host_a/h264_encoder.h)): Intel Quick Sync, CBR at 8 Mbit/s, low latency, no
+  B-frames.
+- **Time:** from just before the conversion until the access unit came out.
+- **Runs:** 5, back to back.
+
+| Date | Machine | Time p50 (ms) | Time p95 (ms) | Bitrate (target 8.0 Mbit/s) | Dropped |
+|---|---|---|---|---|---|
+| 2026-10-21 | Celeron laptop (UHD 600) | 20.1–23.8 | 34.7–50.1, once 121.8 | 6.69–6.96 Mbit/s | 0, once 2 of 60 |
+
+**What it means:**
+- The CPU only queues work here, against a 17–27 ms JPEG encode on the CPU for a smaller,
+  1280×800 window (above).
+- The bitrate stays near the target, against desk mode's 24–79 Mbit/s with JPEG.
+- Whether the picture holds up at that bitrate is P2.4's measurement, when the decoder can turn it
+  back into pixels (PSNR).
+
 ## JPEG encode (hackathon baseline, for roadmap Phase 2)
 
 | Date | Machine | Frame | Result | Source |

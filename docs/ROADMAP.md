@@ -987,6 +987,21 @@ Attempts are rate-limited.
       - `capture_test` (vdd): a real capture of the VDD on the GPU, 12 of 12 frames turned into 1920×1080 NV12;
       - `ctest --preset local` 34/34.
     - **Still open:** a texture is allocated per captured frame; re-using a few saves the allocation, to measure in P2.3b.
+  - **P2.3b result (2026-10-21):**
+    - **[host_a/h264_encoder.h](../host_a/h264_encoder.h):**
+      - finds the hardware H.264 MFT on the GpuDevice's adapter (`MFTEnum2` with the adapter LUID);
+      - unlocks it as an async MFT and gives it the device (`IMFDXGIDeviceManager`), so NV12 textures go in without leaving the GPU;
+      - settings: CBR, low latency, no B-frames, a long GOP (`keyframe_interval_s`, 60 s), `request_keyframe()`, `set_bitrate()`;
+      - a thread of its own answers the encoder's events; input is fed against its "need input" credits. If the encoder is still busy and two pictures wait, the older is dropped and counted (`dropped()`). Out come Annex-B access units with their capture time.
+    - **Found:** Intel's encoder answers its first "have output" with `MFT_OUTPUT_DATA_BUFFER_NO_SAMPLE` plus `E_UNEXPECTED`. That means "nothing yet", not a failure, and is handled as such.
+    - **`h264_test`** (label `gpu`), 60 moving 1080p pictures at 30 fps, 5 runs:
+      - one access unit per picture (once, 2 of 60 were dropped while the encoder was busy);
+      - the first is a keyframe with SPS, PPS and IDR;
+      - a keyframe follows a request, and there are no others;
+      - p50 20–24 ms from picture to access unit, at 6.7–7.0 Mbit/s for an 8 Mbit/s target ([PERF.md](PERF.md)).
+    - `ctest --preset local` 35/35.
+    - **Plan change: the PSNR check moves to P2.4,** where a decoder exists to turn the stream back into pixels.
+    - **Not in CI:** whether the software MFT can stand in on CI runners is left for P2.4's decode test; `h264_test` needs the hardware encoder.
 
 - [ ] **P2.4 Hardware decode and a D3D11 renderer on the viewer** (M), branch `phase2/decode`.
   - **Files:** new `client_b/h264_decoder.*` (MF DXVA decoder with D3D11 output), and [client_b/viewer_window.cpp](../client_b/viewer_window.cpp) moves from a D2D `HwndRenderTarget` to a flip-model swapchain:
