@@ -64,9 +64,13 @@ normal build stays uninstrumented. From a Developer PowerShell (it puts the ASan
 cmake --preset x64-fuzz
 cmake --build --preset x64-fuzz
 build\x64-fuzz\tools\fuzz\fuzz_protocol.exe -max_total_time=600 tools\fuzz\corpus
+build\x64-fuzz\tools\fuzz\fuzz_annexb.exe -max_total_time=600 tools\fuzz\corpus_annexb
 ```
 
-`tools\fuzz\corpus` holds the seeds, and libFuzzer adds what it finds to the folder it is given: give
+- `fuzz_protocol`: control messages and the video frame header (JSON).
+- `fuzz_annexb`: the framing check on an H.264 payload ([kvm/annexb.h](common/include/kvm/annexb.h)).
+
+`tools\fuzz\corpus` and `corpus_annexb` hold the seeds, and libFuzzer adds what it finds to the folder it is given: give
 it a copy when you don't want new files there. A `crash-*` file is a bug to fix; add the input to the
 seeds once it is fixed.
 

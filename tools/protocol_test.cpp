@@ -87,6 +87,12 @@ int main() {
           "desk frame header with rects");
     check(proto::encode(proto::FrameHeader{}).get<proto::FrameHeader>().layer.empty(),
           "frame header: layer defaults to window stream");
+    const auto h264 = proto::encode(proto::FrameHeader{.seq = 3, .codec = "h264", .keyframe = true});
+    check(h264.at("keyframe") == true && h264.get<proto::FrameHeader>().codec == "h264" &&
+              h264.get<proto::FrameHeader>().keyframe,
+          "h264 frame header with the keyframe flag");
+    const auto older = nlohmann::json::parse(R"({"type":"frame","seq":4,"codec":"jpeg"})").get<proto::FrameHeader>();
+    check(older.seq == 4 && !older.keyframe, "frame header without keyframe (an older sender): not a keyframe");
 
     std::printf("\n%s\n", g_failures == 0 ? "all passed" : "FAILED");
     return g_failures == 0 ? 0 : 1;

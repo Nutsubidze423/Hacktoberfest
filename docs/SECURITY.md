@@ -247,7 +247,7 @@ Implemented in P1.10:
 | S6 | launcher unit test: a reply with a paired name but another ID isn't auto-connected (P1.8) |
 | S7 | `identity_test`: round trip; a tampered blob fails cleanly. Manual: another Windows user can't decrypt it (P1.3) |
 | S8 | `loopback_test`: unpair mid-session closes all three channels (P1.9) |
-| S9 | `preauth_test`: a silent connection holds its slot only until the timeout; one address gets 2 of the 4 slots and the paired PC still gets in; after 2 failures an address waits; `stop()` ends running handshakes. `fuzz_protocol` (libFuzzer + ASan) on `proto::decode` and the frame header (P1.12) |
+| S9 | `preauth_test`: a silent connection holds its slot only until the timeout; one address gets 2 of the 4 slots and the paired PC still gets in; after 2 failures an address waits; `stop()` ends running handshakes. `fuzz_protocol` (libFuzzer + ASan) on `proto::decode` and the frame header (P1.12); `fuzz_annexb` on the framing check a viewer runs on an H.264 payload before decoding it (P2.3c) |
 
 ### Code mapping test vectors
 The mapping from 4 exporter bytes to the code shown:

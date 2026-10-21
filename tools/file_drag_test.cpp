@@ -53,23 +53,6 @@ void press_escape() {
     kvm::input::send_key(VK_ESCAPE, 0, false, false);
 }
 
-// Listens on 127.0.0.1 only (a free port), so Windows Firewall doesn't ask anything.
-SOCKET listen_loopback(std::uint16_t& port) {
-    kvm::net::ensure_winsock();
-    const SOCKET s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-    sockaddr_in addr{};
-    addr.sin_family = AF_INET;
-    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-    int len = sizeof(addr);
-    if (s == INVALID_SOCKET || bind(s, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) != 0 || listen(s, 1) != 0 ||
-        getsockname(s, reinterpret_cast<sockaddr*>(&addr), &len) != 0) {
-        if (s != INVALID_SOCKET) closesocket(s);
-        return INVALID_SOCKET;
-    }
-    port = ntohs(addr.sin_port);
-    return s;
-}
-
 std::string read_file(const fs::path& p) {
     std::ifstream in(p, std::ios::binary);
     return std::string(std::istreambuf_iterator<char>(in), {});
@@ -214,7 +197,7 @@ int main() {
     kvm::log::info("2) the whole cross-PC drag on one PC (A and B over 127.0.0.1, no KVM)");
     {
         std::uint16_t port = 0;
-        const SOCKET listener = listen_loopback(port);
+        const SOCKET listener = kvm::test::listen_loopback(port);
         const kvm::test::Session session;
         std::unique_ptr<kvm::files::FileTransfer> a;
         std::thread acceptor([&] {

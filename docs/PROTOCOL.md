@@ -113,10 +113,25 @@ never hand-built JSON.
 | `seq` | frame number, gap-free per stream |
 | `t_capture_us` | when it was captured (owner's clock; the viewer maps it with the ping/pong offset) |
 | `width`, `height` | picture size |
-| `codec` | `jpeg` |
+| `codec` | `jpeg`, or `h264` for a window stream |
+| `keyframe` | `h264`: the frame is an IDR picture with SPS and PPS in front, where a viewer can start decoding (missing = false) |
 | `layer` | `"desk"` in desk mode |
 | `window` | desk mode: the window this picture is of (one window per frame, WGC window capture) |
 | `x`, `y` | desk mode: where the picture sits in the window's frame |
 | `alpha_bytes` | desk mode: the payload is the JPEG (4:4:4) followed by this many bytes of alpha runs `[u8 alpha][u16 count]` (rounded corners) |
 
 The sender always sends the newest frame and drops older ones; it never queues video.
+
+An `h264` payload is one H.264 access unit in Annex-B form: NAL units, each after a start code
+`00 00 01` or `00 00 00 01`. Before a decoder sees it, the viewer checks the framing
+([kvm/annexb.h](../common/include/kvm/annexb.h)):
+- it starts with a start code;
+- no NAL unit is empty, has the forbidden bit set, or has a type H.264 doesn't define for a stream;
+- it holds one picture;
+- `keyframe` is true exactly when that picture is an IDR picture, and then SPS and PPS come first.
+
+A frame that fails is dropped.
+
+A viewer skips any codec it doesn't show, so an older viewer stays blank on `h264` but doesn't
+break. No release sends `h264` yet. Once codecs are negotiated (roadmap P2.5), the owner will send it only
+to a viewer that said it can decode it.
