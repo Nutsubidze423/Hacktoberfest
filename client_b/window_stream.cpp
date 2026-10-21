@@ -15,7 +15,8 @@
 
 namespace kvm {
 
-WindowStream::WindowStream(ViewerWindow& viewer) : viewer_(viewer) {
+WindowStream::WindowStream(ViewerWindow& viewer, std::function<void()> request_keyframe)
+    : viewer_(viewer), request_keyframe_(std::move(request_keyframe)) {
     jpeg_thread_ = std::jthread([this] { jpeg_loop(); });
     h264_thread_ = std::jthread([this] { h264_loop(); });
 }
@@ -31,6 +32,10 @@ void WindowStream::push(net::Frame frame) {
     } else {
         latest_.put(std::move(frame));
     }
+}
+
+void WindowStream::prepare(const std::string& codec) {
+    if (codec == "h264") prepare_h264_ = true;  // the H.264 thread looks at it within 100 ms
 }
 
 void WindowStream::close() {
@@ -85,8 +90,36 @@ void WindowStream::h264_loop() {
     bool need_keyframe = true;
     bool decoder_missing = false;
     std::uint64_t decoded = 0, waited = 0;
+    std::chrono::steady_clock::time_point last_request{};
 
-    while (auto frame = h264_.pop()) {
+    // The decoder on the viewer's current device (a new one after the device was lost).
+    const auto ensure_decoder = [&] {
+        const auto now = viewer_.gpu();
+        if (now == gpu && (decoder || decoder_missing)) return false;
+        gpu = now;
+        converter.reset();
+        std::string why;
+        decoder = H264Decoder::create(gpu && gpu->has_video() ? gpu : nullptr, why);
+        decoder_missing = !decoder;
+        if (!decoder) log::error("video: {}: h264 frames are not shown", why);
+        converter = std::make_unique<PictureConverter>(gpu);
+        return decoder != nullptr;  // a new decoder: it starts at a keyframe
+    };
+    // Waiting for a keyframe: ask the owner for one, now and then.
+    const auto ask_for_keyframe = [&] {
+        const auto now = std::chrono::steady_clock::now();
+        if (!request_keyframe_ || now - last_request < kKeyframeRequestGap) return;
+        last_request = now;
+        request_keyframe_();
+    };
+
+    for (;;) {
+        auto frame = h264_.pop_for(std::chrono::milliseconds(100));
+        if (!frame) {
+            if (h264_.closed()) break;
+            if (prepare_h264_.exchange(false)) ensure_decoder();  // proto::VideoConfig: be ready
+            continue;
+        }
         const proto::FrameHeader& h = frame->header;
         // A missing frame: the ones after it refer to a picture that isn't there.
         if (last_seq && h.seq != *last_seq + 1 && !need_keyframe) {
@@ -97,27 +130,19 @@ void WindowStream::h264_loop() {
         if (const auto why = annexb::check(frame->payload, h.keyframe); !why.empty()) {
             log::warn("video: h264 frame {} dropped: {}", h.seq, why);
             need_keyframe = true;
+            ask_for_keyframe();
             continue;
         }
         if (need_keyframe && !h.keyframe) {
             ++waited;
+            ask_for_keyframe();
             continue;
         }
-
-        // The viewer's device was lost and replaced: a new decoder on the new one.
-        if (const auto now = viewer_.gpu(); now != gpu || (!decoder && !decoder_missing)) {
-            gpu = now;
-            converter.reset();
-            std::string why;
-            decoder = H264Decoder::create(gpu && gpu->has_video() ? gpu : nullptr, why);
-            decoder_missing = !decoder;
-            if (!decoder) log::error("video: {}: h264 frames are not shown", why);
-            converter = std::make_unique<PictureConverter>(gpu);
-            if (decoder && !h.keyframe) {  // a new decoder starts at a keyframe
-                need_keyframe = true;
-                ++waited;
-                continue;
-            }
+        if (ensure_decoder() && !h.keyframe) {  // a new decoder starts at a keyframe
+            need_keyframe = true;
+            ++waited;
+            ask_for_keyframe();
+            continue;
         }
         if (!decoder) continue;
         need_keyframe = false;

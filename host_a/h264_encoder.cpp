@@ -54,6 +54,13 @@ std::vector<ComPtr<IMFActivate>> hardware_encoders(ID3D11Device* device) {
 
 }  // namespace
 
+bool H264Encoder::available(const GpuDevice& gpu) {
+    if (FAILED(MFStartup(MF_VERSION, MFSTARTUP_LITE))) return false;
+    const bool found = !hardware_encoders(gpu.device()).empty();
+    MFShutdown();
+    return found;
+}
+
 std::unique_ptr<H264Encoder> H264Encoder::create(std::shared_ptr<GpuDevice> gpu, const Options& options,
                                                  std::string& why) {
     if (!gpu || options.width <= 0 || options.height <= 0 || options.width % 2 || options.height % 2) {

@@ -46,6 +46,13 @@ std::vector<ComPtr<IMFActivate>> decoders() {
 
 }  // namespace
 
+bool H264Decoder::available() {
+    if (FAILED(MFStartup(MF_VERSION, MFSTARTUP_LITE))) return false;
+    const bool found = !decoders().empty();
+    MFShutdown();
+    return found;
+}
+
 std::unique_ptr<H264Decoder> H264Decoder::create(std::shared_ptr<GpuDevice> gpu, std::string& why) {
     auto dec = std::unique_ptr<H264Decoder>(new H264Decoder());
     dec->gpu_ = std::move(gpu);

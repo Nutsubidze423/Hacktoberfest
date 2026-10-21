@@ -16,7 +16,7 @@
 //   windows.set_video(channel);                  // each video connection (shared, both directions)
 //   per session:
 //     windows.attach(send, peer_w, peer_h);      // send = control messages to the peer
-//     windows.set_peer(hello);                   // the peer's hello: its screen, desk support
+//     windows.set_peer(hello);                   // the peer's hello: its screen, desk, codecs
 //     if (!kvm.handle(m) && !windows.handle(m)) { ... }
 //     windows.detach();                          // windows back here (after a grace period in desk mode)
 //   hotkey Ctrl+Alt+Shift+W -> windows.toggle();
@@ -41,7 +41,9 @@
 #include <stop_token>
 #include <string>
 #include <thread>
+#include <vector>
 
+#include "kvm/codec.h"
 #include "kvm/desk_region.h"
 #include "kvm/dpi.h"
 #include "kvm/protocol.h"
@@ -65,7 +67,10 @@ public:
     struct Options {
         int jpeg_quality = 75;
         int max_fps = 30;
-        std::string codec = "jpeg";  // or "h264" (--codec): windows sent to the viewer
+        // Windows sent to the viewer: H.264 when this PC encodes it (video_encode, from
+        // probe_video_codecs()) and the peer decodes it, unless --codec jpeg (kvm/codec.h).
+        codec::Choice codec = codec::Choice::Auto;
+        std::vector<std::string> video_encode = {"jpeg"};
         display::Side peer_side = display::Side::Right;  // where the VDD goes
         desk::Region* desk = nullptr;                    // desk mode; nullptr = off. Outlives the link.
         bool own_vdd = true;  // false: show the peer's windows but never attach this PC's VDD (--desk-no-vdd)
@@ -135,6 +140,8 @@ private:
     Sink send_;
     int peer_w_ = 1920;
     int peer_h_ = 1080;
+    codec::Decision codec_{"jpeg", "no peer yet"};   // mutex_: what windows sent to the viewer go as
+    std::atomic<bool> peer_knows_codecs_{false};  // its hello listed video_decode: it understands video_config
     std::shared_ptr<net::FrameChannel> video_;
     std::unique_ptr<FrameRouter> router_;
     std::unique_ptr<WindowShare> share_;

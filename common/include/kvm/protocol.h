@@ -64,6 +64,10 @@ struct Hello {
     std::string session_token;
     int video_port = 0;
     int file_port = 0;
+    // Window-stream codecs this PC can decode (show) and encode (send), e.g. ["h264", "jpeg"]
+    // (kvm/codec.h). Missing (an older Sarke) = JPEG only.
+    std::vector<std::string> video_decode;
+    std::vector<std::string> video_encode;
 };
 
 // Both directions (KVM), controller -> controlled. Either PC can be the controller: the side whose
@@ -234,6 +238,21 @@ struct Unpaired {
     static constexpr std::string_view kType = "unpaired";
 };
 
+// Window owner -> viewer, after stream_start (roadmap P2.5): what the window's frames will be, so the
+// viewer can get its decoder ready. Only to a PC whose hello listed video_decode.
+struct VideoConfig {
+    static constexpr std::string_view kType = "video_config";
+    std::string codec;  // "jpeg" or "h264"
+    int width = 0;
+    int height = 0;
+};
+
+// Viewer -> window owner: the viewer's H.264 decoder needs a keyframe (it starts, lost a frame, or a
+// frame failed the framing check). The owner rate-limits them.
+struct VideoKeyframe {
+    static constexpr std::string_view kType = "video_keyframe";
+};
+
 // Pairing (docs/SECURITY.md 6.3): the only messages accepted from a PC whose key isn't paired yet.
 // The PC whose user picked the other one sends pair_request. Each side shows the code derived from
 // its own TLS session and sends pair_confirm with its user's answer. Each stores the other only when
@@ -282,7 +301,8 @@ struct FrameHeader {
 };
 
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(Hello, protocol_version, screen_w, screen_h, dpi_scale, hostname, desk,
-                                                device_id, session_token, video_port, file_port)
+                                                device_id, session_token, video_port, file_port, video_decode,
+                                                video_encode)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(FocusEnter, y_norm, desk)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(FocusLeave, y_norm)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(MouseMove, dx, dy)
@@ -309,6 +329,11 @@ inline void to_json(nlohmann::json& j, const Unpaired&) {
     j = nlohmann::json::object();
 }
 inline void from_json(const nlohmann::json&, Unpaired&) {}
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(VideoConfig, codec, width, height)
+inline void to_json(nlohmann::json& j, const VideoKeyframe&) {
+    j = nlohmann::json::object();
+}
+inline void from_json(const nlohmann::json&, VideoKeyframe&) {}
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(PairRequest, name)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(PairConfirm, ok)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(PairResult, ok, reason)
@@ -316,9 +341,10 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(FrameHeader, seq, t_capture_us, 
                                                 x, y, desk_w, desk_h, rects, window, alpha_bytes)
 
 // Any message that travels on the control channel (port 50500).
-using Message = std::variant<Hello, FocusEnter, FocusLeave, MouseMove, MouseButtonEvent, MouseWheel, Key, StreamStart,
-                             StreamStop, RemoteMouseMove, Clipboard, Ping, Pong, DeskMove, DeskCursor, DeskLayout,
-                             Layout, Identify, PairRequest, PairConfirm, PairResult, Unpaired>;
+using Message =
+    std::variant<Hello, FocusEnter, FocusLeave, MouseMove, MouseButtonEvent, MouseWheel, Key, StreamStart, StreamStop,
+                 RemoteMouseMove, Clipboard, Ping, Pong, DeskMove, DeskCursor, DeskLayout, Layout, Identify,
+                 PairRequest, PairConfirm, PairResult, Unpaired, VideoConfig, VideoKeyframe>;
 
 // Serializes a message struct (including FrameHeader) to JSON with its "type" field set.
 template <class M>

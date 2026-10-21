@@ -16,6 +16,7 @@
 #pragma once
 
 #include <atomic>
+#include <chrono>
 #include <condition_variable>
 #include <cstdint>
 #include <memory>
@@ -51,8 +52,13 @@ public:
 
     // A captured frame (any thread; the capture's).
     void put(GpuFrame&& frame) { frames_.put(std::move(frame)); }
+    // The next picture becomes a keyframe (the viewer asked, proto::VideoKeyframe). At most one in
+    // kMinKeyframeGap: a viewer can't make every picture a keyframe.
+    void request_keyframe();
     // Stops both threads. Also done by the destructor.
     void stop();
+
+    static constexpr std::chrono::milliseconds kMinKeyframeGap{250};
 
     std::uint64_t frames_sent() const { return sent_; }
 
@@ -76,6 +82,7 @@ private:
     std::atomic<std::uint64_t> sent_{0};
     std::atomic<std::uint64_t> bytes_{0};
     std::atomic<bool> channel_closed_{false};
+    std::chrono::steady_clock::time_point last_keyframe_request_{};  // mutex_
 
     std::jthread feed_thread_;  // last: they start after the members above exist
     std::jthread send_thread_;

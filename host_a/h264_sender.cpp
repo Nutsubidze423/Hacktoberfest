@@ -50,6 +50,14 @@ H264Sender::~H264Sender() {
     stop();
 }
 
+void H264Sender::request_keyframe() {
+    std::lock_guard lock(mutex_);
+    const auto now = Clock::now();
+    if (now - last_keyframe_request_ < kMinKeyframeGap) return;
+    last_keyframe_request_ = now;
+    if (encoder_) encoder_->request_keyframe();
+}
+
 void H264Sender::stop() {
     feed_thread_.request_stop();
     send_thread_.request_stop();

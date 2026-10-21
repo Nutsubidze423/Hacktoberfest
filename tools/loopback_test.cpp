@@ -319,7 +319,7 @@ int wmain(int argc, wchar_t** argv) {
         {
             Program client(job, client_exe,
                            L"--config \"" + (dir / "client.json").wstring() + L"\" --host 127.0.0.1" + quiet +
-                               data(L"client-data") + L" --pair-with " + hex(*host_id),
+                               L" --codec jpeg" + data(L"client-data") + L" --pair-with " + hex(*host_id),
                            dir / "client.log");
             check(client.started() && wait_until([&] { return client.log_has("connected to host"); }, 15s),
                   "the client connects");
@@ -330,6 +330,13 @@ int wmain(int argc, wchar_t** argv) {
             // Both sides log the link every 5 s once the first ping/pong is through.
             check(wait_until([&] { return client.log_has("link: rtt") && host.log_has("link: rtt"); }, 15s),
                   "both sides log the link (rtt)");
+            // Codec negotiation (roadmap P2.5): each side picks for the windows it sends, from the
+            // other's hello. The client was told --codec jpeg; the host picks H.264 only with a hardware
+            // encoder (CI runners have none).
+            check(client.log_has("go as jpeg (--codec jpeg)"), "the client sends windows as JPEG: --codec jpeg");
+            check(host.log_has("go as h264 (both PCs can)") ||
+                      host.log_has("go as jpeg (no hardware H.264 encoder on this PC)"),
+                  "the host picks from the client's hello: H.264 if it has an encoder, else JPEG");
 
             kvm::log::info("5b) the host unpairs kvm_client");
             check(host.send_line("unpair " + kvm::tls::to_hex(*client_id)), "\"unpair <the client's ID>\" to the host");

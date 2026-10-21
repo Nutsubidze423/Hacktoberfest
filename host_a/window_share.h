@@ -71,6 +71,10 @@ public:
     std::uint64_t frames_sent() const { return h264_ ? h264_->frames_sent() : sender_ ? sender_->frames_sent() : 0; }
     // "h264" or "jpeg": what the frames are sent as.
     const char* codec() const { return h264_ ? "h264" : "jpeg"; }
+    // The viewer's decoder needs a keyframe (proto::VideoKeyframe). H.264 only; rate-limited.
+    void request_keyframe() {
+        if (h264_) h264_->request_keyframe();
+    }
 
 private:
     WindowShare() = default;

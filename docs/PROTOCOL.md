@@ -82,7 +82,7 @@ never hand-built JSON.
 
 | `type` | Direction | Fields |
 |---|---|---|
-| `hello` | client → host, then host → client (the answer) | `protocol_version`, `screen_w`, `screen_h`, `dpi_scale`, `hostname`, `desk` (desk mode on), `device_id` (64 hex, the sender's TLS key; for logs). The host's answer adds `session_token`, `video_port`, `file_port` (side channels, above) |
+| `hello` | client → host, then host → client (the answer) | `protocol_version`, `screen_w`, `screen_h`, `dpi_scale`, `hostname`, `desk` (desk mode on), `device_id` (64 hex, the sender's TLS key; for logs), `video_decode` and `video_encode` (the window-stream codecs the sender can show and send, e.g. `["h264","jpeg"]`; missing = an older Sarke, JPEG only). The host's answer adds `session_token`, `video_port`, `file_port` (side channels, above) |
 | `focus_enter` | controller → controlled | `y_norm` (where the cursor enters), `desk` (the cursor follows `desk_move`) |
 | `focus_leave` | both | `y_norm`. Controller → controlled: "I took input back". Controlled → controller: "your cursor came back over my edge" |
 | `mouse_move` | controller → controlled | `dx`, `dy` (relative) |
@@ -94,6 +94,8 @@ never hand-built JSON.
 | `desk_layout` | window owner → viewer | `desk_w`, `desk_h`, `active` (the owner's active window is on the VDD, so the viewer raises its overlay), `windows` [`id`, `x`, `y`, `w`, `h`] (the windows on the VDD, top to bottom). Moving a window sends only this message |
 | `stream_start` | window owner → viewer | `hwnd`, `title`, `width`, `height` |
 | `stream_stop` | both | `hwnd`. Owner → viewer: the stream stopped. Viewer → owner: "take it back" |
+| `video_config` | window owner → viewer, after `stream_start` | `codec` (`h264`/`jpeg`), `width`, `height`: what the frames will be, so the viewer can get its decoder ready. Only to a PC whose `hello` had `video_decode` |
+| `video_keyframe` | viewer → window owner | none. The viewer's H.264 decoder needs a keyframe: it started, lost a frame, or a frame failed the framing check. The viewer sends at most two a second, and the owner acts on at most four |
 | `remote_mouse_move` | viewer → window owner | `x_norm`, `y_norm` (in the streamed window, 0..1; the owner maps them onto the window's current client area) |
 | `clipboard` | both | `seq`, `kind` (`text` UTF-8, `png`, or `files`: the copied files' names, with the files going over 50502), `total`, `offset`, `data` (base64, at most 32 KB per message; one copy in several parts) |
 | `layout` | both (after `hello`, and on Displays → Apply) | `you_are` (`left`/`right`/`top`/`bottom`: where the **receiver** stands relative to the sender), `set_at` (ms when the user set it; 0 = never). The newer setting wins; on a tie, the host's. Each PC keeps every peer's side in `config.json` `"peers": {name: {side, set_at}}` ([layout_sync](../common/include/kvm/layout_sync.h)) |
@@ -133,5 +135,13 @@ An `h264` payload is one H.264 access unit in Annex-B form: NAL units, each afte
 A frame that fails is dropped.
 
 A viewer skips any codec it doesn't show, so an older viewer stays blank on `h264` but doesn't
-break. A window owner sends `h264` only when started with `--codec h264` (roadmap P2.4c). Once codecs
-are negotiated (P2.5), it will send it only to a viewer that said it can decode it.
+break.
+
+**Which codec a window goes as** ([kvm/codec.h](../common/include/kvm/codec.h)), decided by the window
+owner from the viewer's `hello`:
+- `h264` when the owner can encode it (a hardware encoder on its GPU), the viewer lists it in
+  `video_decode`, and the owner wasn't started with `--codec jpeg`;
+- else `jpeg`, which every Sarke shows. A viewer whose `hello` has no `video_decode` (an older Sarke)
+  gets JPEG.
+
+Both programs log the decision and its reason when a session starts.
