@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-#include "gpu_device.h"
+#include "kvm/gpu_device.h"
 
 #include <dxgi.h>
 

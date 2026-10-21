@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // One D3D11 device for capture, colour conversion and encode (roadmap P2.3a): frames stay on the GPU
-// from Windows.Graphics.Capture to the H.264 encoder, with no copy to the CPU.
+// from Windows.Graphics.Capture to the H.264 encoder, with no copy to the CPU. The viewer decodes on
+// one too (P2.4).
 //
 //   auto gpu = kvm::GpuDevice::create();          // nullptr: no hardware GPU (e.g. only WARP)
 //   auto cap = kvm::ScreenCapture::for_window(hwnd, false, gpu);

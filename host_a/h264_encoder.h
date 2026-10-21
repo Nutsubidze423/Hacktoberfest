@@ -34,7 +34,7 @@
 #include <thread>
 #include <vector>
 
-#include "gpu_device.h"
+#include "kvm/gpu_device.h"
 #include "kvm/protocol.h"
 #include "kvm/queue.h"
 
@@ -70,11 +70,12 @@ public:
     bool encode(ID3D11Texture2D* nv12, std::int64_t t_capture_us);
     // Encoded access units, in order. Closed when the encoder stops or fails.
     BlockingQueue<Packet>& packets() { return packets_; }
-    // The next picture becomes a keyframe (IDR).
+    // The next picture given to encode() becomes a keyframe (IDR). If that one is dropped while the
+    // encoder is busy, the newer picture that replaces it does.
     void request_keyframe() { keyframe_requested_ = true; }
     // Changes the bitrate from the next picture on.
     void set_bitrate(int bits_per_second);
-    // Waits up to `timeout` until every queued picture has come out as a packet.
+    // Waits up to `timeout` until every queued picture has come out: its packet is in packets() then.
     bool flush(std::chrono::milliseconds timeout);
 
     // The video channel header for `packet` (codec "h264", docs/PROTOCOL.md). `seq` counts the stream's frames.
@@ -87,8 +88,10 @@ public:
                 .keyframe = packet.keyframe};
     }
 
-    // Pictures dropped because the encoder was still busy with older ones.
+    // Pictures dropped because the encoder was still busy with older ones, and pictures the encoder
+    // itself skipped (an empty output).
     std::uint64_t dropped() const { return dropped_; }
+    std::uint64_t skipped() const { return empty_; }
 
     const std::string& name() const { return name_; }  // e.g. "Intel® Quick Sync Video H.264 Encoder MFT"
 
@@ -114,11 +117,16 @@ private:
     std::atomic<std::int64_t> time_base_us_{-1};  // the first picture's capture time: sample times start at 0
 
     std::mutex mutex_;  // the transform calls and the queues below
-    std::deque<Microsoft::WRL::ComPtr<IMFSample>> waiting_;
+    struct Waiting {
+        Microsoft::WRL::ComPtr<IMFSample> sample;
+        bool keyframe = false;
+    };
+    std::deque<Waiting> waiting_;
     int need_input_ = 0;
     std::uint64_t in_flight_ = 0;  // fed, not yet out
     std::condition_variable flushed_;
     std::atomic<std::uint64_t> dropped_{0};
+    std::atomic<std::uint64_t> empty_{0};
     std::atomic<bool> keyframe_requested_{false};
     std::atomic<bool> failed_{false};
     std::atomic<bool> stopping_{false};

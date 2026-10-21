@@ -29,10 +29,10 @@
 #include <vector>
 
 #include "capture.h"
-#include "gpu_device.h"
 #include "jpeg_encoder.h"
 #include "kvm/config.h"
 #include "kvm/dpi.h"
+#include "kvm/gpu_device.h"
 #include "kvm/log.h"
 #include "kvm/net.h"
 #include "nv12_converter.h"

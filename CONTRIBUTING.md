@@ -121,6 +121,9 @@ and should be extended rather than a test skipped:
 
 **Video**
 - Always send the newest frame: drop old ones, never queue them (`LatestSlot`).
+- H.264 changes where that happens, because a picture refers to the one before it:
+  - the viewer decodes every frame it receives, in order, and drops pictures instead;
+  - a sender that has to drop starts again at a keyframe (roadmap P2.6).
 
 **Protocol**
 - Every message is in [docs/PROTOCOL.md](docs/PROTOCOL.md); change it together with

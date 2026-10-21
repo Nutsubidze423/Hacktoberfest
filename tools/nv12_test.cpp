@@ -20,7 +20,7 @@
 #include <string_view>
 #include <vector>
 
-#include "gpu_device.h"
+#include "kvm/gpu_device.h"
 #include "kvm/log.h"
 #include "nv12_converter.h"
 

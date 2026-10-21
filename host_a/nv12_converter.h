@@ -15,7 +15,7 @@
 
 #include <memory>
 
-#include "gpu_device.h"
+#include "kvm/gpu_device.h"
 
 namespace kvm {
 

@@ -34,7 +34,7 @@
 #include <memory>
 #include <vector>
 
-#include "gpu_device.h"
+#include "kvm/gpu_device.h"
 #include "kvm/queue.h"
 
 namespace kvm {

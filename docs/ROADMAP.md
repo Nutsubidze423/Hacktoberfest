@@ -1011,7 +1011,7 @@ Attempts are rate-limited.
   - **P2.3c** (S): `codec:"h264"` in `FrameHeader`, with an Annex-B payload.
   - **Tests:** `tools/h264_test.cpp`, label `gpu`: GPU encode → MF decode → PSNR above a threshold, plus the time per frame. Whether it runs in CI with the software MFT is checked here.
   - **P2.3a result (2026-10-21):**
-    - **[host_a/gpu_device.h](../host_a/gpu_device.h):** one hardware D3D11 device with video support, multithread-protected (`ID3D10Multithread`), and a `GpuDevice::Lock` around the immediate context.
+    - **[kvm/gpu_device.h](../common/include/kvm/gpu_device.h):** one hardware D3D11 device with video support, multithread-protected (`ID3D10Multithread`), and a `GpuDevice::Lock` around the immediate context.
     - **`ScreenCapture`** can capture on it (`for_window` / `for_monitor` take a `GpuDevice`). `start_gpu()` hands over a GPU copy of each WGC texture instead of CPU pixels.
     - **[host_a/nv12_converter.h](../host_a/nv12_converter.h):** BGRA → NV12 with `ID3D11VideoProcessor`; BT.709 is set on both sides (full-range RGB in, limited-range YCbCr out).
     - **Tests** (new label `gpu`: in `ctest --preset local`, not in CI):
@@ -1055,12 +1055,44 @@ Attempts are rate-limited.
     - **Plan change: nothing sends `h264` yet.** The host's capture → encoder → channel path comes with P2.4, the first viewer able to show it, and P2.5 then decides when it may be sent.
     - **Tests share `kvm::test::listen_loopback`** ([tools/side_channel_util.h](../tools/side_channel_util.h)) instead of two copies.
 
-- [ ] **P2.4 Hardware decode and a D3D11 renderer on the viewer** (M), branch `phase2/decode`.
+- [ ] **P2.4 Hardware decode and a D3D11 renderer on the viewer** (M → split into a/b/c), branch `phase2/decode`.
   - **Files:** new `client_b/h264_decoder.*` (MF DXVA decoder with D3D11 output), and [client_b/viewer_window.cpp](../client_b/viewer_window.cpp) moves from a D2D `HwndRenderTarget` to a flip-model swapchain:
     - `DXGI_SWAP_EFFECT_FLIP_DISCARD` and a waitable object;
     - NV12→RGB through the video processor or a shader;
     - JPEG frames are uploaded as textures through the same path.
+  - **P2.4a** (S): the decoder.
+    - `GpuDevice` moves to `common`, so the viewer has one too.
+    - `h264_test` decodes on the GPU and compares (the PSNR check from P2.3).
+    - `h264_decode_test` decodes a committed sample in software, in CI.
+  - **P2.4b** (M): the viewer's swapchain (the list above). `VideoReceiver` decodes every `h264` frame in order and shows the newest picture.
+  - **P2.4c** (S): the host sends `h264` (behind a `--codec h264` switch until P2.5), and the HUD numbers.
   - **Done when:** HUD numbers for H.264 and JPEG are side by side in PERF.md.
+  - **P2.4a result (2026-10-21):**
+    - **[client_b/h264_decoder.h](../client_b/h264_decoder.h):** Media Foundation's H.264 decoder ("Microsoft H264 Video Decoder MFT", synchronous), in low-latency mode.
+      - Given a GpuDevice it decodes on it through DXVA: pictures are NV12 textures (a slice of the decoder's texture array), kept by their sample until released.
+      - Without one, it decodes in software into memory.
+      - The size to show comes from the stream's cropping (1080 of 1088 rows).
+    - **Found:** the decoder works on threads of its own. In software, now and then an access unit's picture wasn't done when asked for: 23 of 200 runs of 10 access units.
+      - Draining after each access unit made it drop its references: only the first picture decoded.
+      - One worker thread didn't help either.
+      - So `decode()` waits for the access unit's own picture, up to 100 ms (a yield, then 1 ms sleeps). After that: 0 of 300 runs.
+      - Without the wait, a still screen's last picture could have stayed inside the decoder.
+    - **[kvm/gpu_device.h](../common/include/kvm/gpu_device.h)** is in `common` now. [kvm/mf_util.h](../common/include/kvm/mf_util.h) holds what the encoder and decoder share.
+    - **`h264_test`** (gpu), 5 runs, decoding the 60 access units on a device of its own (like the viewer's):
+      - all 60 decoded on the GPU, each `decode()` gave its own picture, 1920×1080;
+      - a `decode()` call: p50 0.6–0.7 ms, p95 1.0–2.0 ms (the call; the GPU may still be finishing);
+      - luma PSNR against the source: mean 55.9 dB, lowest 55.2 dB, floor 30. Against the source 10 frames later: 28.0 dB, so the comparison tells pictures apart.
+      - The content is smooth synthetic gradients. Real window content gets its numbers with P2.4c's HUD ([PERF.md](PERF.md)).
+    - **`h264_decode_test`** (unit, so CI runs it): decodes [tools/data/h264_sample.h264](../tools/data/h264_sample.h264) in software.
+      - The sample is 1,034 bytes: 10 pictures of 320×240, written by `h264_test --write-sample`.
+      - 10 of 10 pictures, 320×240, the quadrants' colours exact (worst 0 levels off; tolerance 6), in 300 runs.
+      - **It passes in CI too:** GitHub's Windows runners have Media Foundation's H.264 decoder. That answers P2.3's open question for decoding; the encoder in CI stays open, since `h264_test` needs a hardware one.
+    - **Rule:** the viewer decodes every `h264` frame, in order, because a picture refers to the one before it. It drops pictures, not frames. CONTRIBUTING.md says so.
+    - **Two encoder (P2.3b) bugs found by running `h264_test` many times:**
+      - **`flush()` could return before the last packet was in `packets()`.** The packet was counted out before it was queued. It showed in one `ctest --preset local` run (59 of 60) and in 1 of 12 runs with a busy CPU core. The packet is now queued first: 0 losses in the next 50 runs (40 with a busy core).
+      - **`request_keyframe()` went to whichever picture was fed next.** That could be an older picture still waiting. It now goes to the next picture given to `encode()`, or to the newer one if that is dropped. In 30 runs the requested picture was the IDR every time.
+    - **With a busy CPU core** (a second program spinning on this 2-core Celeron) the encoder drops up to 4 of 60 pictures while busy. That is by design: the newest wins. Once in 20 runs that broke `h264_test`'s limit of 3, which is meant for an idle PC.
+    - `ctest --preset local` 37/37; 38/38 with P2.1 and P2.2 merged into the stack.
 
 - [ ] **P2.5 Codec negotiation and fallback** (S), branch `phase2/negotiate`.
   - **Protocol:**
