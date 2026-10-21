@@ -1001,7 +1001,7 @@ Attempts are rate-limited.
       - HEVC is encoded in hardware and the GPU decodes it, but without a decoder MFT (that needs the Store's HEVC Video Extensions).
       - No AV1. No 4:4:4 input on any encoder.
 
-- [ ] **P2.3 H.264 encoder on the GPU, zero-copy from WGC** (L → split into a/b/c).
+- [x] **P2.3 H.264 encoder on the GPU, zero-copy from WGC** (L → split into a/b/c).
   - **P2.3a** (M): one shared D3D11 device for capture and encode (`ID3D10Multithread` protection). BGRA → NV12 on the GPU with `ID3D11VideoProcessor`.
   - **P2.3b** (M): new `host_a/h264_encoder.{h,cpp}`:
     - Media Foundation hardware MFT (async event model, `MF_TRANSFORM_ASYNC_UNLOCK`, `IMFDXGIDeviceManager`);
@@ -1034,6 +1034,26 @@ Attempts are rate-limited.
     - `ctest --preset local` 35/35.
     - **Plan change: the PSNR check moves to P2.4,** where a decoder exists to turn the stream back into pixels.
     - **Not in CI:** whether the software MFT can stand in on CI runners is left for P2.4's decode test; `h264_test` needs the hardware encoder.
+  - **P2.3c result (2026-10-21):**
+    - **`FrameHeader`:**
+      - `codec: "h264"`: the payload is one H.264 access unit in Annex-B form;
+      - new `keyframe`: an IDR picture with SPS and PPS in front, where a viewer can start decoding;
+      - `H264Encoder::header_for()` builds the header for a packet.
+      - The field is new but optional, so no protocol bump: an older peer ignores it, and its headers read as `keyframe: false`. Viewers already skip codecs they don't show ([PROTOCOL.md](PROTOCOL.md)).
+    - **[kvm/annexb.h](../common/include/kvm/annexb.h):** the framing check a viewer will run on a payload from the other PC before a decoder sees it:
+      - the payload starts with a start code;
+      - no NAL unit is empty, has the forbidden bit set, or has a type H.264 doesn't define for a stream;
+      - it holds one picture;
+      - the keyframe flag matches, with SPS and PPS before an IDR picture.
+      - Header-only, so it is fuzzed with ASan.
+    - **Tests:**
+      - `annexb_test` (unit, CI): 20 checks, including what an encoder writes, length-prefixed (AVCC) data, an RTP fragment type, and an IDR picture without SPS/PPS;
+      - `protocol_test`: the flag round-trips, and an older header reads as not a keyframe;
+      - `h264_test`, 5 runs: every one of the 60 access units passed the check (Intel repeats SPS and PPS on a requested keyframe, so the encoder needs no change), and all 60 arrived intact over a TLS video channel on 127.0.0.1 as `h264` frames with the right flag;
+      - `fuzz_annexb` (new): **10 minutes**, 3,312,570 inputs, no crash or ASan report, 1,328 new corpus units. `fuzz_protocol`, 1 minute with an `h264` header seed: clean;
+      - `ctest --preset local` 36/36.
+    - **Plan change: nothing sends `h264` yet.** The host's capture → encoder → channel path comes with P2.4, the first viewer able to show it, and P2.5 then decides when it may be sent.
+    - **Tests share `kvm::test::listen_loopback`** ([tools/side_channel_util.h](../tools/side_channel_util.h)) instead of two copies.
 
 - [ ] **P2.4 Hardware decode and a D3D11 renderer on the viewer** (M), branch `phase2/decode`.
   - **Files:** new `client_b/h264_decoder.*` (MF DXVA decoder with D3D11 output), and [client_b/viewer_window.cpp](../client_b/viewer_window.cpp) moves from a D2D `HwndRenderTarget` to a flip-model swapchain:

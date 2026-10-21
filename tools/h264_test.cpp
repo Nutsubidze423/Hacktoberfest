@@ -1,13 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// h264_test: H.264 on the GPU (host_a/h264_encoder.h, roadmap P2.3b). Needs a hardware H.264 encoder
+// h264_test: H.264 on the GPU (host_a/h264_encoder.h, roadmap P2.3b/c). Needs a hardware H.264 encoder
 // (ctest label "gpu": local only). 60 moving 1920x1080 pictures at 30 fps go BGRA -> NV12 -> encoder,
 // and it checks:
 //   - every picture comes out as one Annex-B access unit, unless the encoder was still busy (a few may be
 //     dropped then: the newest picture counts);
-//   - the first is a keyframe with SPS, PPS and an IDR picture;
+//   - each passes the viewer's framing check (kvm/annexb.h): the first is a keyframe with SPS, PPS and
+//     an IDR picture, and so is every other keyframe;
 //   - a keyframe follows request_keyframe(), and otherwise there are none (a long GOP);
-//   - capture -> encoded time and the bitrate against the target (printed).
+//   - capture -> encoded time and the bitrate against the target (printed);
+//   - on the video channel (TLS over 127.0.0.1), every access unit arrives as a "h264" frame with
+//     its keyframe flag, byte for byte.
 // Decoding it back and comparing (PSNR) comes with the decoder, P2.4.
 //
 //   h264_test.exe   (exit code 0 = all passed)
@@ -28,9 +31,12 @@
 
 #include "gpu_device.h"
 #include "h264_encoder.h"
+#include "kvm/annexb.h"
 #include "kvm/log.h"
 #include "kvm/net.h"
+#include "kvm/video.h"
 #include "nv12_converter.h"
+#include "side_channel_util.h"
 
 using Microsoft::WRL::ComPtr;
 using namespace std::chrono_literals;
@@ -48,13 +54,41 @@ struct Checks {
 // The NAL unit types in an Annex-B access unit (5 = IDR picture, 7 = SPS, 8 = PPS, 1 = other picture).
 std::set<int> nal_types(const std::vector<std::uint8_t>& au) {
     std::set<int> types;
-    for (std::size_t i = 0; i + 3 < au.size(); ++i) {
-        if (au[i] == 0 && au[i + 1] == 0 && au[i + 2] == 1) {
-            types.insert(au[i + 3] & 0x1F);
-            i += 2;
-        }
-    }
+    for (const auto& nal : kvm::annexb::split(au)) types.insert(nal.type);
     return types;
+}
+
+// Sends `packets` over a video channel on 127.0.0.1 the way kvm_host will, and returns what the viewer
+// side received.
+std::vector<kvm::net::Frame> over_the_wire(const kvm::H264Encoder& encoder,
+                                           const std::vector<kvm::H264Encoder::Packet>& packets) {
+    std::uint16_t port = 0;
+    const SOCKET listener = kvm::test::listen_loopback(port);
+    const kvm::test::Session session;
+    std::unique_ptr<kvm::net::FrameChannel> host;
+    std::thread acceptor([&] {
+        if (auto b = kvm::test::admit_socket(accept(listener, nullptr, nullptr), session, "video", "viewer")) {
+            host = std::make_unique<kvm::net::FrameChannel>(std::move(*b));
+        }
+    });
+    auto viewer = kvm::net::connect_video("127.0.0.1", port, session.client, session.host.id(), session.token);
+    acceptor.join();
+    closesocket(listener);
+    std::vector<kvm::net::Frame> received;
+    if (!host || !viewer) return received;
+    std::thread sender([&] {
+        std::uint32_t seq = 0;
+        for (const auto& packet : packets) host->send_frame(encoder.header_for(packet, seq++), packet.annexb);
+    });
+    while (received.size() < packets.size()) {
+        auto frame = viewer->recv_frame();
+        if (!frame) break;
+        received.push_back(std::move(*frame));
+    }
+    sender.join();
+    host->close();
+    viewer->close();
+    return received;
 }
 
 constexpr int kWidth = 1920, kHeight = 1080, kFps = 30, kFrames = 60, kBitrate = 8'000'000, kKeyframeAt = 30;
@@ -147,6 +181,18 @@ int main() {
         });
         check(requested, "request_keyframe(): the next picture is an IDR");
         check(idr.size() == 2, std::format("no other keyframes (a long GOP): {} IDR pictures in all", idr.size()));
+        std::size_t framed = 0;
+        for (std::size_t i = 0; i < out.size(); ++i) {
+            const auto refused = kvm::annexb::check(out[i].annexb, out[i].keyframe);
+            if (refused.empty()) {
+                ++framed;
+            } else {
+                kvm::log::info("       access unit {} refused: {}", i, refused);
+            }
+        }
+        check(framed == out.size(),
+              std::format("{} of {} pass the viewer's framing check (SPS and PPS with every keyframe)", framed,
+                          out.size()));
 
         std::vector<double> latency;
         std::size_t bytes = 0;
@@ -160,6 +206,17 @@ int main() {
                        latency[latency.size() / 2], latency[latency.size() * 95 / 100]);
         check(mbps > 0.25 * kBitrate / 1e6 && mbps < 2.0 * kBitrate / 1e6,
               std::format("{:.2f} Mbit/s for a {:.1f} Mbit/s target", mbps, kBitrate / 1e6));
+
+        const auto received = over_the_wire(*encoder, out);
+        bool intact = received.size() == out.size();
+        for (std::size_t i = 0; intact && i < received.size(); ++i) {
+            const auto& h = received[i].header;
+            intact = h.codec == "h264" && h.seq == i && h.keyframe == out[i].keyframe && h.width == kWidth &&
+                     h.height == kHeight && h.t_capture_us == out[i].t_capture_us &&
+                     received[i].payload == out[i].annexb;
+        }
+        check(intact, std::format("video channel: {} of {} arrived as \"h264\" frames, keyframe flag and bytes intact",
+                                  received.size(), out.size()));
     }
 
     if (check.failed) {

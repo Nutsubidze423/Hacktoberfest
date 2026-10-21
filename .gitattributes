@@ -2,3 +2,5 @@
 * text=auto
 *.cmd text eol=crlf
 *.ps1 text eol=crlf
+# Fuzz seeds: raw H.264 bytes.
+*.h264 binary

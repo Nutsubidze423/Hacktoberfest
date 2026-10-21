@@ -25,7 +25,7 @@ endforeach()
 set(KVM_UNIT_TESTS
     protocol_test queue_test layout_sync_test display_layout_test launcher_test dpi_test video_test
     video_sender_test file_transfer_test net_listen_test tls_test identity_test paired_test discovery_test
-    preauth_test video_stats_test)
+    preauth_test video_stats_test annexb_test)
 set(KVM_DESKTOP_TESTS
     win32_input_test input_capture_test input_inject_test kvm_link_test clipboard_test file_drop_test
     file_drag_test)

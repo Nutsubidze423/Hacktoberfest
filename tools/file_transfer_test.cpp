@@ -87,23 +87,6 @@ bool same_file(const fs::path& a, const fs::path& b) {
     return fs::exists(a) && fs::exists(b) && read_file(a) == read_file(b);
 }
 
-// Listens on 127.0.0.1 only (a free port), so Windows Firewall doesn't ask anything.
-SOCKET listen_loopback(std::uint16_t& port) {
-    kvm::net::ensure_winsock();
-    const SOCKET s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-    sockaddr_in addr{};
-    addr.sin_family = AF_INET;
-    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-    int len = sizeof(addr);
-    if (s == INVALID_SOCKET || bind(s, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) != 0 || listen(s, 1) != 0 ||
-        getsockname(s, reinterpret_cast<sockaddr*>(&addr), &len) != 0) {
-        if (s != INVALID_SOCKET) closesocket(s);
-        return INVALID_SOCKET;
-    }
-    port = ntohs(addr.sin_port);
-    return s;
-}
-
 // One framed message, written by hand like a peer that doesn't play by the rules would.
 bool raw_send(kvm::tls::Stream& s, const nlohmann::json& header, std::string_view payload = {}) {
     const std::string h = header.dump();
@@ -163,7 +146,7 @@ int main() {
     kvm::log::info("2-4) two FileTransfers over 127.0.0.1");
     {
         std::uint16_t port = 0;
-        const SOCKET listener = listen_loopback(port);
+        const SOCKET listener = kvm::test::listen_loopback(port);
         Inbox inbox_a, inbox_b;
         const kvm::test::Session session;
         std::unique_ptr<kvm::files::FileTransfer> a;
@@ -218,7 +201,7 @@ int main() {
     kvm::log::info("5) a hostile peer");
     {
         std::uint16_t port = 0;
-        const SOCKET listener = listen_loopback(port);
+        const SOCKET listener = kvm::test::listen_loopback(port);
         const fs::path dst_v = root / L"dst_victim";
         Inbox inbox_v;
         // A paired peer inside the session: the paths it sends are still checked (safe_destination).

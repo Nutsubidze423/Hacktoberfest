@@ -260,13 +260,17 @@ struct PairResult {
 // from the newest desk_layout, offset by (x, y). The payload is the JPEG, followed by `alpha_bytes`
 // of its transparency (rounded corners): per row, runs of [u8 alpha][u16 count, little-endian];
 // alpha_bytes 0 = fully opaque. The JPEG's colours are premultiplied by that alpha.
+// codec "h264" (window streams): the payload is one H.264 access unit in Annex-B form (kvm/annexb.h);
+// keyframe = it is an IDR picture with SPS and PPS in front, where a viewer can start decoding.
+// A viewer skips codecs it doesn't show.
 struct FrameHeader {
     static constexpr std::string_view kType = "frame";
     std::uint32_t seq = 0;
     std::int64_t t_capture_us = 0;  // A's monotonic clock
     int width = 0;
     int height = 0;
-    std::string codec = "jpeg";
+    std::string codec = "jpeg";  // "jpeg" or "h264"
+    bool keyframe = false;  // h264 only
     std::string layer;
     int x = 0;
     int y = 0;
@@ -308,8 +312,8 @@ inline void from_json(const nlohmann::json&, Unpaired&) {}
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(PairRequest, name)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(PairConfirm, ok)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(PairResult, ok, reason)
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(FrameHeader, seq, t_capture_us, width, height, codec, layer, x, y,
-                                                desk_w, desk_h, rects, window, alpha_bytes)
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(FrameHeader, seq, t_capture_us, width, height, codec, keyframe, layer,
+                                                x, y, desk_w, desk_h, rects, window, alpha_bytes)
 
 // Any message that travels on the control channel (port 50500).
 using Message = std::variant<Hello, FocusEnter, FocusLeave, MouseMove, MouseButtonEvent, MouseWheel, Key, StreamStart,

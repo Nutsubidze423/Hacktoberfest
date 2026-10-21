@@ -6,7 +6,8 @@
 //
 //   auto enc = kvm::H264Encoder::create(gpu, {.width = 1920, .height = 1080, .fps = 30, .bitrate = 8'000'000});
 //   enc->encode(nv12.convert(bgra, w, h), t_capture_us);   // returns at once
-//   while (auto packet = enc->packets().pop_for(...)) { ... send packet->annexb ... }
+//   while (auto packet = enc->packets().pop_for(...))
+//       channel.send_frame(enc->header_for(*packet, seq++), packet->annexb);
 //   enc->request_keyframe();                                 // the viewer lost a frame, or a new viewer
 //
 // Low latency (CODECAPI_AVLowLatencyMode), no B-frames, and a long GOP: a keyframe at the start and
@@ -34,6 +35,7 @@
 #include <vector>
 
 #include "gpu_device.h"
+#include "kvm/protocol.h"
 #include "kvm/queue.h"
 
 namespace kvm {
@@ -74,6 +76,16 @@ public:
     void set_bitrate(int bits_per_second);
     // Waits up to `timeout` until every queued picture has come out as a packet.
     bool flush(std::chrono::milliseconds timeout);
+
+    // The video channel header for `packet` (codec "h264", docs/PROTOCOL.md). `seq` counts the stream's frames.
+    proto::FrameHeader header_for(const Packet& packet, std::uint32_t seq) const {
+        return {.seq = seq,
+                .t_capture_us = packet.t_capture_us,
+                .width = options_.width,
+                .height = options_.height,
+                .codec = "h264",
+                .keyframe = packet.keyframe};
+    }
 
     // Pictures dropped because the encoder was still busy with older ones.
     std::uint64_t dropped() const { return dropped_; }
