@@ -10,8 +10,9 @@
 //   --no-desk     no desk mode (the client's screen as one more monitor); Ctrl+Alt+Shift+W uses the viewer
 //   --no-discovery  don't answer other PCs looking for hosts (tests: no other PC can find this one)
 //   --stats <file.csv>  one row per video frame shown on this PC (kvm/video_stats.h, docs/PERF.md)
-//   --codec h264  windows sent to the other PC's viewer go as H.264, encoded on the GPU (roadmap
-//                 P2.4c; the other PC needs this version to show them). JPEG without a hardware encoder.
+//   --codec jpeg  windows sent to the other PC's viewer always go as JPEG. The default (auto, or
+//                 h264): H.264 encoded on the GPU when this PC can and the other PC decodes it
+//                 (kvm/codec.h), else JPEG.
 //   --data-dir ... --recreate-identity: this PC's identity and paired PCs, see kvm/trust.h
 //   --test-video  send synthetic frames (codec "test", random bytes, default 250 KB at 30 fps) so
 //                 network throughput and video latency can be measured before capture/viewer exist
@@ -35,6 +36,7 @@
 #include <windows.h>
 
 #include "kvm/clipboard.h"
+#include "kvm/codec.h"
 #include "kvm/config.h"
 #include "kvm/desk_region.h"
 #include "kvm/discovery.h"
@@ -53,6 +55,7 @@
 #include "kvm/video.h"
 #include "kvm/video_stats.h"
 #include "virtual_display.h"
+#include "video_codecs.h"
 #include "window_link.h"
 
 namespace {
@@ -69,7 +72,7 @@ struct Options {
     bool clipboard = true;
     bool desk = true;  // --no-desk, config "desk"
     bool discovery = true;  // --no-discovery
-    std::string codec = "jpeg";  // --codec
+    kvm::codec::Choice codec = kvm::codec::Choice::Auto;  // --codec
     kvm::trust::Options trust;
     bool test_video = false;
     int test_video_kb = 250;
@@ -78,6 +81,7 @@ struct Options {
 
 std::atomic<bool> g_running{true};
 std::string g_device_id;  // this PC's device ID (hex), sent in hello
+kvm::VideoCodecs g_codecs;  // what this PC decodes and encodes, sent in hello
 std::atomic<kvm::net::Server*> g_server{nullptr};
 std::atomic<kvm::net::VideoServer*> g_video_server{nullptr};
 std::atomic<kvm::files::FileServer*> g_file_server{nullptr};
@@ -198,6 +202,8 @@ proto::Hello make_hello(bool desk) {
         .hostname = narrow(std::wstring_view(name, name_len)),
         .desk = desk,
         .device_id = g_device_id,
+        .video_decode = g_codecs.decode,
+        .video_encode = g_codecs.encode,
     };
 }
 
@@ -361,7 +367,13 @@ Options parse_args(int argc, wchar_t** argv) {
         } else if (arg == L"--no-discovery") {
             opt.discovery = false;
         } else if (arg == L"--codec" && has_value) {
-            opt.codec = std::wstring_view(argv[++i]) == L"h264" ? "h264" : "jpeg";
+            const std::wstring_view v = argv[++i];
+            const auto choice = kvm::codec::parse(narrow(v));
+            if (choice) {
+                opt.codec = *choice;
+            } else {
+                kvm::log::warn("--codec: auto, h264 or jpeg");
+            }
         } else if (arg == L"--stats" && has_value) {
             const std::filesystem::path csv = argv[++i];
             if (!kvm::video_stats().open_csv(csv)) kvm::log::warn("stats: can't write {}", csv.string());
@@ -392,6 +404,7 @@ int wmain(int argc, wchar_t** argv) {
         if (!trust) return 1;
         if (opt.trust.print_id) return 0;
         g_device_id = kvm::tls::to_hex(trust->me.id());
+        g_codecs = kvm::probe_video_codecs();
 
         const kvm::Config cfg = kvm::load_config(opt.config_path);
         opt.desk = opt.desk && cfg.desk;
@@ -445,6 +458,7 @@ int wmain(int argc, wchar_t** argv) {
         kvm::WindowLink windows({.jpeg_quality = cfg.jpeg_quality,
                                  .max_fps = cfg.max_fps,
                                  .codec = opt.codec,
+                                 .video_encode = g_codecs.encode,
                                  .peer_side = side.value_or(kvm::display::Side::Right),
                                  .desk = desk});
         // Ctrl+Alt+Shift+Q also ends desk mode (the hooks that keep the cursor off the VDD are gone).

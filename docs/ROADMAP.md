@@ -1141,13 +1141,36 @@ Attempts are rate-limited.
     - `ctest --preset local` 39/39.
     - **P2.4 is ticked:** the H.264 and JPEG HUD numbers are side by side in PERF.md.
 
-- [ ] **P2.5 Codec negotiation and fallback** (S), branch `phase2/negotiate`.
+- [x] **P2.5 Codec negotiation and fallback** (S), branch `phase2/negotiate`.
   - **Protocol:**
     - `hello.video_decode: ["h264","jpeg"]`, `hello.video_encode: [...]`;
     - new `video_keyframe` (viewer → owner);
     - new `video_config{codec,width,height}` (owner → viewer).
   - JPEG is always available. A `--codec jpeg` switch forces the fallback.
   - **Tests:** unit for the selection rules; loopback with forced JPEG.
+  - **P2.5 result (2026-10-21):**
+    - **[kvm/codec.h](../common/include/kvm/codec.h):** the window owner picks, from the viewer's hello:
+      - `h264` when it can encode it and the viewer can decode it;
+      - `jpeg` otherwise, or with `--codec jpeg`.
+      - An older Sarke's hello has no list, so it gets JPEG and still shows the window.
+      - Both programs log the decision and why: "both PCs can", "--codec jpeg", "no hardware H.264 encoder on this PC", "the other PC is an older Sarke", "the other PC can't decode H.264".
+    - **The default is now H.264 when both PCs can.** `--codec auto|h264|jpeg` on kvm_host and kvm_client; `auto` and `h264` mean the same.
+    - **What the hello lists** ([host_a/video_codecs.h](../host_a/video_codecs.h)), probed once at start (only looked up, not started):
+      - `jpeg` always;
+      - `h264` to decode when Media Foundation has a decoder;
+      - `h264` to encode when the GPU has a hardware encoder.
+    - **`video_config`** (after `stream_start`, only to a PC whose hello had the list): the viewer starts its H.264 decoder before the first frame arrives.
+    - **`video_keyframe`:** a viewer waiting for a keyframe (new decoder, lost frame, failed framing check) asks for one. The viewer sends at most two a second, and the owner acts on at most four (`H264Sender::kMinKeyframeGap`). The 2 s keyframe interval stays until P2.6 measures what is needed.
+    - **Tests:**
+      - `codec_test` (unit): the rule, 6 checks;
+      - `protocol_test`: the new fields and messages, and an older hello;
+      - `loopback_test`: the real client started with `--codec jpeg` logs "go as jpeg (--codec jpeg)". The host logs its pick from the client's hello: H.264 here, JPEG on CI's runners, which have no GPU encoder.
+      - `fuzz_protocol`, 2 minutes with seeds for the new messages: clean.
+    - **End to end on this PC:**
+      - kvm_host and kvm_client, both without `--codec`, logged "decodes H.264 and JPEG, encodes H.264 (on the GPU) and JPEG";
+      - both logged "go as h264 (both PCs can)";
+      - the shared window streamed as H.264.
+    - `ctest --preset local` 40/40.
 
 - [ ] **P2.6 Keyframes, resizes and bitrate adaptation** (M), branch `phase2/adapt`.
   - **Keyframes:** a keyframe on stream start, on a decoder error and on request.

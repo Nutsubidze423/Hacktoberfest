@@ -53,6 +53,8 @@ public:
     // nullptr with `why` set if Media Foundation has no H.264 decoder here (e.g. Windows N without the
     // Media Feature Pack).
     static std::unique_ptr<H264Decoder> create(std::shared_ptr<GpuDevice> gpu, std::string& why);
+    // Whether Media Foundation has an H.264 decoder here (it is only looked up, not started).
+    static bool available();
     ~H264Decoder();
     H264Decoder(const H264Decoder&) = delete;
     H264Decoder& operator=(const H264Decoder&) = delete;

@@ -4,14 +4,17 @@
 // DeskView overlay, window-stream frames to the viewer window through a WindowStream (the newest
 // JPEG, or every H.264 frame in order; latency from the owner's capture time).
 //
-//   kvm::FrameRouter router(*channel, viewer, &desk_view);   // declare after `channel`
+//   kvm::FrameRouter router(*channel, viewer, &desk_view, [&] { send(proto::VideoKeyframe{}); });
 //   router.set_clock_offset_us(stats.clock_offset_us);
+//   router.prepare("h264");                                  // proto::VideoConfig
 //
 // Destroying it closes the channel (the only way to wake recv_frame()) and joins its threads.
 #pragma once
 
 #include <atomic>
 #include <cstdint>
+#include <functional>
+#include <string>
 #include <thread>
 
 #include "../client_b/desk_view.h"
@@ -23,7 +26,9 @@ namespace kvm {
 
 class FrameRouter {
 public:
-    FrameRouter(net::FrameChannel& channel, ViewerWindow& viewer, DeskView* desk);
+    // request_keyframe: the viewer's H.264 decoder needs a keyframe (send the owner proto::VideoKeyframe).
+    FrameRouter(net::FrameChannel& channel, ViewerWindow& viewer, DeskView* desk,
+                std::function<void()> request_keyframe = {});
     ~FrameRouter();
 
     FrameRouter(const FrameRouter&) = delete;
@@ -35,6 +40,8 @@ public:
         has_clock_offset_ = true;
         window_.set_clock_offset_us(offset);
     }
+    // The owner's window is coming as `codec` (proto::VideoConfig): get the decoder ready.
+    void prepare(const std::string& codec) { window_.prepare(codec); }
 
 private:
     void read_loop();

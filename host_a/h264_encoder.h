@@ -60,6 +60,8 @@ public:
     // won't take these settings.
     static std::unique_ptr<H264Encoder> create(std::shared_ptr<GpuDevice> gpu, const Options& options,
                                                std::string& why);
+    // Whether `gpu`'s adapter has a hardware H.264 encoder (it is only looked up, not started).
+    static bool available(const GpuDevice& gpu);
     ~H264Encoder();
     H264Encoder(const H264Encoder&) = delete;
     H264Encoder& operator=(const H264Encoder&) = delete;

@@ -171,7 +171,10 @@ void WindowLink::set_video(std::shared_ptr<net::FrameChannel> channel) {
         std::lock_guard lock(video_mutex_);  // never together with mutex_ (see the header)
         old_router = std::move(router_);
         old_video = std::exchange(video_, std::move(channel));
-        if (video_ && viewer) router_ = std::make_unique<FrameRouter>(*video_, *viewer, desk_view_.get());
+        if (video_ && viewer) {
+            router_ = std::make_unique<FrameRouter>(*video_, *viewer, desk_view_.get(),
+                                                    [this] { send(proto::VideoKeyframe{}); });
+        }
     }
     old_router.reset();  // closes the old channel and joins its reader, outside the lock
 }
@@ -197,6 +200,12 @@ void WindowLink::set_peer_screen(int peer_w, int peer_h) {
 
 void WindowLink::set_peer(const proto::Hello& hello) {
     set_peer_screen(hello.screen_w, hello.screen_h);
+    peer_knows_codecs_ = !hello.video_decode.empty();
+    {
+        std::lock_guard lock(mutex_);
+        codec_ = codec::choose(options_.codec, options_.video_encode, hello.video_decode);
+        log::info("video: windows sent to '{}' go as {} ({})", hello.hostname, codec_.codec, codec_.why);
+    }
     if (!options_.desk) return;
     if (!hello.desk) {
         log::info(
@@ -238,7 +247,17 @@ void WindowLink::disable_desk() {
 }
 
 bool WindowLink::handle(const proto::Message& msg) {
+    if (const auto* config = std::get_if<proto::VideoConfig>(&msg)) {
+        // The other PC's window is coming as `codec`: the viewer gets its decoder ready.
+        std::lock_guard lock(video_mutex_);
+        if (router_) router_->prepare(config->codec);
+        return true;
+    }
     std::lock_guard lock(mutex_);
+    if (std::holds_alternative<proto::VideoKeyframe>(msg)) {
+        if (share_) share_->request_keyframe();  // our window, shown over there: its decoder needs one
+        return true;
+    }
     // The peer's input on one of our windows: the viewer's (window stream) or its desk overlay's.
     const auto remote_input = [&] {
         if (input_) return input_->handle(msg);
@@ -326,7 +345,7 @@ void WindowLink::toggle(HWND foreground) {
              .side = peer_side_.load(),
              .jpeg_quality = options_.jpeg_quality,
              .max_fps = options_.max_fps,
-             .codec = options_.codec});
+             .codec = codec_.codec});
     } catch (const std::exception& e) {
         log::error("windows: {}", e.what());
         return;
@@ -337,6 +356,9 @@ void WindowLink::toggle(HWND foreground) {
                             .title = title,
                             .width = share_->width(),
                             .height = share_->height()});
+    if (peer_knows_codecs_) {
+        send(proto::VideoConfig{.codec = share_->codec(), .width = share_->width(), .height = share_->height()});
+    }
     log::info("windows: \"{}\" is on the other PC now ({}x{}); Ctrl+Alt+Shift+W brings it back", title, share_->width(),
               share_->height());
 }
