@@ -182,6 +182,7 @@ private:
     ui::ComPtr<ID2D1Bitmap1> texture_bitmap_;
     int frame_w_ = 0;  // the displayed picture's size, from either
     int frame_h_ = 0;
+    std::string frame_codec_;  // and its codec, for the HUD
     bool have_frame_ = false;
     std::uint64_t seen_generation_ = 0;
     bool stream_sized_ = false;  // window already resized for this stream

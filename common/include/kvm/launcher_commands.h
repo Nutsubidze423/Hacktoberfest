@@ -5,6 +5,8 @@
 //   identify                         the user pressed Identify: the other PC shows its numbers too
 //   pair yes | pair no               the user's answer to "pairing: code ..." (kvm/pairing.h)
 //   unpair <device id>               the user unpaired that PC: forget it and end a session with it
+//   share [<hwnd, hex>]              Ctrl+Alt+Shift+W for that window (default: the one in front);
+//                                    handled by main.cpp, which owns the WindowLink (scripts, tests)
 //
 //   kvm::CurrentPeer peer;                       // a session sets / clears where messages go
 //   kvm::LauncherCommands commands([&](const std::string& line) { kvm::handle_launcher_command(line, places, peer); });

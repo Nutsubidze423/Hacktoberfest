@@ -4,6 +4,10 @@
 // The window must go onto the VDD and fill it, JPEG frames of the VDD size must come out, and after
 // the share ends the window must be exactly where it was and the VDD detached. A share of a window
 // that doesn't exist must fail cleanly.
+// Then the same with --codec h264 (roadmap P2.4c), where this PC has a hardware encoder: every frame
+// passes the viewer's framing check, the first is a keyframe, seq has no gaps, frames keep coming
+// after the cursor stops, and every frame decodes to 1920x1080. (The 500 ms repeat of a still
+// picture is h264_test's: here WGC keeps delivering frames.)
 //
 //   window_share_test.exe --title Paint
 
@@ -17,6 +21,8 @@
 #include <thread>
 #include <vector>
 
+#include "h264_decoder.h"
+#include "kvm/annexb.h"
 #include "kvm/dpi.h"
 #include "kvm/log.h"
 #include "window_picker.h"
@@ -58,9 +64,11 @@ int wmain(int argc, wchar_t** argv) {
 
     std::mutex mutex;
     std::vector<kvm::proto::FrameHeader> received;
+    std::vector<std::vector<std::uint8_t>> payloads;  // kept for h264, to decode
     auto fake_send = [&](const kvm::proto::FrameHeader& h, std::span<const std::uint8_t> payload) {
         std::lock_guard lock(mutex);
         if (!payload.empty()) received.push_back(h);
+        if (h.codec == "h264") payloads.emplace_back(payload.begin(), payload.end());
         return true;
     };
 
@@ -112,6 +120,69 @@ int wmain(int argc, wchar_t** argv) {
         kvm::log::info("expected error: {}", e.what());
     }
     check(threw && vdd && !vdd->attached(), "sharing a window that doesn't exist fails and leaves the VDD off");
+
+    // --codec h264: the same share, encoded on the GPU.
+    {
+        std::lock_guard lock(mutex);
+        received.clear();
+    }
+    bool h264 = false;
+    {
+        std::unique_ptr<kvm::WindowShare> share;
+        try {
+            share = kvm::WindowShare::start(hwnd, fake_send, {.codec = "h264"});
+        } catch (const std::exception& e) {
+            kvm::log::error("{}", e.what());
+            return 1;
+        }
+        h264 = std::string_view(share->codec()) == "h264";
+        if (!h264) kvm::log::info("       no hardware H.264 encoder here: the share fell back to JPEG");
+        POINT cursor{};
+        GetCursorPos(&cursor);
+        const RECT& r = share->monitor_rect();
+        for (int i = 0; i < 60; ++i) {
+            SetCursorPos((r.left + r.right) / 2 + static_cast<int>(80 * std::cos(i * 0.3)),
+                         (r.top + r.bottom) / 2 + static_cast<int>(80 * std::sin(i * 0.3)));
+            std::this_thread::sleep_for(16ms);
+        }
+        SetCursorPos(cursor.x, cursor.y);
+        std::size_t moving = 0;
+        {
+            std::this_thread::sleep_for(200ms);
+            std::lock_guard lock(mutex);
+            moving = received.size();
+        }
+        std::this_thread::sleep_for(1300ms);
+        std::lock_guard lock(mutex);
+        if (h264) {
+            check(received.size() >= moving + 2,
+                  std::format("{} h264 frames while the cursor moved, {} more after it stopped", moving,
+                              received.size() - moving));
+        }
+    }
+    if (h264) {
+        std::lock_guard lock(mutex);
+        bool in_order = !received.empty() && received.front().keyframe;
+        for (std::size_t i = 1; i < received.size(); ++i)
+            in_order = in_order && received[i].seq == received[i - 1].seq + 1;
+        check(in_order, "the first h264 frame is a keyframe, and seq has no gaps");
+        std::size_t framed = 0;
+        for (std::size_t i = 0; i < payloads.size(); ++i) {
+            if (kvm::annexb::check(payloads[i], received[i].keyframe).empty()) ++framed;
+        }
+        check(framed == payloads.size() && framed == received.size(),
+              std::format("{} of {} pass the viewer's framing check", framed, received.size()));
+        std::string why;
+        auto decoder = kvm::H264Decoder::create(nullptr, why);
+        std::size_t decoded = 0;
+        for (std::size_t i = 0; decoder && i < payloads.size(); ++i) {
+            const auto picture = decoder->decode(payloads[i], received[i].t_capture_us);
+            if (picture && picture->width == 1920 && picture->height == 1080) ++decoded;
+        }
+        check(decoded == payloads.size(), std::format("{} of {} decode to 1920x1080", decoded, payloads.size()));
+    }
+    GetWindowRect(hwnd, &after);
+    check(EqualRect(&before, &after) != FALSE, "after the h264 share too, the window is exactly where it was");
 
     if (check.failed) {
         kvm::log::error("{} check(s) failed", check.failed);

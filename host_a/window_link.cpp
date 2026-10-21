@@ -286,7 +286,10 @@ void WindowLink::toggle_hud() {
 }
 
 void WindowLink::toggle() {
-    const HWND foreground = GetForegroundWindow();
+    toggle(GetForegroundWindow());
+}
+
+void WindowLink::toggle(HWND foreground) {
     if (foreground && foreground == viewer_hwnd_.load()) {
         PostMessageW(foreground, WM_CLOSE, 0, 0);  // the viewer sends stream_stop: the window goes home
         return;
@@ -322,7 +325,8 @@ void WindowLink::toggle() {
              .hz = 60,
              .side = peer_side_.load(),
              .jpeg_quality = options_.jpeg_quality,
-             .max_fps = options_.max_fps});
+             .max_fps = options_.max_fps,
+             .codec = options_.codec});
     } catch (const std::exception& e) {
         log::error("windows: {}", e.what());
         return;

@@ -7,6 +7,7 @@
 
 #include <cstdint>
 #include <optional>
+#include <string>
 
 #include "ui_draw.h"
 
@@ -23,6 +24,7 @@ struct HudValues {
     std::optional<int> width;
     std::optional<int> height;
     std::optional<int> jpeg_quality;
+    std::string codec;  // of the frames shown: "jpeg" or "h264"; empty while none are
     std::optional<std::uint64_t> dropped;
     std::optional<std::uint64_t> repeated;  // the owner's repeats of its last frame (every 500 ms)
 };

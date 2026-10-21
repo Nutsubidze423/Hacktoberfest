@@ -1,10 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// Reads window-stream frames from the video channel, decodes the newest one and shows it in the
-// viewer.
-//
-// main.cpp owns the channel: one FrameChannel carries frames both ways (A's window to B and B's
-// window to A), and connecting / reconnecting is main.cpp's job. The receiver only reads from it:
+// Reads window-stream frames from the video channel and shows them in the viewer (window_stream.h
+// decodes them: the newest JPEG, or every H.264 frame in order). For tools and tests: in the apps,
+// WindowLink's FrameRouter reads the channel, since desk-mode frames share it.
 //
 //   auto video = kvm::net::connect_video(ip, cfg.video_port);    // A: VideoServer::accept()
 //   kvm::VideoReceiver receiver(*video, viewer);                 // declare AFTER `video`
@@ -12,25 +10,15 @@
 //
 // Destroying the receiver close()s the channel — the only way to wake recv_frame() — and joins its
 // threads, so `video` can be destroyed right after. The receiver lives as long as the channel.
-//
-// Threads: the read thread is the channel's only recv_frame() caller.
-//   - "jpeg" frames go into a LatestSlot; the decode thread decodes the newest one and presents
-//     it. A slow decoder drops old frames instead of queueing them.
-//   - "h264" frames go into a short queue; the H.264 thread decodes every one in order (a picture
-//     refers to the one before it) on the viewer's GPU (h264_decoder.h), and shows the newest
-//     picture. After a gap in `seq` (the queue overflowed, or the sender dropped one) or a frame that
-//     fails the framing check (kvm/annexb.h), it waits for the next keyframe.
-//   - Other codecs (e.g. kvm_host --test-video) count toward the HUD's MBPS but are not shown.
 #pragma once
 
 #include <atomic>
 #include <cstdint>
-#include <stop_token>
 #include <thread>
 
-#include "kvm/queue.h"
 #include "kvm/video.h"
 #include "viewer_window.h"
+#include "window_stream.h"
 
 namespace kvm {
 
@@ -44,33 +32,18 @@ public:
 
     // The window owner's clock minus ours (net::LinkStats::clock_offset_us), any thread. Until it is
     // set the viewer shows latency as unknown; 0 is exact when both ends are the same machine.
-    void set_clock_offset_us(std::int64_t offset) {
-        clock_offset_us_ = offset;
-        has_clock_offset_ = true;
-    }
+    void set_clock_offset_us(std::int64_t offset) { stream_.set_clock_offset_us(offset); }
 
     // False once the channel has closed (peer gone, or close() called).
     bool running() const { return running_; }
 
 private:
-    void read_loop();
-    void decode_loop();
-    void h264_loop();
-
-    static constexpr std::size_t kH264Queue = 30;  // a second at 30 fps; beyond that, wait for a keyframe
-
     net::FrameChannel& channel_;
-    ViewerWindow& viewer_;
-    std::atomic<std::int64_t> clock_offset_us_{0};
-    std::atomic<bool> has_clock_offset_{false};
     std::atomic<bool> running_{true};
-    LatestSlot<net::Frame> latest_;
-    BlockingQueue<net::Frame> h264_{kH264Queue};
+    WindowStream stream_;
 
-    // Declared last: joined first on destruction, while everything above is still alive.
+    // Declared last: joined first on destruction, while the stream is still alive.
     std::jthread read_thread_;
-    std::jthread decode_thread_;
-    std::jthread h264_thread_;
 };
 
 }  // namespace kvm
