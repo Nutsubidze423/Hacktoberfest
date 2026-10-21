@@ -92,6 +92,8 @@ public:
 
     // Ctrl+Alt+Shift+W: send the foreground window over, or bring it back (see above).
     void toggle();
+    // Ctrl+Alt+Shift+H: shows or hides the viewer's HUD.
+    void toggle_hud();
 
     // Desk mode off for good (emergency exit): windows back, VDD detached. Returns at once.
     void disable_desk();

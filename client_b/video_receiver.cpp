@@ -6,6 +6,7 @@
 
 #include "jpeg_decoder.h"
 #include "kvm/log.h"
+#include "kvm/video_stats.h"
 
 namespace kvm {
 
@@ -22,6 +23,7 @@ VideoReceiver::~VideoReceiver() {
 
 void VideoReceiver::read_loop() {
     while (auto frame = channel_.recv_frame()) {
+        video_stats().received("window", frame->payload.size());
         viewer_.count_payload_bytes(frame->payload.size());
         latest_.put(std::move(*frame));
     }
@@ -43,11 +45,16 @@ void VideoReceiver::decode_loop() {
             }
             continue;
         }
+        const std::int64_t started = steady_now_us();
         if (!decoder.decode(frame->payload, spare)) {
             log::warn("video: frame {} dropped: {}", frame->header.seq, decoder.last_error());
             continue;
         }
-        FrameInfo info{.seq = frame->header.seq};
+        const std::int64_t decoded = steady_now_us();
+        FrameInfo info{.seq = frame->header.seq,
+                       .bytes = frame->payload.size(),
+                       .decode_us = decoded - started,
+                       .decoded_at_us = decoded};
         if (has_clock_offset_) {
             // t_capture_us is the owner's clock; subtracting the offset maps it to ours
             // (the same as Connection::peer_to_local_us).

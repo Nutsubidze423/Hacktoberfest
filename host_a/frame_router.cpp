@@ -6,6 +6,7 @@
 
 #include "../client_b/jpeg_decoder.h"
 #include "kvm/log.h"
+#include "kvm/video_stats.h"
 
 namespace kvm {
 
@@ -24,9 +25,13 @@ FrameRouter::~FrameRouter() {
 void FrameRouter::read_loop() {
     while (auto frame = channel_.recv_frame()) {
         if (frame->header.layer == "desk") {
-            if (desk_) desk_->present(std::move(*frame));
+            video_stats().received("desk", frame->payload.size());
+            std::optional<std::int64_t> t_local;
+            if (has_clock_offset_) t_local = frame->header.t_capture_us - clock_offset_us_;
+            if (desk_) desk_->present(std::move(*frame), t_local);
             continue;
         }
+        video_stats().received("window", frame->payload.size());
         viewer_.count_payload_bytes(frame->payload.size());
         latest_.put(std::move(*frame));
     }
@@ -38,11 +43,16 @@ void FrameRouter::decode_loop() {
     BgraImage spare;  // reused: present() hands back a spare buffer
     while (auto frame = latest_.take()) {
         if (frame->header.codec != "jpeg") continue;  // e.g. kvm_host --test-video: counted, not shown
+        const std::int64_t started = steady_now_us();
         if (!decoder.decode(frame->payload, spare)) {
             log::warn("video: frame {} dropped: {}", frame->header.seq, decoder.last_error());
             continue;
         }
-        FrameInfo info{.seq = frame->header.seq};
+        const std::int64_t decoded = steady_now_us();
+        FrameInfo info{.seq = frame->header.seq,
+                       .bytes = frame->payload.size(),
+                       .decode_us = decoded - started,
+                       .decoded_at_us = decoded};
         if (has_clock_offset_) info.t_capture_local_us = frame->header.t_capture_us - clock_offset_us_;
         viewer_.present(spare, info);
     }

@@ -960,6 +960,29 @@ Attempts are rate-limited.
     - two PCs on home Wi-Fi and on a phone hotspot;
     - content: a static document, browser scrolling, video playback, Photoshop or Blender.
   - **Done when:** the baseline table exists. No later claim is made without a row in it.
+  - **Result (2026-10-21), code done; the two-PC rows are still to measure:**
+    - **[kvm/video_stats.h](../common/include/kvm/video_stats.h):** one per process, fed by the read, decode and UI threads. It records:
+      - bytes received;
+      - each frame shown: capture→screen latency, decode time, present time (decoded → on screen), size, codec;
+      - dropped frames (gaps in a stream's numbers) and repeated frames (the sender's 500 ms resend).
+    - **Desk mode is measured too**, after `UpdateLayeredWindowIndirect`, as well as the viewer, after `EndDraw`.
+    - **Outputs:**
+      - the viewer's HUD gains Latency p50 / p95 (instead of the last frame's), Decode, Present and Repeated;
+      - **Ctrl+Alt+Shift+H** toggles the HUD;
+      - `--stats <file.csv>` on kvm_host and kvm_client writes one row per frame shown;
+      - a `video: …` log line every 5 s while frames are shown.
+    - **New tools:**
+      - `video_stats_report` turns a CSV into a PERF.md row (p50/p95/p99/max, fps, Mbit/s, decode, present, dropped);
+      - `tools/baseline_loopback.ps1` runs the real kvm_host and kvm_client in desk mode on 127.0.0.1, with Notepad, a scrolling page and an animation on the virtual display.
+    - **Found and fixed: desk-mode frame numbers.** Desk mode numbered all windows' frames with one counter. PROTOCOL.md says `seq` is gap-free per stream, so with two windows each stream showed false gaps (743 "dropped" in one run). Now each window counts its own.
+    - **Baseline:** [PERF.md](PERF.md) "Video: capture to screen", the loopback rows from two runs.
+      - **The main finding:** desk mode resends unchanged windows at the full rate. A still document costs 67–71 Mbit/s and a ~17 ms JPEG encode 30 times a second.
+      - On this CPU, JPEG encode and decode are most of the 50–134 ms p50.
+    - **Tests:**
+      - `video_stats_test` (unit): percentiles, gaps and repeats per stream, layers, Mbit/s, the CSV read back;
+      - the HUD was checked by screenshot (`ui_preview_viewer`): "Latency p50/95" in one row ran into its value, so it became two rows;
+      - `ctest --preset local` 34/34.
+    - **Not done yet (needs two PCs):** the Wi-Fi and hotspot rows, video playback and Photoshop/Blender content, and the viewer path.
 
 - [ ] **P2.2 Prototype: probe for hardware MFTs** (S), branch `phase2/mft-probe`.
   - **Files:** new `tools/mft_probe.cpp`. It lists H.264/HEVC/AV1 encoders and decoders through `MFTEnumEx`, with:
@@ -968,6 +991,15 @@ Attempts are rate-limited.
     - low-latency support;
     - 4:4:4 support.
   - **Done when:** results for both demo PCs and this PC (UHD 600) are in PERF.md. They decide which codecs P2.3 and P2.10 target.
+  - **Result (2026-10-21), this PC done; the two demo PCs are still to probe:**
+    - **`tools/mft_probe.cpp`:**
+      - lists every H.264 / HEVC / AV1 encoder and decoder MFT: hardware or not, vendor, D3D11 awareness, async, low-latency mode, raw formats, and whether a 4:4:4 format is listed;
+      - also lists the GPU's own decode profiles (`ID3D11VideoDevice`), because hardware decoding goes through Microsoft's decoder MFT plus DXVA, not a vendor MFT;
+      - `--markdown` prints the PERF.md table.
+    - **This PC** ([PERF.md](PERF.md) "Hardware codecs"):
+      - H.264 is encoded in hardware (Quick Sync: async, D3D11, low latency) and decoded on the GPU. P2.3 and P2.4 can target it, and the risk "whether this PC's UHD 600 decodes H.264 in hardware" is answered: yes.
+      - HEVC is encoded in hardware and the GPU decodes it, but without a decoder MFT (that needs the Store's HEVC Video Extensions).
+      - No AV1. No 4:4:4 input on any encoder.
 
 - [ ] **P2.3 H.264 encoder on the GPU, zero-copy from WGC** (L → split into a/b/c).
   - **P2.3a** (M): one shared D3D11 device for capture and encode (`ID3D10Multithread` protection). BGRA → NV12 on the GPU with `ID3D11VideoProcessor`.
@@ -1049,7 +1081,7 @@ Attempts are rate-limited.
 |---|---|
 | Async MFT complexity and vendor quirks (Intel/AMD/NVIDIA) | P2.2 probe; test on at least two GPU vendors. |
 | Text sharpness at 4:2:0 | Measure with Photoshop's UI; try a higher bitrate first, then 4:4:4 (P2.10). |
-| Whether this PC's UHD 600 decodes H.264 in hardware | P2.2 finds out. If not, the weak-laptop demo needs a different laptop or the JPEG path. |
+| Whether this PC's UHD 600 decodes H.264 in hardware | **Answered by P2.2: yes** (D3D11 decode profiles: H.264, HEVC Main/Main10, VP9). |
 | Colour range (BT.709 limited vs full) mismatches | Set it explicitly on both sides. |
 | Desk mode DComp approach | P2.7a prototype before any commitment. |
 

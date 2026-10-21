@@ -13,6 +13,7 @@
 #include <utility>
 
 #include "jpeg_decoder.h"
+#include "kvm/video_stats.h"
 #include "kvm/log.h"
 #include "kvm/win32_input.h"
 
@@ -123,10 +124,11 @@ DeskView::~DeskView() {
     if (ui_thread_.joinable()) ui_thread_.join();
 }
 
-void DeskView::present(net::Frame&& frame) {
+void DeskView::present(net::Frame&& frame, std::optional<std::int64_t> t_capture_local_us) {
     {
         std::lock_guard lock(incoming_mutex_);
-        incoming_[frame.header.window] = std::move(frame);
+        const std::uint64_t window = frame.header.window;
+        incoming_[window] = Incoming{std::move(frame), t_capture_local_us};
     }
     incoming_cv_.notify_one();
 }
@@ -171,15 +173,17 @@ void DeskView::decode_main(std::stop_token stop) {
     JpegDecoder decoder;
     BgraImage image;
     while (!stop.stop_requested()) {
-        std::map<std::uint64_t, net::Frame> frames;
+        std::map<std::uint64_t, Incoming> frames;
         {
             std::unique_lock lock(incoming_mutex_);
             incoming_cv_.wait(lock, [&] { return stop.stop_requested() || !incoming_.empty(); });
             frames.swap(incoming_);
         }
-        for (auto& [id, frame] : frames) {
+        for (auto& [id, in] : frames) {
+            net::Frame& frame = in.frame;
             const auto& h = frame.header;
             if (h.codec != "jpeg" || h.alpha_bytes > frame.payload.size()) continue;
+            const std::int64_t started = steady_now_us();
             const size_t jpeg_size = frame.payload.size() - h.alpha_bytes;
             if (!decoder.decode(std::span(frame.payload.data(), jpeg_size), image)) {
                 log::warn("desk: picture {} dropped: {}", h.seq, decoder.last_error());
@@ -192,6 +196,11 @@ void DeskView::decode_main(std::stop_token stop) {
                                                   pic.height, pic.pixels, pic.opaque_rows)) {
                 log::warn("desk: picture {}: bad transparency, shown opaque", h.seq);
             }
+            pic.seq = h.seq;
+            pic.bytes = frame.payload.size();
+            pic.t_capture_local_us = in.t_capture_local_us;
+            pic.decoded_at_us = steady_now_us();
+            pic.decode_us = pic.decoded_at_us - started;
             image = {};  // the pixels moved out
             {
                 std::lock_guard lock(pending_mutex_);
@@ -417,6 +426,24 @@ void DeskView::update() {
     }
     first_update_ = false;
     ++shown_;
+    // The new pictures are on screen now.
+    const std::int64_t now = steady_now_us();
+    for (const std::uint64_t id : new_pictures) {
+        const auto pic = pictures_.find(id);
+        if (pic == pictures_.end() || !find(placed_, id)) continue;
+        const Picture& p = pic->second;
+        video_stats().shown(
+            {.layer = "desk",
+             .stream = id,
+             .seq = p.seq,
+             .codec = "jpeg",
+             .bytes = p.bytes,
+             .width = p.width,
+             .height = p.height,
+             .latency_us = p.t_capture_local_us ? std::optional(now - *p.t_capture_local_us) : std::nullopt,
+             .decode_us = p.decode_us,
+             .present_us = now - p.decoded_at_us});
+    }
     if (!visible_ || set_changed || raise_owner) apply_z();
 }
 
