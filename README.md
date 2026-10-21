@@ -67,6 +67,7 @@ Now move the mouse across that edge.
 | **Ctrl+Alt+Shift+Q** | Emergency stop: control comes back to this PC and input capture stops |
 | Ctrl+Alt+Shift+W | Send the window in front to the other PC, or bring it back |
 | Ctrl+Alt+Shift+F | Show a drop box: files dropped on it go to the other PC |
+| Ctrl+Alt+Shift+H | Show or hide the window viewer's numbers (latency, frame rate, decode time, …) |
 
 ## Configuration
 
