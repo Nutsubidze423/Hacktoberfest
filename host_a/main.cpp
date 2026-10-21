@@ -4,10 +4,12 @@
 // Usage: kvm_host.exe [--config <path>] [--log <file>] [--no-kvm] [--no-clipboard] [--no-desk]
 //                     [--no-discovery] [--test-video [--test-video-kb N] [--test-video-fps N]]
 //                     [--data-dir <dir>] [--print-id] [--pair-with <device id>] [--recreate-identity]
+//                     [--stats <file.csv>]
 //   --no-kvm      don't install the input hooks (e.g. when only testing the video stream)
 //   --no-clipboard  don't share copied text/images with the client
 //   --no-desk     no desk mode (the client's screen as one more monitor); Ctrl+Alt+Shift+W uses the viewer
 //   --no-discovery  don't answer other PCs looking for hosts (tests: no other PC can find this one)
+//   --stats <file.csv>  one row per video frame shown on this PC (kvm/video_stats.h, docs/PERF.md)
 //   --data-dir ... --recreate-identity: this PC's identity and paired PCs, see kvm/trust.h
 //   --test-video  send synthetic frames (codec "test", random bytes, default 250 KB at 30 fps) so
 //                 network throughput and video latency can be measured before capture/viewer exist
@@ -45,6 +47,7 @@
 #include "kvm/net.h"
 #include "kvm/protocol.h"
 #include "kvm/video.h"
+#include "kvm/video_stats.h"
 #include "virtual_display.h"
 #include "window_link.h"
 
@@ -323,6 +326,7 @@ void run_session(kvm::net::Connection& conn, kvm::KvmLink* kvm, kvm::clip::Clipb
             kvm::log::info("link: rtt {:.2f} ms, clock offset {:.1f} ms", stats.rtt_us / 1000.0,
                            stats.clock_offset_us / 1000.0);
             if (stats.rtt_us >= 0) windows.set_rtt_ms(static_cast<int>(stats.rtt_us / 1000), stats.clock_offset_us);
+            if (const std::string line = kvm::video_stats().log_line(); !line.empty()) kvm::log::info("{}", line);
             next_stats += kStatsInterval;
         }
     }
@@ -351,6 +355,9 @@ Options parse_args(int argc, wchar_t** argv) {
             opt.desk = false;
         } else if (arg == L"--no-discovery") {
             opt.discovery = false;
+        } else if (arg == L"--stats" && has_value) {
+            const std::filesystem::path csv = argv[++i];
+            if (!kvm::video_stats().open_csv(csv)) kvm::log::warn("stats: can't write {}", csv.string());
         } else if (arg == L"--test-video") {
             opt.test_video = true;
         } else if (arg == L"--test-video-kb" && has_value) {
@@ -512,6 +519,7 @@ int wmain(int argc, wchar_t** argv) {
         kvm::Hotkeys hotkeys;
         hotkeys.add('F', [&] { files.show_catcher_at_cursor(); });
         hotkeys.add('W', [&] { windows.toggle(); });
+        hotkeys.add('H', [&] { windows.toggle_hud(); });
         if (hotkeys.start()) {
             kvm::log::info("Ctrl+Alt+Shift+F: drop files on the box at the cursor to send them to the other PC");
             kvm::log::info("Ctrl+Alt+Shift+W: send the window in front to the other PC, press again to bring it back");

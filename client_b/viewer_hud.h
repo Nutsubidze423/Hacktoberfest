@@ -15,12 +15,16 @@ namespace kvm::viewer {
 struct HudValues {
     std::optional<int> rtt_ms;
     std::optional<int> fps;
-    std::optional<int> latency_ms;
+    std::optional<int> latency_ms;      // p50 over the last second
+    std::optional<int> latency_p95_ms;
+    std::optional<double> decode_ms;   // average over the last second
+    std::optional<double> present_ms;  // decoded -> on screen
     std::optional<double> mbps;
     std::optional<int> width;
     std::optional<int> height;
     std::optional<int> jpeg_quality;
     std::optional<std::uint64_t> dropped;
+    std::optional<std::uint64_t> repeated;  // the owner's repeats of its last frame (every 500 ms)
 };
 
 // Top-right of the content area: top = content_top + 12 dp, right = client_w - 12 dp, fixed size.
