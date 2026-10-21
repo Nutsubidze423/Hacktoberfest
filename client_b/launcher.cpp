@@ -24,6 +24,7 @@
 #include <nlohmann/json.hpp>
 
 #include "device_picker.h"
+#include "network_category.h"
 #include "paired_window.h"
 #include "pairing_dialog.h"
 #include "display_settings.h"
@@ -523,6 +524,18 @@ int App::run() {
     // Opened by the user: the PCs on the network right away, above the tray (the list fills in as
     // the scanner finds them). One click connects; PCs set to "Auto" connect by themselves meanwhile.
     // Started with Windows: only a card that Sarke runs.
+    // Sarke's firewall rules open its ports on Private and Domain networks only (installer/sarke.iss):
+    // on a Public one the other PCs can't reach this one, so say how to change it.
+    for (const auto& network : connected_networks()) {
+        if (!network.is_public) continue;
+        log::info("launcher: the network '{}' is Public: other PCs can't reach Sarke on it", narrow(network.name));
+        notify(L"\u201C" + network.name + L"\u201D is a Public network",
+               L"Other PCs can't reach Sarke here. If you trust this network, make it Private: Settings > "
+               L"Network & internet > Wi-Fi or Ethernet > " +
+                   network.name + L" > Private network.",
+               Toast::Kind::Info);
+        break;
+    }
     if (start_app()) {
         if (options_.show_devices) {
             pick_device(tray_corner());

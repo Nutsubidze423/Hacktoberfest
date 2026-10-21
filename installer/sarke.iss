@@ -6,9 +6,10 @@
 ;   - the fonts its windows use (assets\fonts)
 ;   - the Virtual Display Driver for desk mode (MikeTheTech's signed IddCx driver, MIT) and its settings
 ;     file, writable by users so Sarke can add the other PC's resolution
-;   - Windows Firewall rules for the local network (TCP 50500-50502, UDP 50503 discovery)
-;   - optionally a Microsoft Defender exclusion (keyboard/mouse hooks get unsigned builds flagged)
-;   - Start menu entry, optional desktop shortcut, start with Windows
+;   - Windows Firewall rules for the local network on Private and Domain networks (TCP 50500-50502,
+;     UDP 50503 discovery); a Public network stays closed
+;   - optionally a Microsoft Defender exclusion (off by default: it also stops Defender scanning there)
+;   - Start menu entry, optional desktop shortcut, optionally start with Windows
 ; Per-user settings and logs live in %LOCALAPPDATA%\Sarke (kept on uninstall).
 
 ; ISCC /DBuild=<folder> packs the programs of another build folder (e.g. a fresh clone using an existing build).
@@ -44,9 +45,10 @@ CloseApplications=yes
 RestartApplications=no
 
 [Tasks]
-Name: autostart; Description: "Start Sarke when Windows starts"
+; Starting with Windows and the Defender exclusion are the user's choice: off by default (roadmap P1.11).
+Name: autostart; Description: "Start Sarke when Windows starts"; Flags: unchecked
 Name: desktopicon; Description: "Create a desktop shortcut"; Flags: unchecked
-Name: defender; Description: "Add a Microsoft Defender exclusion for Sarke's folder (recommended: Sarke uses keyboard and mouse hooks, and Defender may flag its unsigned programs by mistake)"
+Name: defender; Description: "Add a Microsoft Defender exclusion for Sarke's folder. Only if Defender blocks Sarke: its keyboard and mouse hooks can look suspicious to Defender, but an exclusion also means Defender no longer scans anything in that folder."; Flags: unchecked
 
 [Files]
 Source: "{#Build}\tools\sarke.exe"; DestDir: "{app}"; Flags: ignoreversion
@@ -78,13 +80,14 @@ Name: "{autodesktop}\Sarke"; Filename: "{app}\sarke.exe"; WorkingDir: "{app}"; T
 Root: HKA; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "Sarke"; ValueData: """{app}\sarke.exe"" --background"; Flags: uninsdeletevalue; Tasks: autostart
 
 [Run]
-; Windows Firewall: Sarke's ports and its two programs, from the local network only, on any network
-; profile (a phone hotspot is usually "Public"). Old rules go first so a reinstall doesn't add twins.
+; Windows Firewall: Sarke's ports only, from the local network only, and only on Private and Domain
+; networks: on a Public one (an airport, a cafe) nothing gets in. A phone hotspot that Windows calls
+; Public has to be made Private first; the launcher says how. No rule for the programs themselves:
+; that would open every port they listen on. Old rules go first so a reinstall doesn't add twins
+; (and an upgrade from 1.1 loses its any-profile and program rules).
 Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=""Sarke"""; Flags: runhidden
-Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall add rule name=""Sarke"" dir=in action=allow protocol=TCP localport=50500-50502 remoteip=localsubnet profile=any"; Flags: runhidden; StatusMsg: "Allowing Sarke through Windows Firewall..."
-Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall add rule name=""Sarke"" dir=in action=allow protocol=UDP localport=50503 remoteip=localsubnet profile=any"; Flags: runhidden
-Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall add rule name=""Sarke"" dir=in action=allow program=""{app}\kvm_host.exe"" remoteip=localsubnet profile=any"; Flags: runhidden
-Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall add rule name=""Sarke"" dir=in action=allow program=""{app}\kvm_client.exe"" remoteip=localsubnet profile=any"; Flags: runhidden
+Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall add rule name=""Sarke"" dir=in action=allow protocol=TCP localport=50500-50502 remoteip=localsubnet profile=private,domain"; Flags: runhidden; StatusMsg: "Allowing Sarke through Windows Firewall..."
+Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall add rule name=""Sarke"" dir=in action=allow protocol=UDP localport=50503 remoteip=localsubnet profile=private,domain"; Flags: runhidden
 Filename: "{app}\sarke.exe"; Description: "Start Sarke now"; Flags: nowait postinstall skipifsilent runasoriginaluser
 
 [UninstallRun]
