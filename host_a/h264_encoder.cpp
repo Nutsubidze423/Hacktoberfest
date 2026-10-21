@@ -11,33 +11,15 @@
 #include <utility>
 
 #include "kvm/log.h"
+#include "kvm/mf_util.h"
 #include "kvm/net.h"  // steady_now_us
 
 namespace kvm {
 
 namespace {
 
+using mf::hr_text;
 using Microsoft::WRL::ComPtr;
-
-std::string hr_text(HRESULT hr) {
-    return std::format("0x{:08X}", static_cast<std::uint32_t>(hr));
-}
-
-std::string narrow(const wchar_t* s, std::size_t n) {
-    const int len = WideCharToMultiByte(CP_UTF8, 0, s, static_cast<int>(n), nullptr, 0, nullptr, nullptr);
-    std::string out(static_cast<std::size_t>(len > 0 ? len : 0), '\0');
-    if (len > 0) WideCharToMultiByte(CP_UTF8, 0, s, static_cast<int>(n), out.data(), len, nullptr, nullptr);
-    return out;
-}
-
-std::string friendly_name(IMFActivate* activate) {
-    UINT32 length = 0;
-    if (FAILED(activate->GetStringLength(MFT_FRIENDLY_NAME_Attribute, &length))) return "H.264 encoder";
-    std::wstring name(length + 1, L'\0');
-    if (FAILED(activate->GetString(MFT_FRIENDLY_NAME_Attribute, name.data(), length + 1, &length)))
-        return "H.264 encoder";
-    return narrow(name.data(), length);
-}
 
 // The hardware H.264 encoders on the adapter `device` runs on (MFTEnum2 can filter by adapter; an
 // encoder on another GPU couldn't read our textures).
@@ -93,7 +75,7 @@ std::unique_ptr<H264Encoder> H264Encoder::create(std::shared_ptr<GpuDevice> gpu,
         return nullptr;
     }
     enc->activate_ = encoders.front();
-    enc->name_ = friendly_name(enc->activate_.Get());
+    enc->name_ = mf::friendly_name(enc->activate_.Get(), "H.264 encoder");
     HRESULT hr = enc->activate_->ActivateObject(IID_PPV_ARGS(&enc->transform_));
     if (FAILED(hr)) {
         why = std::format("h264: {} won't start ({})", enc->name_, hr_text(hr));
@@ -247,22 +229,25 @@ bool H264Encoder::encode(ID3D11Texture2D* nv12, std::int64_t t_capture_us) {
     sample->SetSampleTime((t_capture_us - time_base_us_) * 10);
     sample->SetSampleDuration(10'000'000 / options_.fps);
 
+    const bool keyframe = keyframe_requested_.exchange(false);
     std::lock_guard lock(mutex_);
-    if (waiting_.size() >= 2) {  // behind: the newest picture wins
+    if (waiting_.size() >= 2) {  // behind: the newest picture wins, and takes over a keyframe request
+        const bool was_keyframe = waiting_.front().keyframe;
         waiting_.pop_front();
+        if (was_keyframe) waiting_.front().keyframe = true;
         ++dropped_;
     }
-    waiting_.push_back(std::move(sample));
+    waiting_.push_back({std::move(sample), keyframe});
     feed_locked();
     return !failed_;
 }
 
 void H264Encoder::feed_locked() {
     while (need_input_ > 0 && !waiting_.empty() && !failed_) {
-        ComPtr<IMFSample> sample = std::move(waiting_.front());
+        Waiting next = std::move(waiting_.front());
         waiting_.pop_front();
-        if (keyframe_requested_.exchange(false)) set_codec_value(CODECAPI_AVEncVideoForceKeyFrame, 1);
-        const HRESULT hr = transform_->ProcessInput(0, sample.Get(), 0);
+        if (next.keyframe) set_codec_value(CODECAPI_AVEncVideoForceKeyFrame, 1);
+        const HRESULT hr = transform_->ProcessInput(0, next.sample.Get(), 0);
         --need_input_;
         if (FAILED(hr)) {
             fail("h264: the encoder refused a picture (" + hr_text(hr) + ")");
@@ -325,12 +310,17 @@ void H264Encoder::drain_output() {
             packet.annexb.assign(data, data + length);
             buffer->Unlock();
         }
+        // Queued before it counts as out: flush() promises the packet is in packets() when it returns.
+        if (packet.annexb.empty()) {
+            if (empty_++ == 0) log::warn("h264: the encoder put out an empty sample (picture skipped)");
+        } else {
+            packets_.push(std::move(packet));
+        }
         {
             std::lock_guard lock(mutex_);
             if (in_flight_ > 0) --in_flight_;
             if (in_flight_ == 0 && waiting_.empty()) flushed_.notify_all();
         }
-        if (!packet.annexb.empty()) packets_.push(std::move(packet));
         return;  // one output per METransformHaveOutput
     }
 }

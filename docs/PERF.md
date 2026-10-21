@@ -82,6 +82,26 @@ the hardware H.264 encoder (P2.3b), whose time is still to measure.
 - Whether the picture holds up at that bitrate is P2.4's measurement, when the decoder can turn it
   back into pixels (PSNR).
 
+## H.264 decode on the GPU (roadmap P2.4a)
+
+**What:** `h264_test` (label `gpu`):
+- **Input:** the 60 access units from the encode above, decoded by
+  [h264_decoder.h](../client_b/h264_decoder.h) on a D3D11 device of its own, like the viewer's.
+- **Decoder:** Media Foundation's H.264 decoder, DXVA, low latency.
+- **Time:** one `decode()` call, which returns with the access unit's picture as a texture. The GPU
+  may still be finishing it.
+- **PSNR:** luma against the source pictures.
+- **Runs:** 5.
+
+| Date | Machine | decode() p50 (ms) | decode() p95 (ms) | Luma PSNR mean / lowest (dB) |
+|---|---|---|---|---|
+| 2026-10-21 | Celeron laptop (UHD 600) | 0.6–0.7 | 1.0–2.0 | 55.9 / 55.2 |
+
+**What it means:**
+- The viewer's CPU only hands the decoder the data.
+- The PSNR is high because the content is smooth synthetic gradients. Real window content gets its
+  numbers with the HUD in P2.4c.
+
 ## JPEG encode (hackathon baseline, for roadmap Phase 2)
 
 | Date | Machine | Frame | Result | Source |
