@@ -93,19 +93,26 @@ Result run(net::Handshaken pending, bool initiator, const tls::Credentials& me, 
     // The launcher shows this line to its user and answers "pair yes" / "pair no".
     prompt.arm();
     log::info("pairing: code {} with '{}' ({}) - confirm on both PCs", the_code, result.peer_name, id_text);
+    // A last message before giving up: wait for the other PC to read it and hang up. Closing right
+    // away can reset the connection first, and it would then say "no answer" instead of "cancelled".
+    const auto send_last = [&](const proto::Message& msg) {
+        conn.send_json(proto::encode(msg));
+        conn.wait_peer_close(std::chrono::seconds(2));
+    };
     const auto mine = prompt.wait(kAnswerTimeout);
     if (!mine) {
-        conn.send(proto::PairConfirm{.ok = false});
         log::info("pairing: no answer here within {} s - cancelled", kAnswerTimeout.count());
+        send_last(proto::PairConfirm{.ok = false});
         result.outcome = Outcome::Timeout;
         return result;
     }
-    conn.send(proto::PairConfirm{.ok = *mine});
     if (!*mine) {
         log::info("pairing: cancelled on this PC");
+        send_last(proto::PairConfirm{.ok = false});
         result.outcome = Outcome::Declined;
         return result;
     }
+    conn.send(proto::PairConfirm{.ok = true});
 
     // The other user's answer (it may have come while this one was deciding).
     std::optional<bool> theirs;
@@ -138,7 +145,7 @@ Result run(net::Handshaken pending, bool initiator, const tls::Credentials& me, 
 
     if (!paired.add({.id = result.peer_id, .name = result.peer_name, .paired_at = paired::now_ms()})) {
         log::error("pairing: can't save paired.json - cancelled");
-        conn.send(proto::PairResult{.ok = false, .reason = "can't save"});
+        send_last(proto::PairResult{.ok = false, .reason = "can't save"});
         return result;
     }
     conn.send(proto::PairResult{.ok = true});

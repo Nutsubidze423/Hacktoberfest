@@ -241,7 +241,7 @@ Implemented in P1.10:
 | Property | Test |
 |---|---|
 | S1, S3 | `loopback_test`: a peer with an unknown key is closed before any `hello` log line; a peer with a paired key connects (P1.5) |
-| S2 | `tls_test`: TLS 1.2 refused, a plaintext peer refused. A packet capture during the two-PC regression run shows no readable JSON or JPEG (P1.14) |
+| S2 | `tls_test`: TLS 1.2 refused, a plaintext peer refused. `wire_test`: a relay between the real kvm_host and a paired client sees only TLS records on all three channels, both ways, and none of the JSON, names, token, clipboard text or video bytes. A packet capture during the two-PC regression run shows no readable JSON or JPEG (P1.14) |
 | S4 | `loopback_test` step 4: on 50501/50502 another key with the right token, or the right key with a wrong token, is refused and doesn't replace the live channel; after the session its token opens nothing. `video_test`: the same for no token, an ended session, a renewed session's old token, and a listener without the host's key (P1.7) |
 | S5 | `tls_test`: a relaying man-in-the-middle with its own key gives different exporter values; the code mapping matches the vectors below (P1.2, P1.6) |
 | S6 | launcher unit test: a reply with a paired name but another ID isn't auto-connected (P1.8) |

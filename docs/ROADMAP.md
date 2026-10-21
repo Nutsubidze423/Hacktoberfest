@@ -900,6 +900,18 @@ Attempts are rate-limited.
 
 - [ ] **P1.14 Security release** (S), branch `phase1/release`.
   - Run the full regression checklist on two PCs, plus a Wireshark/Npcap capture showing only TLS records on 50500–50502.
+  - **Prep done without the two PCs (2026-10-21):**
+    - **New `wire_test`** (loopback label): a relay on 127.0.0.1 stands where the network is, between the real kvm_host (with `--test-video`) and a paired client, on all three channels. Results:
+      - 3 connections and 333 KB went through;
+      - every byte, both ways, is a TLS record: the handshake, then only encrypted data;
+      - none of the JSON, names, session token, host ID, clipboard text, frame header or video bytes appear;
+      - the same checks catch a plaintext Sarke 1.1 hello.
+      - It covers what the capture checks, on one PC. The capture on two PCs stays on the list: it is the real network, and it covers kvm_client too.
+    - The helpers that run the real programs moved from `loopback_test` to `tools/program_util.h`.
+    - **Found by CI and fixed:** a PC that declines pairing, or whose answer times out, sends `pair_confirm{ok: false}` and closes.
+      - The close could reset the connection before the other PC read it, so that PC said "no answer" instead of "cancelled on the other PC" (1 of 2 CI runs).
+      - Pairing's last messages now wait up to 2 s for the other PC to hang up first, like P1.10's `wait_peer_close()`.
+      - `loopback_test`: 5 runs in a row clean.
   - Write a CHANGELOG entry, tag `v1.2.0` (protocol v3; both PCs must update) and publish it.
 
 ### Phase 1 acceptance
