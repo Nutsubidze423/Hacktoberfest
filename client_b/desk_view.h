@@ -60,7 +60,9 @@ public:
     DeskView& operator=(const DeskView&) = delete;
 
     // A layer "desk" frame: one window's picture (any thread). Per window only the newest is decoded.
-    void present(net::Frame&& frame);
+    // `t_capture_local_us`: when it was captured, on this PC's steady_now_us() clock (unknown until
+    // the clock offset is), for kvm::video_stats().
+    void present(net::Frame&& frame, std::optional<std::int64_t> t_capture_local_us = std::nullopt);
 
     // The owner's windows and their places (any thread).
     void set_layout(proto::DeskLayout layout);
@@ -90,6 +92,16 @@ private:
         int y = 0;
         std::vector<std::uint8_t> pixels;
         std::vector<std::uint8_t> opaque_rows;  // 1 = the whole row has alpha 255
+        // For kvm::video_stats(), reported once it is on screen.
+        std::uint32_t seq = 0;
+        std::size_t bytes = 0;
+        std::optional<std::int64_t> t_capture_local_us;
+        std::int64_t decode_us = 0;
+        std::int64_t decoded_at_us = 0;
+    };
+    struct Incoming {
+        net::Frame frame;
+        std::optional<std::int64_t> t_capture_local_us;
     };
     struct Placed {
         std::uint64_t id = 0;
@@ -125,7 +137,7 @@ private:
     // decode thread input
     std::mutex incoming_mutex_;
     std::condition_variable incoming_cv_;
-    std::map<std::uint64_t, net::Frame> incoming_;  // newest undecoded frame per window
+    std::map<std::uint64_t, Incoming> incoming_;  // newest undecoded frame per window
 
     // decode/session threads -> UI thread
     std::mutex pending_mutex_;

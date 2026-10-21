@@ -16,6 +16,7 @@
 
 #include "kvm/dpi.h"
 #include "kvm/log.h"
+#include "kvm/video_stats.h"
 #include "kvm/net.h"
 
 #pragma comment(lib, "dwmapi.lib")
@@ -32,6 +33,7 @@ using ui::TextStyle;
 constexpr wchar_t kClassName[] = L"KvmViewerWindow";
 constexpr UINT kMsgStreamStart = WM_APP + 1;  // wParam = width, lParam = height
 constexpr UINT kMsgLinkChanged = WM_APP + 2;  // wParam = LinkState before, lParam = LinkState now
+constexpr UINT kMsgToggleHud = WM_APP + 3;
 constexpr UINT_PTR kHudTimer = 1;
 constexpr UINT_PTR kBlinkTimer = 2;
 
@@ -191,6 +193,10 @@ void ViewerWindow::update_icons() {
 void ViewerWindow::set_rtt_ms(std::optional<int> rtt_ms) {
     std::lock_guard lock(mutex_);
     shared_.rtt_ms = rtt_ms;
+}
+
+void ViewerWindow::toggle_hud() {
+    if (const HWND h = hwnd_) PostMessageW(h, kMsgToggleHud, 0, 0);
 }
 
 void ViewerWindow::set_jpeg_quality(std::optional<int> quality) {
@@ -379,6 +385,10 @@ LRESULT ViewerWindow::handle_message(UINT msg, WPARAM wp, LPARAM lp) {
         } else if (wp == kBlinkTimer) {
             on_blink_tick();
         }
+        return 0;
+    case kMsgToggleHud:
+        hud_visible_ = !hud_visible_;
+        InvalidateRect(hwnd_, nullptr, FALSE);
         return 0;
     case kMsgLinkChanged:
         if (link_listener_) {
@@ -628,7 +638,7 @@ void ViewerWindow::take_pending_frame() {
         stream_sized_ = false;
         last_seq_.reset();
         dropped_ = 0;
-        latency_ms_.reset();
+        repeated_ = 0;
     }
     if (!got) {
         return;
@@ -641,12 +651,9 @@ void ViewerWindow::take_pending_frame() {
     if (last_seq_ && info.seq > *last_seq_ + 1) {
         dropped_ += info.seq - *last_seq_ - 1;
     }
+    if (last_seq_ && info.seq == *last_seq_) ++repeated_;  // the owner repeats its last frame every 500 ms
     last_seq_ = info.seq;
-    if (info.t_capture_local_us) {
-        latency_ms_ = static_cast<int>((steady_now_us() - *info.t_capture_local_us) / 1000);
-    } else {
-        latency_ms_.reset();
-    }
+    to_report_ = info;
     if (!stream_sized_) {
         stream_sized_ = true;
         resize_for_stream(displayed_.width, displayed_.height);
@@ -706,17 +713,29 @@ void ViewerWindow::on_hud_tick() {
         hud_.mbps.reset();
     }
     if (view == View::Streaming || view == View::Stalled) {
+        const StatsSummary s = video_stats().summary("window");
+        const auto whole_ms = [](std::optional<double> v) -> std::optional<int> {
+            return v ? std::optional<int>(static_cast<int>(std::lround(*v))) : std::nullopt;
+        };
         hud_.fps = static_cast<int>(std::accumulate(frame_buckets_.begin(), frame_buckets_.end(), std::uint64_t{0}));
-        hud_.latency_ms = latency_ms_;
+        hud_.latency_ms = whole_ms(s.latency_p50_ms);
+        hud_.latency_p95_ms = whole_ms(s.latency_p95_ms);
+        hud_.decode_ms = s.decode_ms;
+        hud_.present_ms = s.present_ms;
         hud_.width = displayed_.width;
         hud_.height = displayed_.height;
         hud_.dropped = dropped_;
+        hud_.repeated = repeated_;
     } else {
         hud_.fps.reset();
         hud_.latency_ms.reset();
+        hud_.latency_p95_ms.reset();
+        hud_.decode_ms.reset();
+        hud_.present_ms.reset();
         hud_.width.reset();
         hud_.height.reset();
         hud_.dropped.reset();
+        hud_.repeated.reset();
     }
     InvalidateRect(hwnd_, nullptr, FALSE);  // also turns Streaming into Stalled on time
 }
@@ -798,7 +817,22 @@ void ViewerWindow::render() {
         brush_.Reset();
         bitmap_.Reset();
         InvalidateRect(hwnd_, nullptr, FALSE);
+    } else if (to_report_) {
+        // On screen now (EndDraw has presented): capture -> here, and decoded -> here.
+        const std::int64_t now = steady_now_us();
+        const FrameInfo& f = *to_report_;
+        video_stats().shown(
+            {.layer = "window",
+             .seq = f.seq,
+             .codec = "jpeg",
+             .bytes = f.bytes,
+             .width = displayed_.width,
+             .height = displayed_.height,
+             .latency_us = f.t_capture_local_us ? std::optional(now - *f.t_capture_local_us) : std::nullopt,
+             .decode_us = f.decode_us,
+             .present_us = f.decoded_at_us ? now - f.decoded_at_us : 0});
     }
+    to_report_.reset();
 
     const std::wstring window_text = title.empty() ? std::wstring(ui::kAppName) : title;
     if (window_text != window_text_) {

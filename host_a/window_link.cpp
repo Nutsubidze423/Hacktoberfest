@@ -280,6 +280,11 @@ bool WindowLink::handle(const proto::Message& msg) {
                       msg);
 }
 
+void WindowLink::toggle_hud() {
+    std::lock_guard lock(mutex_);
+    if (viewer_) viewer_->toggle_hud();
+}
+
 void WindowLink::toggle() {
     const HWND foreground = GetForegroundWindow();
     if (foreground && foreground == viewer_hwnd_.load()) {

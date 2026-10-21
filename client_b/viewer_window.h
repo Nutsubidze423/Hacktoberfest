@@ -39,6 +39,10 @@ struct FrameInfo {
     std::uint32_t seq = 0;
     // Capture time converted to B's steady_now_us() clock; nullopt while the clock offset is unknown.
     std::optional<std::int64_t> t_capture_local_us;
+    // For kvm::video_stats(): the payload's size, how long decoding took and when it ended.
+    std::size_t bytes = 0;
+    std::int64_t decode_us = 0;
+    std::int64_t decoded_at_us = 0;
 };
 
 class ViewerWindow {
@@ -59,6 +63,8 @@ public:
     void set_reconnects(bool reconnects);  // true: LOST says "reconnecting", else "restart the client"
     void set_link_state(LinkState state);  // leaving Linked ends the current stream
     void set_rtt_ms(std::optional<int> rtt_ms);
+    // Shows or hides the HUD (Ctrl+Alt+Shift+H). Any thread.
+    void toggle_hud();
     void set_jpeg_quality(std::optional<int> quality);
     void start_stream(const proto::StreamStart& start);  // stream_start from the window owner
     void stop_stream();                                   // stream_stop from the window owner
@@ -153,7 +159,8 @@ private:
     Clock::time_point last_frame_time_{};
     std::optional<std::uint32_t> last_seq_;
     std::uint64_t dropped_ = 0;
-    std::optional<int> latency_ms_;
+    std::uint64_t repeated_ = 0;
+    std::optional<FrameInfo> to_report_;  // taken for this paint; reported once it is on screen
     D2D1_RECT_F image_rect_{};  // where the frame was last drawn (client px)
 
     std::uint64_t frames_shown_ = 0;
